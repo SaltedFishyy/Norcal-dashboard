@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NC network pickup analysis — W27 (06/29–07/05)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #edf0f3;
+    --card: #ffffff;
+    --ink: #17242f;
+    --ink-soft: #55636f;
+    --ink-faint: #8b98a3;
+    --line: #d9dfe4;
+    --blue: #2a78d6;
+    --blue-soft: #9dc2ec;
+    --amber: #dd9500;
+    --red: #cf4340;
+    --green: #0f7a5c;
+    --navy: #14273d;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: "IBM Plex Sans", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding: 26px 18px 56px; line-height: 1.45;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  header { background: var(--navy); color: #eef3f8; border-radius: 10px; padding: 20px 22px 16px; margin-bottom: 16px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #8fb4dc; margin-bottom: 6px; }
+  h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; }
+  .period { font-family: var(--mono); font-size: 12.5px; color: #b9c9d8; margin-top: 6px; }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin: 16px 0 14px; flex-wrap: wrap; }
+  .controls label { font-size: 13px; color: var(--ink-soft); font-weight: 500; }
+  select {
+    font: inherit; font-size: 14px; padding: 8px 34px 8px 12px; min-width: 220px;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--ink);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2355636f' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center;
+  }
+  select:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .basis-chip {
+    font-family: var(--mono); font-size: 11.5px; padding: 5px 10px; border-radius: 999px;
+    background: #e2ecf8; color: #1d4e8f; border: 1px solid #c3d8f1;
+  }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px; }
+  .kpi .lbl { font-size: 11.5px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; font-weight: 500; }
+  .kpi .val { font-family: var(--mono); font-size: 24px; font-weight: 600; }
+  .kpi .sub { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; }
+  .kpi .val.red { color: var(--red); }
+  .kpi .val.green { color: var(--green); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 18px 16px 12px; margin-bottom: 18px; }
+  h2 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+  .note { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 10px; }
+  .note em { color: var(--ink-faint); }
+  .chartbox { position: relative; height: 400px; }
+  .chartbox.short { height: 300px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-soft); margin: 4px 0 10px; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .dot { border-radius: 50%; }
+  .dash { width: 16px; height: 0; border-top: 2px dashed var(--ink-faint); }
+  .pin { margin-top: 8px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); min-height: 18px; }
+
+  .insight { border-left: 4px solid var(--blue); background: #f4f8fd; border-radius: 0 9px 9px 0; padding: 14px 18px; margin-bottom: 18px; }
+  .insight h2 { margin-bottom: 8px; }
+  .insight p { font-size: 13.5px; margin-bottom: 8px; }
+  .insight p:last-child { margin-bottom: 0; }
+  .insight strong { font-family: var(--mono); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); font-weight: 600; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  .sev-high { color: var(--red); font-weight: 600; }
+  .sev-mid { color: #9a6a00; }
+
+  footer { margin-top: 22px; font-size: 12px; color: var(--ink-faint); line-height: 1.65; }
+  footer strong { color: var(--ink-soft); }
+  @media (max-width: 640px) { .chartbox { height: 340px; } h1 { font-size: 17px; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>GOFO · NC network · last-mile operations</span>
+      <a href="../index.html" style="color:#8fb4dc;text-decoration:none;font-family:var(--mono);font-size:11px;letter-spacing:0.08em;">&larr; BACK TO NETWORK MAP</a>
+    </div>
+    <h1>Driver pickup volume analysis — Week 27</h1>
+    <div class="period">06/29–07/05/2026 · 8 stations · 16 DSPs · unified basis: daily DSP volume ÷ daily active routes</div>
+  </header>
+
+  <div class="controls">
+    <label for="stSel">Station</label>
+    <select id="stSel">
+      <option value="ALL" selected>All network (8 stations)</option>
+      <option value="SFO01">SFO01</option>
+      <option value="SMF01">SMF01</option>
+      <option value="RNO01">RNO01</option>
+      <option value="SCK01">SCK01</option>
+      <option value="MOD01">MOD01</option>
+      <option value="RDG01">RDG01</option>
+      <option value="MFR01">MFR01</option>
+      <option value="OAR01">OAR01</option>
+    </select>
+    <span class="basis-chip" id="basisChip">—</span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="lbl">Week total volume</div><div class="val" id="kpiTotal">—</div><div class="sub" id="kpiTotalSub"></div></div>
+    <div class="kpi"><div class="lbl">Avg / driver / day</div><div class="val" id="kpiAvg">—</div><div class="sub" id="kpiAvgSub"></div></div>
+    <div class="kpi"><div class="lbl">Peak day</div><div class="val green" id="kpiPeak">—</div><div class="sub" id="kpiPeakSub"></div></div>
+    <div class="kpi"><div class="lbl">Outlier routes &gt; 240</div><div class="val red" id="kpiOut">—</div><div class="sub" id="kpiOutSub"></div></div>
+  </div>
+
+  <div class="insight">
+    <h2>Analysis summary</h2>
+    <div id="insightBody"></div>
+  </div>
+
+  <div class="card">
+    <h2>Avg pickup volume per driver per day — by DSP</h2>
+    <div class="note" id="dspNote"></div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--blue)"></span>Avg / driver / day</span>
+      <span><span class="sw dot" style="background:var(--amber)"></span>Outlier route 241–300</span>
+      <span><span class="sw dot" style="background:var(--red)"></span>Outlier route over 300</span>
+      <span><span class="dash"></span>240 threshold</span>
+    </div>
+    <div class="chartbox"><canvas id="dspChart" role="img" aria-label="Bar chart of average driver pickup volume per DSP with outlier routes"></canvas></div>
+    <div class="pin" id="pinInfo">Click a bar or dot to pin its exact number here.</div>
+  </div>
+
+  <div class="card">
+    <h2 id="dailyAvgTitle">Daily avg / driver / day — estimated</h2>
+    <div class="note">Derived: daily received volume ÷ estimated active routes per day (implied from weekly figures — see method). Hatched bars mark estimates; solid basis requires the daily route roster.</div>
+    <div class="chartbox short"><canvas id="dailyAvgChart" role="img" aria-label="Bar chart of estimated daily average pickup volume per driver across the seven days"></canvas></div>
+    <div class="pin" id="dailyAvgPin"></div>
+  </div>
+
+  <div class="card">
+    <h2 id="dailyTitle">Daily total received volume</h2>
+    <div class="note">Actuals, all 7 days. Green bar = peak day, hollow-look bar = trough day.</div>
+    <div class="chartbox short"><canvas id="dailyChart" role="img" aria-label="Bar chart of daily total received volume across the seven days"></canvas></div>
+    <div class="pin" id="dailyPin"></div>
+  </div>
+
+  <div class="card">
+    <h2>Outlier routes over 240 avg/day</h2>
+    <div class="note" id="outNote"></div>
+    <table id="outTable" aria-label="Outlier routes exceeding 240 average daily pickup">
+      <thead><tr><th>Route</th><th>DSP</th><th class="num">Avg / working day</th><th>Severity</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <footer>
+    <strong>Method.</strong> DSP averages: SFO01 &amp; SMF01 computed on peak day 07/04/2026 (SFO01 total 58,241 — only day over 55k; SMF01 total 16,689 — highest day); avg = received quantity ÷ active routes that day; SFO-ASP excluded (no 07/04 volume). Other 6 stations: daily DSP total ÷ active routes, averaged over 06/29–07/05. Outlier = route exceeding 240 pkgs avg per working day. 07/06 excluded (partial day).<br>
+    <strong>Estimated daily avg/driver/day.</strong> Daily route counts were not exported with this dataset, so active routes per day are implied: week-basis stations use (week total ÷ weekly avg) ÷ 7; peak-day stations use peak-day total ÷ peak-day avg. This assumes a constant daily route count — treat the daily avg series as directional. To convert it to actuals, re-export with daily active route counts per DSP.<br>
+    <strong>Data gap noted W27:</strong> per-DSP daily volume splits exist only at station level for the 6 single-DSP stations; SFO01/SMF01 multi-DSP daily splits not included in export.
+  </footer>
+</div>
+
+<script>
+const DSP = {
+ "SFO01":[["SFO-AAS",191.9,17844],["SFO-DAE",227.8,13438],["SFO-HFE",178.1,9971],["SFO-UNS",185.3,8522],["SFO-WDA",203.6,5089],["SFO-WZS",225.1,3377]],
+ "SMF01":[["SMF-DAE",206.3,7633],["SMF-JAS",160.7,4821],["SMF-PEL",158.1,2371],["SMF-RRI",133.1,1864]],
+ "RNO01":[["RNO-PEL",156.4,57748]],
+ "SCK01":[["SCK-UNS",160.6,45708]],
+ "MOD01":[["MOD-PEL",158.3,26883]],
+ "RDG01":[["RDG-QDT",198.9,23215]],
+ "MFR01":[["MFR-NFE",154.8,13561]],
+ "OAR01":[["OAR-PML",169.1,11907]]
+};
+const OUT = {
+ "SFO-AAS":[["SFO02-031-F",282],["SFO02-031-G",278],["SFO02-034-A",273],["SFO02-034-B",270],["SFO02-034-C",270],["SFO02-034-D",270],["SFO02-034-E",270],["SFO02-031-J",260],["SFO02-034-F",260],["SFO02-031-I",259],["SFO02-031-D",256],["SFO02-031-H",256],["SFO02-027-A",242]],
+ "SFO-DAE":[["SFO01-019-F",370],["SFO01-010-B",360],["SFO01-019-G",312],["SFO01-029-A",303],["SFO01-038-D",290],["SFO01-044-A",289],["SFO01-038-C",287],["SFO01-038-A",281],["SFO01-017-D",280],["SFO01-017-E",280],["SFO01-019-E",280],["SFO01-020-E",280],["SFO01-017-F",279],["SFO01-038-B",279],["SFO01-010-A",274],["SFO01-044-B",270],["SFO01-044-C",270],["SFO01-044-D",270],["SFO01-037-D",260],["SFO01-037-E",260],["SFO01-010-D",259],["SFO01-016-B",250],["SFO01-016-C",250],["SFO01-029-D",250],["SFO01-043-B",250],["SFO01-043-C",250],["SFO01-029-B",249],["SFO01-043-A",246]],
+ "SFO-HFE":[["SFO01-008-C",254],["SFO01-022-G",249]],
+ "SFO-UNS":[["SFO01-015-D",310],["SFO01-015-C",299],["SFO01-015-B",298],["SFO01-014-A",295],["SFO01-015-A",279],["SFO01-014-B",263],["SFO01-051-E",260],["SFO01-014-C",253],["SFO01-013-E",250],["SFO01-051-D",250],["SFO01-051-B",249],["SFO01-030-C",248],["SFO01-030-A",244]],
+ "SFO-WDA":[["SFO01-039-B",299],["SFO01-039-C",299],["SFO01-041-A",299],["SFO01-041-D",299],["SFO01-041-C",297],["SFO01-035-C",269]],
+ "SFO-WZS":[["SFO01-023-B",280],["SFO01-023-C",280],["SFO01-023-F",270]],
+ "OAR-PML":[["OAR01-001-L",249.0]],
+ "RDG-QDT":[["WE-RDG01-001-H",250.0]],
+ "SMF-DAE":[["SMF01-009-H",300],["SMF01-008-E",299],["SMF01-008-D",245]],
+ "SMF-JAS":[["SMF01-006-A",305],["SMF01-006-D",300],["SMF01-006-C",295]]
+};
+const STAVG = {"SFO01":198.1,"SMF01":173.8,"RNO01":156.4,"SCK01":160.6,"MOD01":158.3,"RDG01":198.9,"MFR01":154.8,"OAR01":169.1,"ALL":171.3};
+const ORDER = ["SFO01","SMF01","RNO01","SCK01","MOD01","RDG01","MFR01","OAR01"];
+const PEAK_BASIS = { "SFO01": true, "SMF01": true };
+const DAYS = ["Mon 06/29","Tue 06/30","Wed 07/01","Thu 07/02","Fri 07/03","Sat 07/04","Sun 07/05"];
+const PEAK_IDX = 5; // Sat 07/04
+const DAILY = {
+ "SFO01":[52021,33380,45331,42558,47915,58241,54639],
+ "SMF01":[15627,9362,13155,12665,14448,16689,16210],
+ "RNO01":[9990,6331,7755,6189,8327,9814,9342],
+ "SCK01":[7894,4390,6088,5507,5992,8122,7715],
+ "MOD01":[4763,2818,3577,2959,3353,4958,4455],
+ "RDG01":[4038,2458,3240,2215,3597,3722,3945],
+ "MFR01":[2274,1545,2004,1613,1541,2206,2378],
+ "OAR01":[2132,1273,1651,1431,1474,2127,1819]
+};
+
+// ---- derived figures --------------------------------------------------
+const WEEK_TOTAL = {}; ORDER.forEach(st => WEEK_TOTAL[st] = DAILY[st].reduce((s,v)=>s+v,0));
+// implied active routes per day per station
+const ROUTES = {};
+ORDER.forEach(st => {
+  if (PEAK_BASIS[st]) ROUTES[st] = DAILY[st][PEAK_IDX] / STAVG[st];
+  else ROUTES[st] = (WEEK_TOTAL[st] / STAVG[st]) / 7;
+});
+const ROUTES_ALL = ORDER.reduce((s,st)=>s+ROUTES[st],0);
+
+function dailyVals(sel){
+  return sel === "ALL" ? DAYS.map((d,i)=>ORDER.reduce((s,st)=>s+DAILY[st][i],0)) : DAILY[sel];
+}
+function dailyAvgVals(sel){
+  const routes = sel === "ALL" ? ROUTES_ALL : ROUTES[sel];
+  return dailyVals(sel).map(v => v / routes);
+}
+function getRows(sel){
+  if (sel === "ALL"){ let r=[]; for (const st of ORDER) r=r.concat(DSP[st]); return r; }
+  return DSP[sel];
+}
+function outliersFor(labels){
+  const rows=[]; for (const l of labels) (OUT[l]||[]).forEach(o=>rows.push({route:o[0],dsp:l,avg:o[1]}));
+  rows.sort((a,b)=>b.avg-a.avg); return rows;
+}
+const fmt = n => Math.round(n).toLocaleString();
+
+// hatched patterns mark estimated (derived) bars
+const HATCH_BLUE = (function(){ const g=document.createElement('canvas').getContext('2d');
+  const c=document.createElement('canvas'); c.width=8;c.height=8; const x=c.getContext('2d');
+  x.fillStyle='#2a78d6'; x.globalAlpha=0.28; x.fillRect(0,0,8,8);
+  x.globalAlpha=0.95; x.strokeStyle='#2a78d6'; x.lineWidth=1.5;
+  x.beginPath(); x.moveTo(-2,6); x.lineTo(6,-2); x.moveTo(2,10); x.lineTo(10,2); x.stroke();
+  return g.createPattern(c,'repeat'); })();
+const HATCH_GREEN = (function(){ const g=document.createElement('canvas').getContext('2d');
+  const c=document.createElement('canvas'); c.width=8;c.height=8; const x=c.getContext('2d');
+  x.fillStyle='#0f7a5c'; x.globalAlpha=0.3; x.fillRect(0,0,8,8);
+  x.globalAlpha=0.95; x.strokeStyle='#0f7a5c'; x.lineWidth=1.5;
+  x.beginPath(); x.moveTo(-2,6); x.lineTo(6,-2); x.moveTo(2,10); x.lineTo(10,2); x.stroke();
+  return g.createPattern(c,'repeat'); })();
+
+// ---- insight text -----------------------------------------------------
+function buildInsight(sel){
+  const vals = dailyVals(sel), avgs = dailyAvgVals(sel);
+  const pk = vals.indexOf(Math.max(...vals)), tr = vals.indexOf(Math.min(...vals));
+  const outs = outliersFor(getRows(sel).map(r=>r[0]));
+  const over300 = outs.filter(o=>o.avg>300).length;
+  const peakAvg = Math.max(...avgs);
+  const headroom = 240 - peakAvg;
+  let html = '';
+  if (sel === 'ALL'){
+    html += '<p>Network moved <strong>' + fmt(ORDER.reduce((s,st)=>s+WEEK_TOTAL[st],0)) + '</strong> pkgs in W27 across ~<strong>' + fmt(ROUTES_ALL) + '</strong> active routes/day. Network avg <strong>171.3</strong> pkgs/driver/day sits well under the 240 threshold — capacity pressure is a <em>route-level</em> problem, not a network one.</p>';
+    html += '<p>Weekly rhythm is consistent at every station: <strong>Sat 07/04</strong> is the volume peak (' + fmt(vals[pk]) + ' pkgs network-wide) and <strong>Tue 06/30</strong> the trough (' + fmt(vals[tr]) + '), a ' + Math.round((vals[pk]/vals[tr]-1)*100) + '% swing. Staffing plans should flex around that Sat/Sun crest rather than a flat weekly roster.</p>';
+    html += '<p><strong>' + outs.length + '</strong> routes exceed 240 (' + over300 + ' over 300). The concentration is stark: SFO-DAE alone carries 28 outlier routes with a top load of 370 pkgs/day, and SFO01 holds 65 of 73 total. Rebalancing inside SFO01 — splitting the 019/010/015 route clusters — addresses ~90% of network outlier exposure.</p>';
+  } else {
+    const basis = PEAK_BASIS[sel] ? 'peak day 07/04' : 'week average';
+    html += '<p>' + sel + ' handled <strong>' + fmt(WEEK_TOTAL[sel]) + '</strong> pkgs over the week on an estimated <strong>' + fmt(ROUTES[sel]) + '</strong> routes/day. DSP avg (' + basis + ' basis) is <strong>' + STAVG[sel].toFixed(1) + '</strong> pkgs/driver/day.</p>';
+    html += '<p>Peak day <strong>' + DAYS[pk] + '</strong> (' + fmt(vals[pk]) + ' pkgs) pushed estimated per-driver load to <strong>' + peakAvg.toFixed(1) + '</strong> — ' + (headroom >= 0 ? fmt(headroom) + ' pkgs of headroom below' : Math.abs(Math.round(headroom)) + ' pkgs above') + ' the 240 line. Trough was ' + DAYS[tr] + ' (' + fmt(vals[tr]) + ' pkgs, ~' + avgs[tr].toFixed(1) + '/driver).</p>';
+    if (outs.length) html += '<p><strong>' + outs.length + '</strong> route' + (outs.length>1?'s':'') + ' over 240 this week (' + over300 + ' over 300); heaviest is ' + outs[0].route + ' at ' + outs[0].avg + ' pkgs/day. These are the first candidates for route splits or added coverage on peak days.</p>';
+    else html += '<p>No route exceeded 240 this week — station is operating within threshold at route level.</p>';
+  }
+  return html;
+}
+
+// ---- charts -----------------------------------------------------------
+let dspChart, dailyAvgChart, dailyChart;
+
+function render(sel){
+  const rows = getRows(sel);
+  const labels = rows.map(r=>r[0]);
+  const avgs = rows.map(r=>r[1]);
+  const tots = {}; rows.forEach(r=>tots[r[0]]=r[2]);
+  const dotsMid=[], dotsHigh=[], perDspOut={}, maxDot={};
+  for (const l of labels){
+    (OUT[l]||[]).forEach(o=>{
+      const d={x:l,y:o[1],route:o[0]};
+      if (o[1]>300) dotsHigh.push(d); else dotsMid.push(d);
+      perDspOut[l]=(perDspOut[l]||0)+1; maxDot[l]=Math.max(maxDot[l]||0,o[1]);
+    });
+  }
+  const tableRows = outliersFor(labels);
+  const vals = dailyVals(sel);
+  const pk = vals.indexOf(Math.max(...vals));
+
+  // KPIs
+  const weekTot = sel==='ALL' ? ORDER.reduce((s,st)=>s+WEEK_TOTAL[st],0) : WEEK_TOTAL[sel];
+  document.getElementById('kpiTotal').textContent = fmt(weekTot);
+  document.getElementById('kpiTotalSub').textContent = '~' + fmt((sel==='ALL'?ROUTES_ALL:ROUTES[sel])) + ' routes/day (est.)';
+  document.getElementById('kpiAvg').textContent = STAVG[sel].toFixed(1);
+  document.getElementById('kpiAvgSub').textContent = PEAK_BASIS[sel] ? 'peak-day basis' : (sel==='ALL' ? 'mixed basis' : 'week-avg basis');
+  document.getElementById('kpiPeak').textContent = fmt(vals[pk]);
+  document.getElementById('kpiPeakSub').textContent = DAYS[pk];
+  document.getElementById('kpiOut').textContent = tableRows.length;
+  document.getElementById('kpiOutSub').textContent = tableRows.filter(o=>o.avg>300).length + ' over 300';
+
+  document.getElementById('basisChip').textContent = PEAK_BASIS[sel] ? 'basis: peak day 07/04' : (sel==='ALL' ? 'basis: mixed (see method)' : 'basis: week avg 06/29–07/05');
+  document.getElementById('insightBody').innerHTML = buildInsight(sel);
+  document.getElementById('dspNote').innerHTML = sel==='ALL'
+    ? 'SFO/SMF DSPs on peak-day basis, others on week-avg basis. <em>Hover a bar for total volume.</em>'
+    : (PEAK_BASIS[sel] ? 'Peak day 07/04/2026 only: received quantity ÷ active routes that day.' : 'Week 06/29–07/05: daily DSP total ÷ active routes, averaged across days.');
+  document.getElementById('outNote').textContent = tableRows.length
+    ? tableRows.length + ' routes over 240 for this selection, sorted by load.'
+    : '';
+  document.getElementById('pinInfo').textContent = 'Click a bar or dot to pin its exact number here.';
+
+  // outlier table
+  const tbody = document.querySelector('#outTable tbody'); tbody.innerHTML='';
+  if (!tableRows.length){
+    tbody.innerHTML='<tr><td colspan="4" style="color:var(--ink-faint)">No routes over 240 for this station this week.</td></tr>';
+  } else {
+    for (const r of tableRows){
+      const tr=document.createElement('tr');
+      const sev = r.avg>300 ? '<span class="sev-high">Over 300</span>' : '<span class="sev-mid">241–300</span>';
+      tr.innerHTML='<td style="font-family:var(--mono)">'+r.route+'</td><td>'+r.dsp+'</td><td class="num">'+r.avg.toFixed(1)+'</td><td>'+sev+'</td>';
+      tbody.appendChild(tr);
+    }
+  }
+
+  // chart 1: DSP bars + outlier dots
+  const labelPlugin = { id:'labelsPlugin', afterDatasetsDraw(c){
+    const ctx=c.ctx, meta=c.getDatasetMeta(0);
+    ctx.save(); ctx.textAlign='center';
+    meta.data.forEach((bar,i)=>{
+      ctx.font='600 12px "IBM Plex Mono", monospace'; ctx.fillStyle='#17242f';
+      ctx.fillText(avgs[i].toFixed(1), bar.x, bar.y-6);
+      const l=labels[i];
+      if (perDspOut[l]){
+        const topY=c.scales.y.getPixelForValue(maxDot[l]);
+        ctx.fillStyle='#cf4340'; ctx.font='600 11px "IBM Plex Sans", sans-serif';
+        ctx.fillText(perDspOut[l]+' outlier'+(perDspOut[l]>1?'s':''), bar.x, topY-8);
+      }
+    });
+    ctx.restore();
+  }};
+  if (dspChart) dspChart.destroy();
+  dspChart = new Chart(document.getElementById('dspChart'), {
+    data: { labels, datasets: [
+      { type:'bar', label:'Avg / driver / day', data:avgs, backgroundColor:'#2a78d6', borderRadius:3, maxBarThickness:46, order:4 },
+      { type:'line', label:'240 threshold', data:labels.map(()=>240), borderColor:'#8b98a3', borderWidth:1.5, borderDash:[6,4], pointRadius:0, order:3 },
+      { type:'scatter', label:'Outliers 241-300', data:dotsMid, backgroundColor:'rgba(221,149,0,0.85)', pointRadius:4, pointHoverRadius:7, order:2 },
+      { type:'scatter', label:'Outliers over 300', data:dotsHigh, backgroundColor:'#cf4340', pointStyle:'rectRot', pointRadius:6, pointHoverRadius:9, order:1 }
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false, layout:{padding:{top:8}},
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:function(ctx){
+        if (ctx.dataset.type==='scatter') return ctx.raw.route+': '+ctx.raw.y+(ctx.raw.y>300?' (over 300)':'');
+        if (ctx.dataset.label==='240 threshold') return 'Threshold: 240';
+        const l=ctx.label, isPk=PEAK_BASIS[l.slice(0,3)+'01'];
+        const lines=['Avg: '+ctx.formattedValue, 'Total volume: '+tots[l].toLocaleString()+' pkgs'];
+        lines.push(isPk ? 'Daily volume (07/04 only): '+tots[l].toLocaleString()+' pkgs'
+                        : 'Avg daily volume: '+Math.round(tots[l]/7).toLocaleString()+' pkgs/day');
+        return lines;
+      }}}},
+      onClick:(evt,els)=>{
+        if(!els.length) return;
+        const el=els[0], ds=dspChart.data.datasets[el.datasetIndex], info=document.getElementById('pinInfo');
+        if (ds.type==='scatter'){ const d=ds.data[el.index]; info.textContent='Selected: '+d.route+' ('+d.x+') — '+d.y+' pkgs/day'; }
+        else if (ds.type==='bar'){ const lbl=dspChart.data.labels[el.index], isPk=PEAK_BASIS[lbl.slice(0,3)+'01'];
+          info.textContent='Selected: '+lbl+' — avg '+ds.data[el.index]+' pkgs/driver/day | total '+tots[lbl].toLocaleString()+' pkgs | '+(isPk?'daily volume (07/04): '+tots[lbl].toLocaleString():'avg daily volume: '+Math.round(tots[lbl]/7).toLocaleString())+' pkgs'; }
+      },
+      scales:{
+        y:{min:0,max:380,title:{display:true,text:'avg pickup volume / driver / day'},grid:{color:'#e6eaee'}},
+        x:{grid:{display:false},ticks:{autoSkip:false,maxRotation:labels.length>8?60:0,font:{size:11}}}
+      }
+    },
+    plugins:[labelPlugin]
+  });
+}
+
+function renderDailyAvg(sel){
+  const avgs = dailyAvgVals(sel);
+  const pk = avgs.indexOf(Math.max(...avgs));
+  document.getElementById('dailyAvgTitle').textContent = 'Daily avg / driver / day (estimated) — ' + (sel==='ALL'?'all network':sel);
+  document.getElementById('dailyAvgPin').textContent =
+    'Peak load day: ' + DAYS[pk] + ' at ~' + avgs[pk].toFixed(1) + ' pkgs/driver | headroom to 240: ' + (240-avgs[pk]).toFixed(0) + ' pkgs';
+  if (dailyAvgChart) dailyAvgChart.destroy();
+  dailyAvgChart = new Chart(document.getElementById('dailyAvgChart'), {
+    data: { labels: DAYS, datasets: [
+      { type:'bar', label:'Est. avg/driver/day', data:avgs,
+        backgroundColor: avgs.map((v,i)=> i===pk ? HATCH_GREEN : HATCH_BLUE),
+        borderColor: avgs.map((v,i)=> i===pk ? '#0f7a5c' : '#2a78d6'),
+        borderWidth:1.5, borderRadius:3, maxBarThickness:56 },
+      { type:'line', label:'240 threshold', data:DAYS.map(()=>240), borderColor:'#8b98a3', borderWidth:1.5, borderDash:[6,4], pointRadius:0 }
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false},
+        tooltip:{ callbacks:{ label: ctx => ctx.dataset.type==='line' ? 'Threshold: 240' : 'Est. avg: '+ctx.parsed.y.toFixed(1)+' pkgs/driver' }}},
+      scales:{
+        y:{min:0,max:260,title:{display:true,text:'est. pkgs / driver / day'},grid:{color:'#e6eaee'}},
+        x:{grid:{display:false}}
+      }
+    },
+    plugins:[{ id:'davLabels', afterDatasetsDraw(c){
+      const ctx=c.ctx, meta=c.getDatasetMeta(0);
+      ctx.save(); ctx.font='600 11px "IBM Plex Mono", monospace'; ctx.fillStyle='#17242f'; ctx.textAlign='center';
+      meta.data.forEach((bar,i)=>ctx.fillText(avgs[i].toFixed(1), bar.x, bar.y-5));
+      ctx.restore();
+    }}]
+  });
+}
+
+function renderDaily(sel){
+  const vals = dailyVals(sel);
+  const peak = Math.max(...vals), low = Math.min(...vals);
+  document.getElementById('dailyTitle').textContent = 'Daily total received volume — ' + (sel==='ALL'?'all network':sel);
+  const avg = Math.round(vals.reduce((s,v)=>s+v,0)/7);
+  document.getElementById('dailyPin').textContent =
+    'Daily average: '+avg.toLocaleString()+' pkgs | Peak: '+peak.toLocaleString()+' ('+DAYS[vals.indexOf(peak)]+') | Trough: '+low.toLocaleString()+' ('+DAYS[vals.indexOf(low)]+')';
+  if (dailyChart) dailyChart.destroy();
+  dailyChart = new Chart(document.getElementById('dailyChart'), {
+    type:'bar',
+    data:{ labels:DAYS, datasets:[{ label:'Total volume', data:vals,
+      backgroundColor: vals.map(v => v===peak ? '#0f7a5c' : (v===low ? '#c9d7e6' : '#7fb0e3')),
+      borderRadius:3, maxBarThickness:60 }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:ctx=>'Total: '+ctx.parsed.y.toLocaleString()+' pkgs'}}},
+      scales:{
+        y:{beginAtZero:true,title:{display:true,text:'total received volume'},grid:{color:'#e6eaee'},
+           ticks:{callback:v=>v>=1000?(v/1000)+'k':v}},
+        x:{grid:{display:false}}
+      }
+    },
+    plugins:[{ id:'dailyLabels', afterDatasetsDraw(c){
+      const ctx=c.ctx, meta=c.getDatasetMeta(0);
+      ctx.save(); ctx.font='600 11px "IBM Plex Mono", monospace'; ctx.fillStyle='#17242f'; ctx.textAlign='center';
+      meta.data.forEach((bar,i)=>ctx.fillText(vals[i].toLocaleString(), bar.x, bar.y-5));
+      ctx.restore();
+    }}]
+  });
+}
+
+function renderAll(sel){ render(sel); renderDailyAvg(sel); renderDaily(sel); }
+document.getElementById('stSel').addEventListener('change', e=>renderAll(e.target.value));
+renderAll('ALL');
+</script>
+</body>
+</html>

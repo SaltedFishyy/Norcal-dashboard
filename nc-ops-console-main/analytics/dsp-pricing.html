@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSP pricing analysis — NorCal network</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#edf0f3; --card:#fff; --ink:#17242f; --ink-soft:#55636f; --ink-faint:#8b98a3;
+    --line:#d9dfe4; --blue:#2a78d6; --amber:#dd9500; --red:#cf4340; --green:#0f7a5c;
+    --navy:#14273d; --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:"IBM Plex Sans","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);padding:26px 18px 56px;line-height:1.45}
+  .wrap{max-width:1000px;margin:0 auto}
+  header{background:var(--navy);color:#eef3f8;border-radius:10px;padding:20px 22px 16px;margin-bottom:16px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8fb4dc;margin-bottom:6px}
+  h1{font-size:21px;font-weight:600;letter-spacing:-.01em}
+  .period{font-family:var(--mono);font-size:12.5px;color:#b9c9d8;margin-top:6px}
+  .controls{display:flex;align-items:center;gap:10px;margin:16px 0 14px;flex-wrap:wrap}
+  .controls label{font-size:13px;color:var(--ink-soft);font-weight:500}
+  select{font:inherit;font-size:14px;padding:8px 34px 8px 12px;min-width:220px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2355636f' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center}
+  select:focus{outline:2px solid var(--blue);outline-offset:1px}
+  .basis-chip{font-family:var(--mono);font-size:11.5px;padding:5px 10px;border-radius:999px;background:#e2ecf8;color:#1d4e8f;border:1px solid #c3d8f1}
+  .basis-chip.applied{background:#e2f5ee;color:#0c5f47;border-color:#b9e4d4}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:13px 15px}
+  .kpi .lbl{font-size:11.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;font-weight:500}
+  .kpi .val{font-family:var(--mono);font-size:24px;font-weight:600}
+  .kpi .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);margin-top:2px}
+  .kpi .val.green{color:var(--green)} .kpi .val.red{color:var(--red)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:18px 16px 12px;margin-bottom:18px}
+  h2{font-size:15px;font-weight:600;margin-bottom:2px}
+  .note{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px}
+  .chartbox{position:relative;height:380px}
+  .insight{border-left:4px solid var(--blue);background:#f4f8fd;border-radius:0 9px 9px 0;padding:14px 18px;margin-bottom:18px}
+  .insight h2{margin-bottom:8px}
+  .insight p{font-size:13.5px;margin-bottom:8px}
+  .insight p:last-child{margin-bottom:0}
+  .insight strong{font-family:var(--mono);font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono)}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:600;font-family:"IBM Plex Sans",sans-serif}
+  th:first-child,td:first-child{text-align:left}
+  td.heat{border-radius:3px}
+  .tbl-scroll{overflow-x:auto}
+  footer{margin-top:22px;font-size:12px;color:var(--ink-faint);line-height:1.65}
+  footer strong{color:var(--ink-soft)}
+  @media(max-width:640px){.chartbox{height:320px}h1{font-size:17px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>GOFO · NC network · last-mile operations</span>
+      <a href="../index.html" style="color:#8fb4dc;text-decoration:none;font-family:var(--mono);font-size:11px;letter-spacing:0.08em;">&larr; BACK TO NETWORK MAP</a>
+    </div>
+    <h1>DSP pricing analysis — avg price by station &amp; network</h1>
+    <div class="period">443 ZIPs · 8 stations · 13 DSPs · volume-weighted by each DSP's own ZIP volume</div>
+  </header>
+
+  <div class="controls">
+    <label for="stSel">View</label>
+    <select id="stSel"><option value="ALL" selected>All North Cal (network-wide)</option></select>
+    <span class="basis-chip" id="psChip">base prices</span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="lbl">Avg price (selection)</div><div class="val" id="kpiAvg">—</div><div class="sub">$/pkg, volume-weighted</div></div>
+    <div class="kpi"><div class="lbl">Highest-priced DSP</div><div class="val green" id="kpiHi">—</div><div class="sub" id="kpiHiSub"></div></div>
+    <div class="kpi"><div class="lbl">Lowest-priced DSP</div><div class="val red" id="kpiLo">—</div><div class="sub" id="kpiLoSub"></div></div>
+    <div class="kpi"><div class="lbl">Price spread</div><div class="val" id="kpiSpread">—</div><div class="sub">max − min across DSPs</div></div>
+  </div>
+
+  <div class="insight"><h2>Analysis summary</h2><div id="insightBody"></div></div>
+
+  <div class="card">
+    <h2 id="chartTitle">Avg price per DSP</h2>
+    <div class="note">Bars = volume-weighted avg $/pkg for each DSP. Dashed line = selection average. Hover for volume served.</div>
+    <div class="chartbox"><canvas id="dspChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>DSP × station price matrix</h2>
+    <div class="note">Volume-weighted avg $/pkg per DSP in each station where it operates; darker green = higher price. Overall = station values combined by each station's pkg-volume share of the NC region (normalized over the DSP's stations; hover a cell for the weight). Vol = daily pkg volume attributed to the DSP.</div>
+    <div class="tbl-scroll"><table id="matrix"></table></div>
+  </div>
+
+  <footer>
+    <strong>Method.</strong> Chart &amp; KPIs: for each DSP, avg price = Σ(ZIP price × DSP volume in that ZIP) ÷ Σ(DSP volume), over priced ZIPs only. Matrix: each cell is the DSP's volume-weighted avg within that station; a DSP's Overall value combines its station cells weighted by each station's pkg-volume share of the NC region, normalized over the stations it operates in (hover a cell for weights); the Station avg row is the station's volume-weighted avg over all priced ZIPs, and the region Overall is Σ(station avg × station volume share).<br>
+    <strong>Price sheet.</strong> This page reads data/price_adjustments.csv the same way the map does — commit an updated CSV and these figures recompute on next load. The chip next to the selector shows whether adjustments are active.
+  </footer>
+</div>
+
+<!-- ============================================================= -->
+<!-- >>> EDIT DATA HERE <<<  Per-ZIP records below: "v" = volume,  -->
+<!-- "p" = price, "d" = {DSP: volume}. Ctrl+F a ZIP like "94952".  -->
+<!-- Do NOT edit anything else. Replace this whole line to update.  -->
+<!-- ============================================================= -->
+<script id="pricedata" type="application/json">[{"z":"94565","s":"SFO01","p":1.95,"v":941,"d":{"HFE":941}},{"z":"95023","s":"SFO01","p":1.85,"v":847,"d":{"DAE":847}},{"z":"93905","s":"SFO01","p":2.1,"v":793,"d":{"WDA":793}},{"z":"94544","s":"SFO01","p":1.8,"v":813,"d":{"HFE":813}},{"z":"93906","s":"SFO01","p":2.26,"v":804,"d":{"WDA":804}},{"z":"95020","s":"SFO01","p":1.9,"v":677,"d":{"DAE":677}},{"z":"94558","s":"SFO01","p":2.1,"v":657,"d":{"AAS":657}},{"z":"95076","s":"SFO01","p":2.2,"v":811,"d":{"WDA":811}},{"z":"94509","s":"SFO01","p":1.95,"v":726,"d":{"HFE":726}},{"z":"94928","s":"SFO01","p":1.8,"v":550,"d":{"AAS":550}},{"z":"95403","s":"SFO01","p":2.2,"v":561,"d":{"AAS":561}},{"z":"94080","s":"SFO01","p":1.85,"v":541,"d":{"WZS":541}},{"z":"94513","s":"SFO01","p":1.95,"v":551,"d":{"HFE":551}},{"z":"94541","s":"SFO01","p":1.8,"v":583,"d":{"HFE":583}},{"z":"94015","s":"SFO01","p":1.85,"v":529,"d":{"WZS":529}},{"z":"95407","s":"SFO01","p":1.8,"v":526,"d":{"AAS":526}},{"z":"94806","s":"SFO01","p":1.8,"v":582,"d":{"AAS":582}},{"z":"95123","s":"SFO01","p":1.85,"v":536,"d":{"DAE":536}},{"z":"95111","s":"SFO01","p":1.8,"v":531,"d":{"UNS":531}},{"z":"95037","s":"SFO01","p":1.9,"v":510,"d":{"DAE":510}},{"z":"94112","s":"SFO01","p":1.85,"v":487,"d":{"WZS":487}},{"z":"94587","s":"SFO01","p":1.8,"v":451,"d":{"DAE":451}},{"z":"94531","s":"SFO01","p":1.95,"v":514,"d":{"HFE":514}},{"z":"95127","s":"SFO01","p":1.8,"v":552,"d":{"UNS":552}},{"z":"95401","s":"SFO01","p":2.2,"v":459,"d":{"AAS":459}},{"z":"94901","s":"SFO01","p":1.95,"v":435,"d":{"AAS":435}},{"z":"94536","s":"SFO01","p":1.9,"v":449,"d":{"UNS":449}},{"z":"95035","s":"SFO01","p":1.8,"v":574,"d":{"UNS":574}},{"z":"95112","s":"SFO01","p":1.8,"v":494,"d":{"UNS":494}},{"z":"94561","s":"SFO01","p":1.95,"v":468,"d":{"HFE":468}},{"z":"95122","s":"SFO01","p":1.8,"v":461,"d":{"UNS":461}},{"z":"95376","s":"SFO01","p":2.0,"v":468,"d":{"UNS":468}},{"z":"94591","s":"SFO01","p":1.8,"v":490,"d":{"AAS":490}},{"z":"94601","s":"SFO01","p":1.9,"v":397,"d":{"AAS":397}},{"z":"94954","s":"SFO01","p":2.2,"v":407,"d":{"AAS":407}},{"z":"95116","s":"SFO01","p":1.8,"v":429,"d":{"UNS":429}},{"z":"94501","s":"SFO01","p":1.85,"v":371,"d":{"AAS":371}},{"z":"94804","s":"SFO01","p":2.1,"v":422,"d":{"AAS":422}},{"z":"95404","s":"SFO01","p":2.2,"v":446,"d":{"AAS":446}},{"z":"94538","s":"SFO01","p":1.9,"v":435,"d":{"UNS":435}},{"z":"94110","s":"SFO01","p":2.1,"v":352,"d":{"HFE":352}},{"z":"95476","s":"SFO01","p":2.1,"v":366,"d":{"AAS":366}},{"z":"95136","s":"SFO01","p":1.85,"v":366,"d":{"DAE":366}},{"z":"94577","s":"SFO01","p":1.8,"v":382,"d":{"WDA":382}},{"z":"94303","s":"SFO01","p":1.85,"v":311,"d":{"MYE":311}},{"z":"94014","s":"SFO01","p":1.85,"v":408,"d":{"WZS":408}},{"z":"95125","s":"SFO01","p":1.9,"v":352,"d":{"DAE":352}},{"z":"94568","s":"SFO01","p":1.85,"v":341,"d":{"HFE":341}},{"z":"94578","s":"SFO01","p":1.8,"v":300,"d":{"WDA":300}},{"z":"94066","s":"SFO01","p":1.85,"v":322,"d":{"DAE":322}},{"z":"95377","s":"SFO01","p":2.0,"v":360,"d":{"UNS":360}},{"z":"94605","s":"SFO01","p":2.1,"v":372,"d":{"AAS":372}},{"z":"94560","s":"SFO01","p":1.9,"v":337,"d":{"UNS":337}},{"z":"93901","s":"SFO01","p":2.1,"v":354,"d":{"WDA":354}},{"z":"95051","s":"SFO01","p":1.85,"v":375,"d":{"MYE":375}},{"z":"95492","s":"SFO01","p":2.2,"v":263,"d":{"AAS":263}},{"z":"94124","s":"SFO01","p":2.1,"v":394,"d":{"HFE":394}},{"z":"94520","s":"SFO01","p":2.1,"v":329,"d":{"AAS":329}},{"z":"94553","s":"SFO01","p":2.1,"v":290,"d":{"AAS":290}},{"z":"95008","s":"SFO01","p":1.9,"v":318,"d":{"DAE":318}},{"z":"94559","s":"SFO01","p":1.95,"v":327,"d":{"AAS":327}},{"z":"94550","s":"SFO01","p":2.0,"v":230,"d":{"UNS":230}},{"z":"94546","s":"SFO01","p":1.9,"v":296,"d":{"AAS":296}},{"z":"94603","s":"SFO01","p":2.1,"v":293,"d":{"AAS":293}},{"z":"94025","s":"SFO01","p":1.85,"v":215,"d":{"MYE":215}},{"z":"94403","s":"SFO01","p":1.85,"v":416,"d":{"DAE":416}},{"z":"94539","s":"SFO01","p":1.8,"v":315,"d":{"UNS":315}},{"z":"94063","s":"SFO01","p":1.85,"v":256,"d":{"DAE":256}},{"z":"94086","s":"SFO01","p":1.85,"v":305,"d":{"DAE":305}},{"z":"94521","s":"SFO01","p":2.1,"v":291,"d":{"AAS":291}},{"z":"94566","s":"SFO01","p":1.85,"v":212,"d":{"HFE":212}},{"z":"95126","s":"SFO01","p":1.9,"v":359,"d":{"DAE":359}},{"z":"93907","s":"SFO01","p":2.1,"v":293,"d":{"WDA":293}},{"z":"94903","s":"SFO01","p":2.2,"v":312,"d":{"AAS":312}},{"z":"94947","s":"SFO01","p":2.2,"v":293,"d":{"AAS":293}},{"z":"95148","s":"SFO01","p":1.8,"v":343,"d":{"UNS":343}},{"z":"94590","s":"SFO01","p":1.8,"v":290,"d":{"AAS":290}},{"z":"95124","s":"SFO01","p":1.85,"v":279,"d":{"DAE":279}},{"z":"94551","s":"SFO01","p":1.85,"v":278,"d":{"HFE":278}},{"z":"95409","s":"SFO01","p":2.1,"v":287,"d":{"AAS":287}},{"z":"95121","s":"SFO01","p":1.8,"v":331,"d":{"UNS":331}},{"z":"94589","s":"SFO01","p":1.95,"v":256,"d":{"AAS":256}},{"z":"94621","s":"SFO01","p":1.9,"v":294,"d":{"AAS":294}},{"z":"94010","s":"SFO01","p":1.85,"v":273,"d":{"DAE":273}},{"z":"94122","s":"SFO01","p":1.85,"v":277,"d":{"WZS":277}},{"z":"94801","s":"SFO01","p":2.1,"v":279,"d":{"AAS":279}},{"z":"94134","s":"SFO01","p":2.1,"v":259,"d":{"HFE":259}},{"z":"94523","s":"SFO01","p":2.1,"v":237,"d":{"AAS":237}},{"z":"95117","s":"SFO01","p":1.85,"v":251,"d":{"MYE":251}},{"z":"94087","s":"SFO01","p":1.85,"v":218,"d":{"DAE":218}},{"z":"95128","s":"SFO01","p":1.9,"v":289,"d":{"DAE":289}},{"z":"95014","s":"SFO01","p":1.9,"v":258,"d":{"DAE":258}},{"z":"94044","s":"SFO01","p":1.85,"v":236,"d":{"WZS":236}},{"z":"94545","s":"SFO01","p":1.8,"v":254,"d":{"DAE":254}},{"z":"95132","s":"SFO01","p":1.8,"v":276,"d":{"UNS":276}},{"z":"94061","s":"SFO01","p":1.85,"v":260,"d":{"DAE":260}},{"z":"95050","s":"SFO01","p":1.85,"v":256,"d":{"MYE":256}},{"z":"94401","s":"SFO01","p":1.85,"v":275,"d":{"DAE":275}},{"z":"94306","s":"SFO01","p":1.85,"v":109,"d":{"MYE":109}},{"z":"94107","s":"SFO01","p":2.1,"v":240,"d":{"HFE":240}},{"z":"95118","s":"SFO01","p":1.85,"v":223,"d":{"DAE":223}},{"z":"95060","s":"SFO01","p":2.2,"v":217,"d":{"HFE":217}},{"z":"94115","s":"SFO01","p":2.05,"v":193,"d":{"HFE":193}},{"z":"94580","s":"SFO01","p":1.8,"v":246,"d":{"WDA":246}},{"z":"94583","s":"SFO01","p":1.9,"v":226,"d":{"AAS":226}},{"z":"95405","s":"SFO01","p":2.2,"v":169,"d":{"AAS":169}},{"z":"94526","s":"SFO01","p":1.8,"v":176,"d":{"AAS":176}},{"z":"94118","s":"SFO01","p":2.05,"v":164,"d":{"HFE":164}},{"z":"94949","s":"SFO01","p":2.2,"v":231,"d":{"AAS":231}},{"z":"94040","s":"SFO01","p":1.85,"v":201,"d":{"DAE":201}},{"z":"95131","s":"SFO01","p":2.0,"v":198,"d":{"UNS":198}},{"z":"94518","s":"SFO01","p":2.1,"v":199,"d":{"AAS":199}},{"z":"94582","s":"SFO01","p":1.8,"v":204,"d":{"AAS":204}},{"z":"94945","s":"SFO01","p":2.2,"v":169,"d":{"AAS":169}},{"z":"94503","s":"SFO01","p":1.95,"v":172,"d":{"AAS":172}},{"z":"95133","s":"SFO01","p":2.0,"v":223,"d":{"UNS":223}},{"z":"95054","s":"SFO01","p":2.0,"v":139,"d":{"UNS":139}},{"z":"94404","s":"SFO01","p":1.85,"v":169,"d":{"DAE":169}},{"z":"94555","s":"SFO01","p":1.8,"v":186,"d":{"DAE":186}},{"z":"95062","s":"SFO01","p":2.2,"v":298,"d":{"WDA":298}},{"z":"94510","s":"SFO01","p":1.8,"v":171,"d":{"AAS":171}},{"z":"94602","s":"SFO01","p":1.9,"v":160,"d":{"AAS":160}},{"z":"94116","s":"SFO01","p":1.85,"v":217,"d":{"WZS":217}},{"z":"94121","s":"SFO01","p":2.05,"v":199,"d":{"HFE":199}},{"z":"94117","s":"SFO01","p":2.05,"v":188,"d":{"HFE":188}},{"z":"94547","s":"SFO01","p":1.8,"v":181,"d":{"AAS":181}},{"z":"94062","s":"SFO01","p":1.85,"v":158,"d":{"DAE":158}},{"z":"94114","s":"SFO01","p":2.1,"v":146,"d":{"HFE":146}},{"z":"95391","s":"SFO01","p":2.0,"v":210,"d":{"UNS":210}},{"z":"94070","s":"SFO01","p":1.85,"v":132,"d":{"DAE":132}},{"z":"94549","s":"SFO01","p":2.0,"v":146,"d":{"HFE":146}},{"z":"95129","s":"SFO01","p":1.85,"v":222,"d":{"MYE":222}},{"z":"94022","s":"SFO01","p":1.85,"v":71,"d":{"MYE":71}},{"z":"94619","s":"SFO01","p":1.85,"v":172,"d":{"AAS":172}},{"z":"94588","s":"SFO01","p":1.85,"v":162,"d":{"HFE":162}},{"z":"95120","s":"SFO01","p":1.95,"v":214,"d":{"DAE":214}},{"z":"94019","s":"SFO01","p":2.1,"v":129,"d":{"HFE":129}},{"z":"95032","s":"SFO01","p":1.9,"v":150,"d":{"DAE":150}},{"z":"94043","s":"SFO01","p":1.85,"v":117,"d":{"DAE":117}},{"z":"94579","s":"SFO01","p":1.8,"v":150,"d":{"WDA":150}},{"z":"94002","s":"SFO01","p":1.85,"v":140,"d":{"DAE":140}},{"z":"94596","s":"SFO01","p":2.0,"v":177,"d":{"HFE":177}},{"z":"94123","s":"SFO01","p":2.05,"v":129,"d":{"HFE":129}},{"z":"94597","s":"SFO01","p":2.0,"v":149,"d":{"HFE":149}},{"z":"94132","s":"SFO01","p":1.85,"v":157,"d":{"WZS":157}},{"z":"95033","s":"SFO01","p":2.15,"v":158,"d":{"DAE":158}},{"z":"94089","s":"SFO01","p":2.0,"v":168,"d":{"UNS":168}},{"z":"94085","s":"SFO01","p":2.0,"v":142,"d":{"UNS":142}},{"z":"94611","s":"SFO01","p":1.85,"v":206,"d":{"AAS":206}},{"z":"95110","s":"SFO01","p":1.9,"v":163,"d":{"DAE":163}},{"z":"94519","s":"SFO01","p":2.1,"v":183,"d":{"AAS":183}},{"z":"95138","s":"SFO01","p":1.8,"v":146,"d":{"UNS":146}},{"z":"94960","s":"SFO01","p":1.95,"v":94,"d":{"AAS":94}},{"z":"94803","s":"SFO01","p":1.8,"v":149,"d":{"AAS":149}},{"z":"94402","s":"SFO01","p":1.85,"v":123,"d":{"DAE":123}},{"z":"94609","s":"SFO01","p":1.9,"v":122,"d":{"AAS":122}},{"z":"95003","s":"SFO01","p":2.2,"v":159,"d":{"WDA":159}},{"z":"94530","s":"SFO01","p":2.1,"v":140,"d":{"AAS":140}},{"z":"94506","s":"SFO01","p":1.8,"v":117,"d":{"AAS":117}},{"z":"94131","s":"SFO01","p":1.85,"v":127,"d":{"WZS":127}},{"z":"94030","s":"SFO01","p":1.85,"v":129,"d":{"DAE":129}},{"z":"95012","s":"SFO01","p":2.2,"v":154,"d":{"WDA":154}},{"z":"94598","s":"SFO01","p":2.1,"v":133,"d":{"AAS":133}},{"z":"94301","s":"SFO01","p":1.85,"v":72,"d":{"MYE":72}},{"z":"94805","s":"SFO01","p":2.1,"v":123,"d":{"AAS":123}},{"z":"95070","s":"SFO01","p":1.9,"v":145,"d":{"DAE":145}},{"z":"94564","s":"SFO01","p":1.8,"v":124,"d":{"AAS":124}},{"z":"94505","s":"SFO01","p":1.95,"v":115,"d":{"HFE":115}},{"z":"95135","s":"SFO01","p":1.8,"v":124,"d":{"UNS":124}},{"z":"94931","s":"SFO01","p":1.8,"v":92,"d":{"AAS":92}},{"z":"95030","s":"SFO01","p":1.9,"v":82,"d":{"DAE":82}},{"z":"94542","s":"SFO01","p":1.8,"v":118,"d":{"HFE":118}},{"z":"95304","s":"SFO01","p":2.0,"v":131,"d":{"UNS":131}},{"z":"94904","s":"SFO01","p":1.95,"v":103,"d":{"AAS":103}},{"z":"94925","s":"SFO01","p":1.95,"v":103,"d":{"AAS":103}},{"z":"94024","s":"SFO01","p":1.85,"v":88,"d":{"DAE":88}},{"z":"94127","s":"SFO01","p":1.85,"v":83,"d":{"WZS":83}},{"z":"95119","s":"SFO01","p":1.85,"v":83,"d":{"DAE":83}},{"z":"94703","s":"SFO01","p":1.85,"v":94,"d":{"AAS":94}},{"z":"94041","s":"SFO01","p":1.85,"v":74,"d":{"DAE":74}},{"z":"94552","s":"SFO01","p":1.9,"v":64,"d":{"AAS":64}},{"z":"95066","s":"SFO01","p":2.2,"v":93,"d":{"HFE":93}},{"z":"94563","s":"SFO01","p":2.0,"v":108,"d":{"HFE":108}},{"z":"94702","s":"SFO01","p":1.85,"v":103,"d":{"AAS":103}},{"z":"94065","s":"SFO01","p":1.85,"v":86,"d":{"DAE":86}},{"z":"94507","s":"SFO01","p":2.0,"v":115,"d":{"HFE":115}},{"z":"94595","s":"SFO01","p":2.0,"v":116,"d":{"HFE":116}},{"z":"94517","s":"SFO01","p":1.95,"v":80,"d":{"HFE":80}},{"z":"95130","s":"SFO01","p":1.9,"v":88,"d":{"DAE":88}},{"z":"94704","s":"SFO01","p":1.85,"v":71,"d":{"AAS":71}},{"z":"94502","s":"SFO01","p":1.9,"v":90,"d":{"AAS":90}},{"z":"94705","s":"SFO01","p":1.85,"v":47,"d":{"AAS":47}},{"z":"95134","s":"SFO01","p":2.0,"v":179,"d":{"UNS":179}},{"z":"94158","s":"SFO01","p":2.1,"v":73,"d":{"HFE":73}},{"z":"95046","s":"SFO01","p":1.9,"v":67,"d":{"DAE":67}},{"z":"94706","s":"SFO01","p":1.85,"v":63,"d":{"AAS":63}},{"z":"95018","s":"SFO01","p":2.2,"v":73,"d":{"HFE":73}},{"z":"94618","s":"SFO01","p":2.0,"v":55,"d":{"AAS":55}},{"z":"94610","s":"SFO01","p":1.85,"v":72,"d":{"AAS":72}},{"z":"94572","s":"SFO01","p":1.8,"v":59,"d":{"AAS":59}},{"z":"94556","s":"SFO01","p":2.0,"v":64,"d":{"HFE":64}},{"z":"95010","s":"SFO01","p":2.2,"v":47,"d":{"WDA":47}},{"z":"95005","s":"SFO01","p":2.2,"v":58,"d":{"HFE":58}},{"z":"94939","s":"SFO01","p":1.95,"v":60,"d":{"AAS":60}},{"z":"94305","s":"SFO01","p":1.85,"v":17,"d":{"MYE":17}},{"z":"94028","s":"SFO01","p":1.85,"v":24,"d":{"MYE":24}},{"z":"94130","s":"SFO01","p":2.1,"v":48,"d":{"HFE":48}},{"z":"94710","s":"SFO01","p":1.9,"v":57,"d":{"AAS":57}},{"z":"95019","s":"SFO01","p":2.2,"v":52,"d":{"WDA":52}},{"z":"94951","s":"SFO01","p":2.2,"v":28,"d":{"AAS":28}},{"z":"94005","s":"SFO01","p":1.85,"v":37,"d":{"WZS":37}},{"z":"95004","s":"SFO01","p":2.2,"v":62,"d":{"WDA":62}},{"z":"94707","s":"SFO01","p":1.85,"v":49,"d":{"AAS":49}},{"z":"95139","s":"SFO01","p":1.85,"v":45,"d":{"DAE":45}},{"z":"94708","s":"SFO01","p":1.9,"v":22,"d":{"AAS":22}},{"z":"94304","s":"SFO01","p":1.85,"v":17,"d":{"MYE":17}},{"z":"94027","s":"SFO01","p":1.85,"v":27,"d":{"MYE":27}},{"z":"94709","s":"SFO01","p":1.9,"v":26,"d":{"AAS":26}},{"z":"95113","s":"SFO01","p":1.9,"v":26,"d":{"DAE":26}},{"z":"95442","s":"SFO01","p":2.1,"v":25,"d":{"AAS":25}},{"z":"95045","s":"SFO01","p":2.2,"v":46,"d":{"WDA":46}},{"z":"94038","s":"SFO01","p":2.1,"v":29,"d":{"HFE":29}},{"z":"94129","s":"SFO01","p":2.05,"v":11,"d":{"HFE":11}},{"z":"94037","s":"SFO01","p":2.1,"v":14,"d":{"HFE":14}},{"z":"95452","s":"SFO01","p":2.1,"v":16,"d":{"AAS":16}},{"z":"94525","s":"SFO01","p":1.8,"v":28,"d":{"AAS":28}},{"z":"94018","s":"SFO01","p":2.1,"v":18,"d":{"HFE":18}},{"z":"94720","s":"SFO01","p":1.9,"v":2,"d":{"AAS":2}},{"z":"94586","s":"SFO01","p":1.85,"v":11,"d":{"HFE":11}},{"z":"94592","s":"SFO01","p":1.95,"v":8,"d":{"AAS":8}},{"z":"95064","s":"SFO01","p":2.2,"v":5,"d":{"HFE":5}},{"z":"95002","s":"SFO01","p":2.0,"v":5,"d":{"UNS":5}},{"z":"95013","s":"SFO01","p":1.85,"v":2,"d":{"DAE":2}},{"z":"95439","s":"SFO01","p":2.2,"v":7,"d":{"AAS":7}},{"z":"94662","s":"SFO01","p":2.0,"v":0,"d":{"AAS":0}},{"z":"94623","s":"SFO01","p":2.0,"v":0,"d":{"AAS":0}},{"z":"94617","s":"SFO01","p":2.0,"v":0,"d":{"AAS":0}},{"z":"94615","s":"SFO01","p":2.0,"v":1,"d":{"AAS":1}},{"z":"94612","s":"SFO01","p":2.0,"v":0,"d":{"AAS":0}},{"z":"94608","s":"SFO01","p":1.9,"v":0,"d":{"AAS":0}},{"z":"94607","s":"SFO01","p":1.9,"v":0,"d":{"AAS":0}},{"z":"94604","s":"SFO01","p":1.9,"v":0,"d":{"AAS":0}},{"z":"94701","s":"SFO01","p":1.85,"v":0,"d":{"AAS":0}},{"z":"94624","s":"SFO01","p":1.85,"v":0,"d":{"AAS":0}},{"z":"94606","s":"SFO01","p":1.85,"v":0,"d":{"AAS":0}},{"z":"94516","s":"SFO01","p":1.9,"v":1,"d":{"AAS":1}},{"z":"94613","s":"SFO01","p":2.1,"v":0,"d":{"AAS":0}},{"z":"94528","s":"SFO01","p":1.8,"v":0,"d":{"AAS":0}},{"z":"94537","s":"SFO01","p":1.9,"v":0,"d":{"UNS":0}},{"z":"95152","s":"SFO01","p":1.8,"v":0,"d":{"UNS":0}},{"z":"95036","s":"SFO01","p":1.8,"v":0,"d":{"UNS":0}},{"z":"95173","s":"SFO01","p":1.8,"v":0,"d":{"UNS":0}},{"z":"95164","s":"SFO01","p":2.0,"v":0,"d":{"UNS":0}},{"z":"95056","s":"SFO01","p":2.0,"v":0,"d":{"UNS":0}},{"z":"95151","s":"SFO01","p":1.8,"v":0,"d":{"UNS":0}},{"z":"94128","s":"SFO01","p":1.85,"v":0,"d":{"DAE":0}},{"z":"95156","s":"SFO01","p":1.8,"v":0,"d":{"UNS":0}},{"z":"95065","s":"SFO01","p":2.2,"v":0,"d":{"WDA":0}},{"z":"95073","s":"SFO01","p":2.2,"v":1,"d":{"WDA":1}},{"z":"94965","s":"SFO01","p":2.1,"v":83,"d":{"AAS":83}},{"z":"94941","s":"SFO01","p":2.1,"v":125,"d":{"AAS":125}},{"z":"94920","s":"SFO01","p":2.1,"v":62,"d":{"AAS":62}},{"z":"94952","s":"SFO01","p":2.1,"v":229,"d":{"AAS":229}},{"z":"95472","s":"SFO01","p":2.1,"v":3,"d":{"AAS":3}},{"z":"95444","s":"SFO01","p":2.1,"v":0,"d":{"AAS":0}},{"z":"95436","s":"SFO01","p":2.1,"v":31,"d":{"AAS":31}},{"z":"94569","s":"SFO01","p":2.1,"v":0,"d":{"AAS":0}},{"z":"95431","s":"SFO01","p":2.1,"v":0,"d":{"AAS":0}},{"z":"94599","s":"SFO01","p":2.1,"v":0,"d":{"AAS":0}},{"z":"94533","s":"SMF01","p":2.05,"v":620,"d":{"DAE":620}},{"z":"95823","s":"SMF01","p":1.85,"v":691,"d":{"DAE":691}},{"z":"95828","s":"SMF01","p":1.85,"v":593,"d":{"DAE":593}},{"z":"95624","s":"SMF01","p":1.85,"v":534,"d":{"DAE":534}},{"z":"95687","s":"SMF01","p":2.05,"v":385,"d":{"DAE":385}},{"z":"95648","s":"SMF01","p":1.95,"v":448,"d":{"JAS":448}},{"z":"95758","s":"SMF01","p":1.85,"v":508,"d":{"DAE":508}},{"z":"95757","s":"SMF01","p":1.95,"v":500,"d":{"DAE":500}},{"z":"95670","s":"SMF01","p":1.85,"v":442,"d":{"DAE":442}},{"z":"95608","s":"SMF01","p":1.85,"v":483,"d":{"PEL":483}},{"z":"95843","s":"SMF01","p":1.85,"v":380,"d":{"JAS":380}},{"z":"95835","s":"SMF01","p":1.9,"v":348,"d":{"RRI":348}},{"z":"95610","s":"SMF01","p":1.85,"v":362,"d":{"PEL":362}},{"z":"95838","s":"SMF01","p":1.85,"v":395,"d":{"JAS":395}},{"z":"94534","s":"SMF01","p":2.05,"v":260,"d":{"DAE":260}},{"z":"95834","s":"SMF01","p":1.9,"v":333,"d":{"RRI":333}},{"z":"95833","s":"SMF01","p":2.0,"v":353,"d":{"RRI":353}},{"z":"95991","s":"SMF01","p":2.2,"v":305,"d":{"JAS":305}},{"z":"95822","s":"SMF01","p":1.85,"v":367,"d":{"DAE":367}},{"z":"95821","s":"SMF01","p":1.85,"v":362,"d":{"PEL":362}},{"z":"95961","s":"SMF01","p":2.2,"v":262,"d":{"JAS":262}},{"z":"95829","s":"SMF01","p":1.85,"v":289,"d":{"DAE":289}},{"z":"95831","s":"SMF01","p":1.85,"v":261,"d":{"DAE":261}},{"z":"95621","s":"SMF01","p":1.85,"v":385,"d":{"PEL":385}},{"z":"95901","s":"SMF01","p":2.2,"v":239,"d":{"JAS":239}},{"z":"95628","s":"SMF01","p":1.85,"v":294,"d":{"PEL":294}},{"z":"95765","s":"SMF01","p":1.85,"v":333,"d":{"JAS":333}},{"z":"95825","s":"SMF01","p":1.85,"v":318,"d":{"JAS":318}},{"z":"95660","s":"SMF01","p":1.85,"v":329,"d":{"JAS":329}},{"z":"95842","s":"SMF01","p":1.85,"v":290,"d":{"JAS":290}},{"z":"95826","s":"SMF01","p":1.85,"v":278,"d":{"JAS":278}},{"z":"95993","s":"SMF01","p":2.2,"v":227,"d":{"JAS":227}},{"z":"95691","s":"SMF01","p":2.0,"v":324,"d":{"RRI":324}},{"z":"95824","s":"SMF01","p":1.85,"v":259,"d":{"DAE":259}},{"z":"95815","s":"SMF01","p":1.85,"v":241,"d":{"JAS":241}},{"z":"95677","s":"SMF01","p":1.85,"v":157,"d":{"JAS":157}},{"z":"95603","s":"SMF01","p":2.1,"v":179,"d":{"JAS":179}},{"z":"95820","s":"SMF01","p":1.85,"v":278,"d":{"DAE":278}},{"z":"95742","s":"SMF01","p":2.0,"v":209,"d":{"DAE":209}},{"z":"95662","s":"SMF01","p":1.85,"v":220,"d":{"PEL":220}},{"z":"95620","s":"SMF01","p":2.05,"v":160,"d":{"DAE":160}},{"z":"95841","s":"SMF01","p":1.85,"v":189,"d":{"PEL":189}},{"z":"95673","s":"SMF01","p":1.9,"v":160,"d":{"RRI":160}},{"z":"95827","s":"SMF01","p":1.85,"v":196,"d":{"DAE":196}},{"z":"95864","s":"SMF01","p":2.15,"v":158,"d":{"JAS":158}},{"z":"95818","s":"SMF01","p":1.85,"v":106,"d":{"DAE":106}},{"z":"95816","s":"SMF01","p":1.95,"v":99,"d":{"DAE":99}},{"z":"95605","s":"SMF01","p":1.9,"v":151,"d":{"RRI":151}},{"z":"95832","s":"SMF01","p":1.85,"v":112,"d":{"DAE":112}},{"z":"95650","s":"SMF01","p":1.95,"v":91,"d":{"JAS":91}},{"z":"95814","s":"SMF01","p":2.1,"v":76,"d":{"RRI":76}},{"z":"95811","s":"SMF01","p":2.1,"v":78,"d":{"RRI":78}},{"z":"95817","s":"SMF01","p":1.85,"v":96,"d":{"DAE":96}},{"z":"95819","s":"SMF01","p":1.95,"v":89,"d":{"DAE":89}},{"z":"95658","s":"SMF01","p":2.1,"v":35,"d":{"JAS":35}},{"z":"95626","s":"SMF01","p":1.9,"v":33,"d":{"RRI":33}},{"z":"95655","s":"SMF01","p":1.85,"v":35,"d":{"DAE":35}},{"z":"95663","s":"SMF01","p":2.1,"v":27,"d":{"JAS":27}},{"z":"95830","s":"SMF01","p":1.85,"v":4,"d":{"DAE":4}},{"z":"95652","s":"SMF01","p":1.85,"v":13,"d":{"JAS":13}},{"z":"95696","s":"SMF01","p":2.05,"v":0,"d":{"DAE":0}},{"z":"95747","s":"SCK01","p":1.85,"v":713,"d":{"UNS":713}},{"z":"95258","s":"SCK01","p":2.2,"v":13,"d":{"UNS":13}},{"z":"95630","s":"SCK01","p":1.85,"v":539,"d":{"UNS":539}},{"z":"95206","s":"SCK01","p":2.0,"v":780,"d":{"UNS":780}},{"z":"95617","s":"SCK01","p":1.85,"v":533,"d":{"UNS":533}},{"z":"95337","s":"SCK01","p":2.0,"v":473,"d":{"UNS":473}},{"z":"95237","s":"SCK01","p":2.2,"v":17,"d":{"UNS":17}},{"z":"95336","s":"SCK01","p":2.0,"v":486,"d":{"UNS":486}},{"z":"95240","s":"SCK01","p":2.2,"v":287,"d":{"UNS":287}},{"z":"95209","s":"SCK01","p":1.95,"v":297,"d":{"UNS":297}},{"z":"95220","s":"SCK01","p":2.2,"v":51,"d":{"UNS":51}},{"z":"95207","s":"SCK01","p":1.95,"v":260,"d":{"UNS":260}},{"z":"95776","s":"SCK01","p":1.85,"v":188,"d":{"UNS":188}},{"z":"95330","s":"SCK01","p":2.0,"v":575,"d":{"UNS":575}},{"z":"95695","s":"SCK01","p":1.85,"v":230,"d":{"UNS":230}},{"z":"95678","s":"SCK01","p":1.85,"v":323,"d":{"UNS":323}},{"z":"95242","s":"SCK01","p":2.2,"v":179,"d":{"UNS":179}},{"z":"95205","s":"SCK01","p":1.95,"v":221,"d":{"UNS":221}},{"z":"95632","s":"SCK01","p":2.2,"v":188,"d":{"UNS":188}},{"z":"95212","s":"SCK01","p":1.95,"v":218,"d":{"UNS":218}},{"z":"95215","s":"SCK01","p":2.2,"v":172,"d":{"UNS":172}},{"z":"95210","s":"SCK01","p":1.95,"v":272,"d":{"UNS":272}},{"z":"95219","s":"SCK01","p":2.2,"v":200,"d":{"UNS":200}},{"z":"95661","s":"SCK01","p":1.85,"v":196,"d":{"UNS":196}},{"z":"95204","s":"SCK01","p":1.95,"v":170,"d":{"UNS":170}},{"z":"95693","s":"SCK01","p":2.2,"v":46,"d":{"UNS":46}},{"z":"95746","s":"SCK01","p":1.85,"v":141,"d":{"UNS":141}},{"z":"95203","s":"SCK01","p":2.0,"v":173,"d":{"UNS":173}},{"z":"95616","s":"SCK01","p":1.85,"v":136,"d":{"UNS":136}},{"z":"95366","s":"SCK01","p":2.0,"v":117,"d":{"UNS":117}},{"z":"95236","s":"SCK01","p":2.2,"v":24,"d":{"UNS":24}},{"z":"95202","s":"SCK01","p":1.95,"v":40,"d":{"UNS":40}},{"z":"95638","s":"SCK01","p":2.2,"v":12,"d":{"UNS":12}},{"z":"95231","s":"SCK01","p":2.0,"v":38,"d":{"UNS":38}},{"z":"95618","s":"SCK01","p":1.85,"v":79,"d":{"UNS":79}},{"z":"93955","s":"OAR01","p":2.1,"v":335,"d":{"PML":335}},{"z":"93960","s":"OAR01","p":2.1,"v":282,"d":{"PML":282}},{"z":"93933","s":"OAR01","p":2.1,"v":294,"d":{"PML":294}},{"z":"93940","s":"OAR01","p":2.1,"v":262,"d":{"PML":262}},{"z":"93927","s":"OAR01","p":2.1,"v":244,"d":{"PML":244}},{"z":"93930","s":"OAR01","p":2.1,"v":243,"d":{"PML":243}},{"z":"93908","s":"OAR01","p":2.1,"v":140,"d":{"PML":140}},{"z":"93950","s":"OAR01","p":2.1,"v":129,"d":{"PML":129}},{"z":"93926","s":"OAR01","p":2.1,"v":79,"d":{"PML":79}},{"z":"93953","s":"OAR01","p":2.1,"v":37,"d":{"PML":37}},{"z":"93921","s":"OAR01","p":2.1,"v":4,"d":{"PML":4}},{"z":"95355","s":"MOD01","p":1.95,"v":384,"d":{"PEL":384}},{"z":"95363","s":"MOD01","p":2.05,"v":401,"d":{"PEL":401}},{"z":"95350","s":"MOD01","p":1.95,"v":365,"d":{"PEL":365}},{"z":"95351","s":"MOD01","p":1.95,"v":310,"d":{"PEL":310}},{"z":"95307","s":"MOD01","p":1.95,"v":338,"d":{"PEL":338}},{"z":"95380","s":"MOD01","p":1.95,"v":242,"d":{"PEL":242}},{"z":"95356","s":"MOD01","p":1.95,"v":241,"d":{"PEL":241}},{"z":"95361","s":"MOD01","p":1.95,"v":229,"d":{"PEL":229}},{"z":"95382","s":"MOD01","p":1.95,"v":204,"d":{"PEL":204}},{"z":"95358","s":"MOD01","p":1.95,"v":199,"d":{"PEL":199}},{"z":"95367","s":"MOD01","p":1.95,"v":210,"d":{"PEL":210}},{"z":"95354","s":"MOD01","p":1.95,"v":183,"d":{"PEL":183}},{"z":"95322","s":"MOD01","p":2.05,"v":112,"d":{"PEL":112}},{"z":"95360","s":"MOD01","p":2.05,"v":99,"d":{"PEL":99}},{"z":"95334","s":"MOD01","p":1.95,"v":131,"d":{"PEL":131}},{"z":"95368","s":"MOD01","p":1.95,"v":87,"d":{"PEL":87}},{"z":"95357","s":"MOD01","p":1.95,"v":72,"d":{"PEL":72}},{"z":"95315","s":"MOD01","p":1.95,"v":107,"d":{"PEL":107}},{"z":"95320","s":"MOD01","p":2.05,"v":80,"d":{"PEL":80}},{"z":"95386","s":"MOD01","p":2.05,"v":70,"d":{"PEL":70}},{"z":"95326","s":"MOD01","p":1.95,"v":65,"d":{"PEL":65}},{"z":"95316","s":"MOD01","p":2.05,"v":33,"d":{"PEL":33}},{"z":"95324","s":"MOD01","p":1.95,"v":58,"d":{"PEL":58}},{"z":"95328","s":"MOD01","p":1.95,"v":30,"d":{"PEL":30}},{"z":"95319","s":"MOD01","p":1.95,"v":9,"d":{"PEL":9}},{"z":"95374","s":"MOD01","p":1.95,"v":13,"d":{"PEL":13}},{"z":"95313","s":"MOD01","p":1.95,"v":13,"d":{"PEL":13}},{"z":"95323","s":"MOD01","p":2.05,"v":12,"d":{"PEL":12}},{"z":"95303","s":"MOD01","p":1.95,"v":6,"d":{"PEL":6}},{"z":"89436","s":"RNO01","p":2.1,"v":710,"d":{"PEL":710}},{"z":"89506","s":"RNO01","p":2.1,"v":702,"d":{"PEL":702}},{"z":"89502","s":"RNO01","p":2.1,"v":716,"d":{"PEL":716}},{"z":"89521","s":"RNO01","p":2.1,"v":476,"d":{"PEL":476}},{"z":"89431","s":"RNO01","p":2.1,"v":608,"d":{"PEL":608}},{"z":"89408","s":"RNO01","p":2.1,"v":449,"d":{"PEL":449}},{"z":"89523","s":"RNO01","p":2.1,"v":391,"d":{"PEL":391}},{"z":"89701","s":"RNO01","p":2.1,"v":374,"d":{"PEL":374}},{"z":"89503","s":"RNO01","p":2.1,"v":386,"d":{"PEL":386}},{"z":"89511","s":"RNO01","p":2.1,"v":328,"d":{"PEL":328}},{"z":"89434","s":"RNO01","p":2.1,"v":389,"d":{"PEL":389}},{"z":"89512","s":"RNO01","p":2.1,"v":385,"d":{"PEL":385}},{"z":"89433","s":"RNO01","p":2.1,"v":356,"d":{"PEL":356}},{"z":"89509","s":"RNO01","p":2.15,"v":418,"d":{"PEL":418}},{"z":"89706","s":"RNO01","p":2.15,"v":341,"d":{"PEL":341}},{"z":"89403","s":"RNO01","p":2.15,"v":312,"d":{"PEL":312}},{"z":"96150","s":"RNO01","p":2.2,"v":201,"d":{"PEL":201}},{"z":"89441","s":"RNO01","p":2.1,"v":191,"d":{"PEL":191}},{"z":"89423","s":"RNO01","p":2.2,"v":141,"d":{"PEL":141}},{"z":"89508","s":"RNO01","p":2.15,"v":228,"d":{"PEL":228}},{"z":"89460","s":"RNO01","p":2.2,"v":192,"d":{"PEL":192}},{"z":"89429","s":"RNO01","p":2.2,"v":189,"d":{"PEL":189}},{"z":"89703","s":"RNO01","p":2.1,"v":162,"d":{"PEL":162}},{"z":"89451","s":"RNO01","p":2.2,"v":69,"d":{"PEL":69}},{"z":"89519","s":"RNO01","p":2.1,"v":85,"d":{"PEL":85}},{"z":"89705","s":"RNO01","p":2.2,"v":108,"d":{"PEL":108}},{"z":"89704","s":"RNO01","p":2.15,"v":61,"d":{"PEL":61}},{"z":"89439","s":"RNO01","p":2.15,"v":39,"d":{"PEL":39}},{"z":"89449","s":"RNO01","p":2.2,"v":17,"d":{"PEL":17}},{"z":"96143","s":"RNO01","p":2.2,"v":27,"d":{"PEL":27}},{"z":"89440","s":"RNO01","p":2.15,"v":13,"d":{"PEL":13}},{"z":"89428","s":"RNO01","p":2.15,"v":1,"d":{"PEL":1}},{"z":"89448","s":"RNO01","p":2.2,"v":1,"d":{"PEL":1}},{"z":"96003","s":"RDG01","p":2.25,"v":784,"d":{"QDT":784}},{"z":"95973","s":"RDG02","p":2.25,"v":388,"d":{"WDA":388}},{"z":"96002","s":"RDG01","p":2.15,"v":532,"d":{"QDT":532}},{"z":"96001","s":"RDG01","p":2.25,"v":437,"d":{"QDT":437}},{"z":"95926","s":"RDG02","p":2.15,"v":343,"d":{"WDA":343}},{"z":"95928","s":"RDG02","p":2.15,"v":330,"d":{"WDA":330}},{"z":"96007","s":"RDG01","p":2.25,"v":206,"d":{"QDT":206}},{"z":"96021","s":"RDG02","p":2.25,"v":202,"d":{"WDA":202}},{"z":"95963","s":"RDG02","p":2.25,"v":225,"d":{"WDA":225}},{"z":"95988","s":"RDG02","p":2.25,"v":99,"d":{"WDA":99}},{"z":"96055","s":"RDG02","p":2.25,"v":66,"d":{"WDA":66}},{"z":"95951","s":"RDG02","p":2.25,"v":6,"d":{"WDA":6}},{"z":"97504","s":"MFR01","p":2.05,"v":450,"d":{"NFE":450}},{"z":"97501","s":"MFR01","p":2.05,"v":489,"d":{"NFE":489}},{"z":"97527","s":"MFR01","p":2.05,"v":386,"d":{"NFE":386}},{"z":"97526","s":"MFR01","p":2.05,"v":448,"d":{"NFE":448}},{"z":"97502","s":"MFR01","p":2.05,"v":249,"d":{"NFE":249}},{"z":"97520","s":"MFR01","p":2.05,"v":162,"d":{"NFE":162}},{"z":"97503","s":"MFR01","p":2.05,"v":130,"d":{"NFE":130}},{"z":"97540","s":"MFR01","p":2.05,"v":65,"d":{"NFE":65}},{"z":"97535","s":"MFR01","p":2.05,"v":39,"d":{"NFE":39}},{"z":"95762","s":"SMF01","p":1.9,"v":0,"d":{"PEL":0}}]</script>
+<script>
+(function(){
+"use strict";
+const ZIPS = JSON.parse(document.getElementById('pricedata').textContent);
+const STATIONS = [...new Set(ZIPS.map(r=>r.s))];
+const $ = id => document.getElementById(id);
+const fmtP = v => '$' + v.toFixed(3);
+
+// populate station selector
+const sel = $('stSel');
+STATIONS.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s+' station'; sel.appendChild(o); });
+
+function parseCsv(text){
+  const rows=[]; text.split(/\r?\n/).forEach(line=>{
+    const p=line.split(',').map(s=>s.trim().replace(/^"|"$/g,''));
+    if(p.length<2) return; const zip=p[0], price=parseFloat(p[1]);
+    if(/^\d{5}$/.test(zip)&&isFinite(price)&&price>0) rows.push({zip,price});
+  }); return rows;
+}
+
+// stats: for a station filter (or ALL) → per-DSP {avg, vol}, plus overall avg
+function compute(filter){
+  const cells={}, overall={pv:0,v:0};
+  for(const r of ZIPS){
+    if(filter!=='ALL' && r.s!==filter) continue;
+    if(r.p<=0) continue;
+    overall.pv += r.p*r.v; overall.v += r.v;
+    for(const [dsp,vol] of Object.entries(r.d)){
+      const c=cells[dsp]=cells[dsp]||{pv:0,v:0,ps:0,n:0};
+      c.pv+=r.p*vol; c.v+=vol; c.ps+=r.p; c.n++;
+    }
+  }
+  const out={};
+  for(const [dsp,c] of Object.entries(cells)){
+    out[dsp]={ avg: c.v>0 ? c.pv/c.v : (c.n?c.ps/c.n:null), vol:c.v };
+  }
+  return { dsps: out, avg: overall.v>0 ? overall.pv/overall.v : null };
+}
+
+let chart;
+function render(){
+  const filter = sel.value;
+  const st = compute(filter);
+  const rows = Object.entries(st.dsps).filter(([,x])=>x.avg!==null).sort((a,b)=>b[1].avg-a[1].avg);
+  const labels = rows.map(r=>r[0]), avgs = rows.map(r=>+r[1].avg.toFixed(3)), vols = rows.map(r=>r[1].vol);
+
+  // KPIs
+  $('kpiAvg').textContent = st.avg!==null ? fmtP(st.avg) : '—';
+  if(rows.length){
+    $('kpiHi').textContent = fmtP(rows[0][1].avg); $('kpiHiSub').textContent = rows[0][0];
+    const lo = rows[rows.length-1];
+    $('kpiLo').textContent = fmtP(lo[1].avg); $('kpiLoSub').textContent = lo[0];
+    $('kpiSpread').textContent = '$'+(rows[0][1].avg-lo[1].avg).toFixed(3);
+  }
+  $('chartTitle').textContent = 'Avg price per DSP — ' + (filter==='ALL'?'all North Cal':filter+' station');
+
+  // insight
+  const above = rows.filter(r=>r[1].avg>st.avg), below = rows.filter(r=>r[1].avg<st.avg);
+  const bigVol = rows.slice().sort((a,b)=>b[1].vol-a[1].vol)[0];
+  let html = '<p>' + (filter==='ALL'?'Across the North Cal network':'Within '+filter) + ', the volume-weighted average price is <strong>'+fmtP(st.avg)+'</strong>/pkg across <strong>'+rows.length+'</strong> DSPs. <strong>'+rows[0][0]+'</strong> earns the highest rate ('+fmtP(rows[0][1].avg)+') and <strong>'+rows[rows.length-1][0]+'</strong> the lowest ('+fmtP(rows[rows.length-1][1].avg)+'), a spread of $'+(rows[0][1].avg-rows[rows.length-1][1].avg).toFixed(3)+'.</p>';
+  html += '<p><strong>'+above.length+'</strong> DSP'+(above.length===1?' sits':'s sit')+' above the selection average and <strong>'+below.length+'</strong> below. The largest volume carrier here is <strong>'+bigVol[0]+'</strong> ('+bigVol[1].vol.toLocaleString()+' pkgs/day at '+fmtP(bigVol[1].avg)+')'+(bigVol[1].avg<st.avg?' — priced below average, which pulls the weighted network rate down; renegotiation there moves the most revenue.':' — priced above average, so its volume lifts the weighted rate.')+'</p>';
+  if(filter==='ALL') html += '<p>Use the station selector to compare a DSP\'s rate across regions — differences between a DSP\'s station-level rates in the matrix below usually reflect ZIP mix (urban core vs long-tail rural) rather than contract differences.</p>';
+  $('insightBody').innerHTML = html;
+
+  // chart
+  if(chart) chart.destroy();
+  chart = new Chart($('dspChart'), {
+    data:{ labels, datasets:[
+      { type:'bar', data:avgs, backgroundColor:labels.map((l,i)=>avgs[i]>=st.avg?'#0f7a5c':'#2a78d6'), borderRadius:3, maxBarThickness:46 },
+      { type:'line', data:labels.map(()=>+st.avg.toFixed(3)), borderColor:'#8b98a3', borderDash:[6,4], borderWidth:1.5, pointRadius:0 }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:(c)=> c.dataset.type==='line' ? 'Selection avg: '+fmtP(st.avg) : ['Avg price: '+fmtP(c.parsed.y), 'DSP volume: '+vols[c.dataIndex].toLocaleString()+' pkgs/day'] }}},
+      scales:{ y:{ title:{display:true,text:'avg $/pkg (volume-weighted)'}, grid:{color:'#e6eaee'},
+                   suggestedMin: Math.floor(Math.min(...avgs)*20)/20 - 0.05, suggestedMax: Math.ceil(Math.max(...avgs)*20)/20 + 0.05 },
+               x:{ grid:{display:false}, ticks:{autoSkip:false, maxRotation:labels.length>8?60:0, font:{size:11}} } }
+    },
+    plugins:[{ id:'lbl', afterDatasetsDraw(c){ const ctx=c.ctx, m=c.getDatasetMeta(0);
+      ctx.save(); ctx.font='600 11px "IBM Plex Mono",monospace'; ctx.fillStyle='#17242f'; ctx.textAlign='center';
+      m.data.forEach((b,i)=>ctx.fillText(avgs[i].toFixed(2), b.x, b.y-5)); ctx.restore(); }}]
+  });
+
+  renderMatrix();
+}
+
+function stationVolumes(){
+  const sv={}; let region=0;
+  for(const r of ZIPS){ if(r.p<=0) continue; sv[r.s]=(sv[r.s]||0)+r.v; region+=r.v; }
+  return {sv, region};
+}
+
+function renderMatrix(){
+  const perSt = {}; STATIONS.forEach(s=>perSt[s]=compute(s).dsps);
+  const {sv, region} = stationVolumes();
+  // DSP overall = station vol-weighted avgs combined by station volume share of NC region,
+  // normalized over the stations the DSP operates in
+  const netDsp = {};
+  const allDsps = [...new Set([].concat(...STATIONS.map(s=>Object.keys(perSt[s]))))];
+  for(const d of allDsps){
+    let wsum=0, w=0, vol=0;
+    for(const s of STATIONS){ const c=perSt[s][d]; if(c&&c.avg!==null){ wsum+=c.avg*sv[s]; w+=sv[s]; vol+=c.vol; } }
+    netDsp[d] = { avg: w>0 ? wsum/w : null, vol };
+  }
+  const dsps = allDsps.sort((a,b)=>(netDsp[b].avg??0)-(netDsp[a].avg??0));
+  const vals=[]; dsps.forEach(d=>STATIONS.forEach(s=>{const c=perSt[s][d]; if(c&&c.avg!==null)vals.push(c.avg);}));
+  const lo=Math.min(...vals), hi=Math.max(...vals);
+  const heat=v=>{ if(v===null||v===undefined) return ''; const t=hi>lo?(v-lo)/(hi-lo):0.5;
+    return 'background:rgba(15,122,92,'+(0.06+t*0.34).toFixed(2)+');'; };
+  let h='<thead><tr><th>DSP</th>'+STATIONS.map(s=>'<th>'+s+'</th>').join('')+'<th>Overall</th><th>Vol/day</th></tr></thead><tbody>';
+  for(const d of dsps){
+    const opSt = STATIONS.filter(s=>perSt[s][d]&&perSt[s][d].avg!==null);
+    const wTot = opSt.reduce((a,s)=>a+sv[s],0);
+    h+='<tr><td>'+d+'</td>';
+    for(const s of STATIONS){
+      const c=perSt[s][d];
+      if(c&&c.avg!==null){
+        const wPct=Math.round(sv[s]/wTot*100), rPct=(sv[s]/region*100).toFixed(1);
+        h+='<td class="heat" style="'+heat(c.avg)+'" title="station = '+rPct+'% of NC region volume; weight in '+d+' overall = '+wPct+'%">'+c.avg.toFixed(3)+'</td>';
+      } else h+='<td style="color:#c3ccd3">—</td>';
+    }
+    const n=netDsp[d];
+    h+='<td style="font-weight:600">'+(n.avg!==null?n.avg.toFixed(3):'—')+'</td><td>'+n.vol.toLocaleString()+'</td></tr>';
+  }
+  const regionAvg = STATIONS.reduce((a,s)=>{const st=compute(s); return a + (st.avg!==null?st.avg*sv[s]:0);},0)/region;
+  h+='<tr><td style="font-weight:600">Station avg</td>'+STATIONS.map(s=>{const a=compute(s).avg;return '<td style="font-weight:600">'+(a!==null?a.toFixed(3):'—')+'</td>';}).join('')+'<td style="font-weight:600">'+regionAvg.toFixed(3)+'</td><td></td></tr></tbody>';
+  $('matrix').innerHTML=h;
+}
+
+// price-sheet awareness (same source the map uses)
+fetch('../data/price_adjustments.csv',{cache:'no-store'})
+  .then(r=>{ if(!r.ok) throw 0; return r.text(); })
+  .then(text=>{
+    const byZip={}; parseCsv(text).forEach(r=>byZip[r.zip]=r.price);
+    let changed=0; ZIPS.forEach(r=>{ const p=byZip[r.z]; if(p!==undefined&&Math.abs(p-r.p)>1e-9){r.p=p;changed++;} });
+    const chip=$('psChip');
+    chip.textContent = changed? 'price sheet applied · '+changed+' adjusted' : 'price sheet loaded · matches base';
+    chip.classList.add('applied');
+  })
+  .catch(()=>{})
+  .finally(render);
+
+sel.addEventListener('change', render);
+})();
+</script>
+</body>
+</html>
