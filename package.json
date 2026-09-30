@@ -1,0 +1,11 @@
+{
+  "name": "nc-ops-console",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.9" },
+  "scripts": {
+    "dms:login": "node --env-file-if-exists=.env server/bin/dms-login.js",
+    "test": "node --test server/test/"
+  },
+  "dependencies": { "playwright": "^1.58.0" }
+}

@@ -21,3 +21,10 @@ Desktop.ini
 
 # Local Claude → Codex handoff run artifacts
 .handoff/
+
+# Local DMS tooling and state
+node_modules/
+playwright/.auth/
+runtime-data/
+*.storageState.json
+dms-state.json

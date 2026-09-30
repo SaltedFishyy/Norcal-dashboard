@@ -364,4 +364,16 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 
 ## 实现记录（Implementation Notes）
 
-（尚未开始）
+### T1 — 2026-09-30
+
+- Product Owner 本次明确要求执行 `.handoff/briefs/T1-dms-login.md`，授权范围仅 T1；本文上方 Draft / 未授权标记不代表后续 T2–T8 已获授权。
+- 新增 `package.json`、`package-lock.json`、`.env.example`；唯一直接永久依赖为 `playwright`（本次解析版本 1.63.0，其传递依赖为 `playwright-core` 1.63.0）。Node.js 要求 >=22.9，不使用 dotenv、Express 或测试框架。
+- `server/src/config.js` 提供纯函数路径解析、仓库内拒绝、同步目录 warning 和 URL 校验；`server/bin/dms-login.js` 从脚本位置推导仓库根目录，与运行工作目录无关。相对 `DMS_STATE_PATH` 以仓库根目录解析。
+- 默认 session 路径：Windows 有 `LOCALAPPDATA` 时使用 `%LOCALAPPDATA%\nc-ops-console\playwright\.auth\dms-state.json`；否则使用 `~/.nc-ops-console/playwright/.auth/dms-state.json`。配置覆盖必须位于仓库外；比较先规范化，Windows 不区分大小写。路径包含 OneDrive / Dropbox / Google Drive / iCloud 时 warning 后继续。
+- `server/src/dms/session.js`：有界面 Chromium → 用户手动登录并按 Enter → storageState 写入仓库外的同目录临时文件后重命名 → 关闭浏览器 → 新浏览器复用 storageState → 用户回答 y/n。仅主动导航两次，不操作表单、不抓数据、不实现 persistent profile。浏览器正常加载页面所需的资源和手动登录产生的请求不属于额外自动化操作。
+- Ctrl+C、关闭页面/浏览器或终端会取消流程并清理未完成临时文件；已完整保存的 session 不因取消或验证失败而删除。日志只输出 session 路径、origin + pathname、阶段和结果；不输出浏览器原始错误或 session 内容。
+- 安装：`npm.cmd install`、`npx.cmd playwright install chromium` 已成功；Chromium（及其默认配套 headless shell / FFmpeg / Winldd）位于 `%LOCALAPPDATA%\ms-playwright`，未安装 Firefox / WebKit，也未安装到仓库。沙箱首次安装因 EACCES / EPERM 失败，经批准在沙箱外完成。
+- 测试：`npm.cmd test`，25 项通过。`server/test/config.test.js` 覆盖路径及 URL；`session.test.js` 使用模拟浏览器/文件操作覆盖两次导航、y/n、取消清理和脱敏；`cli.test.js` 覆盖缺少 URL、仓库内路径拒绝、从其他工作目录启动及 warning。`server/test/index.js` 是简报指定 `node --test server/test/` 的目录入口（Node v24 不会直接发现该目录下的测试）。所有测试不访问 DMS、不写实际 session。
+- 使用：复制 `.env.example` 为本地 `.env`，只配置 `DMS_BASE_URL` 和可选 `DMS_STATE_PATH`，然后从仓库根目录运行 `npm.cmd run dms:login`（PowerShell 执行策略允许时可用 `npm run dms:login`）。账号密码只在浏览器里手动输入。
+- **本机验证（2026-09-30，Product Owner + Claude）：通过。** `npm run dms:login` 打开有界面的 Chromium → Product Owner 手动登录 → storageState 保存到 `%LOCALAPPDATA%\nc-ops-console\playwright\.auth\dms-state.json`（约 2.6 MB）→ 关闭浏览器 → 用 storageState 重新打开，Product Owner 确认仍是登录状态（y）→ 输出 “storageState 验证成功”，退出码 0。结论：Phase 1 用 storageState 足以保持登录，不需要 persistent profile。日志中没有 cookie / token；仓库内没有 session 或 runtime 文件。`DMS_BASE_URL` 配置为路区画像页（`/gofo-site/report/reportCenter/areaDepiction`）。
+- 未配置 lint / build；legacy 页面未修改，本次未重复执行地图交互回归。无数据 schema / dataset 变化，未 commit / push / deploy。真实 DMS 登录和 storageState 保持验证待 Product Owner 本机完成，Codex 未尝试访问 DMS。

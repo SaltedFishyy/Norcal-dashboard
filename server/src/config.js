@@ -1,0 +1,39 @@
+import path from 'node:path';
+
+const pathApi = (platform) => platform === 'win32' ? path.win32 : path.posix;
+
+export function resolveStatePath({ env, platform, homedir, repoRoot }) {
+  const p = pathApi(platform);
+  const override = env.DMS_STATE_PATH?.trim();
+  if (override) return p.resolve(repoRoot, override);
+  const base = platform === 'win32' && env.LOCALAPPDATA?.trim()
+    ? p.join(env.LOCALAPPDATA, 'nc-ops-console')
+    : p.join(homedir, '.nc-ops-console');
+  return p.resolve(base, 'playwright', '.auth', 'dms-state.json');
+}
+
+export function checkStatePath(statePath, repoRoot, platform = process.platform) {
+  const p = pathApi(platform);
+  const absolutePath = p.resolve(repoRoot, statePath);
+  const normalize = (value) => platform === 'win32' ? value.toLowerCase() : value;
+  const relative = p.relative(normalize(p.resolve(repoRoot)), normalize(absolutePath));
+  if (!relative || (relative !== '..' && !relative.startsWith(`..${p.sep}`) && !p.isAbsolute(relative))) {
+    throw new Error('Session 路径位于仓库内，拒绝运行。请将 DMS_STATE_PATH 配置到仓库外。');
+  }
+  const warnings = /onedrive|dropbox|google drive|icloud/i.test(absolutePath)
+    ? ['warning: Session 路径包含同步目录名称，登录态可能被同步；建议使用 LOCALAPPDATA 下的默认路径。']
+    : [];
+  return { path: absolutePath, warnings };
+}
+
+export function parseBaseUrl(value) {
+  if (!value?.trim()) throw new Error('请在本地 .env 中配置 DMS_BASE_URL，然后重新运行 npm run dms:login。');
+  let url;
+  try { url = new URL(value.trim()); } catch {
+    throw new Error('DMS_BASE_URL 必须是有效的 HTTP(S) URL。');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('DMS_BASE_URL 必须是 HTTP(S) URL，且不能包含账号或密码。');
+  }
+  return { href: url.href, display: url.origin + url.pathname };
+}
