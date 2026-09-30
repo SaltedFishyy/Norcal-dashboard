@@ -4,8 +4,13 @@
 
 NorCal Operations Console (NC Ops Console)
 
-This file contains long-term, project-wide rules for every human and AI agent working in this repository.
-Feature-level requirements do not belong here — see Section 5 (Documentation Structure).
+This file contains long-term, project-wide rules shared by every human and AI agent working in this repository.
+
+* Feature-level requirements do not belong here — see Section 6 (Documentation Structure).
+* Claude-specific working rules live in `CLAUDE.md`. Codex and other agents do not need to follow `CLAUDE.md`, but must follow this file.
+* Detailed data definitions live in `docs/data-schema.md`; Tableau details live in `docs/tableau.md`.
+
+Section numbers in this file are referenced by other documents and scripts. Do not renumber sections without updating those references.
 
 ---
 
@@ -15,17 +20,10 @@ The goal of this project is to build and continuously improve a Northern Califor
 
 The system should eventually support:
 
-* Station analysis
-* Route analysis
-* ZIP-level analysis
-* DSP analysis
-* Daily package volume
-* PPH
-* Delivery Success Rate
-* Route difficulty
-* Pricing analysis
-* DSP resource pool management
-* DSP onboarding / introduction tracking
+* Station, Route, ZIP, and DSP analysis
+* Daily package volume, PPH, Delivery Success Rate
+* Route difficulty and pricing analysis
+* DSP resource pool management and DSP onboarding / introduction tracking
 * Route reallocation analysis
 * Tableau analytics
 * Future database / API integration
@@ -45,6 +43,7 @@ The Product Owner:
 * Approves requirements and specs
 * Gives final sign-off on UI/UX through a preview (Section 9)
 * Decides which version wins when documents, code, and implementation disagree
+* Decides when implementation starts (Section 7.4)
 
 The Product Owner's latest explicit and confirmed decision has the highest priority (Section 3).
 
@@ -54,22 +53,17 @@ Claude is **not** the primary code author. By default, Claude does not implement
 
 Claude is responsible for:
 
-* Understanding each new requirement from the Product Owner
-* Inspecting the existing repository and related code before designing anything
+* Analyzing each new requirement and inspecting the existing repository before designing anything
 * Checking whether similar functionality already exists and can be reused
-* Turning requirements into clear specs (Section 6)
-* Writing and maintaining `REQUIREMENTS.md`, `docs/features/*.md`, and `docs/open-questions.md`
-* Proactively pointing out technical, architectural, data security, permission, or maintenance problems in a requirement, and proposing better alternatives when they exist
-* Breaking large features into small, verifiable Codex tasks (Section 7)
-* Writing clear, executable, reviewable task briefs for Codex
-* Reviewing Codex's work against the original requirement and spec (Section 8)
-* Preparing or describing how to open a preview for Product Owner sign-off
+* Turning requirements into clear specs (Section 6) and maintaining `REQUIREMENTS.md`, `docs/features/*.md`, and `docs/open-questions.md`
+* Proactively pointing out technical, architectural, data security, permission, or maintenance problems, and proposing better alternatives
+* Breaking large features into small, verifiable Codex tasks and writing Codex task briefs (Section 7)
+* Reviewing Codex's work against the requirement and spec (Section 8)
+* Preparing or describing how to open a preview for Product Owner sign-off (Section 9)
 
-Claude must not mechanically transcribe or execute a request that has obvious problems. If a requirement is unreasonable, Claude must say so and explain why.
+Claude must not mechanically transcribe or execute a request that has obvious problems. During review, Claude does not rewrite Codex's code on a large scale unless the Product Owner explicitly asks Claude to modify code directly.
 
-During review, Claude should not rewrite Codex's code on a large scale unless the Product Owner explicitly asks Claude to modify code directly.
-
-When the Product Owner describes a new feature, Claude's default response is to analyze it and update the spec — not to start implementing it.
+Claude's detailed working process is defined in `CLAUDE.md`.
 
 ### 2.3 Codex — Software Engineer
 
@@ -78,14 +72,12 @@ Codex is responsible for:
 * Reading `AGENTS.md` and the relevant `REQUIREMENTS.md` / feature spec before implementing
 * Inspecting the existing code before changing it
 * Providing an implementation plan before coding when the task is non-trivial (Section 7.3)
-* Implementing features according to the spec and the existing project
-* Fixing bugs
+* Implementing features and fixing bugs according to the spec and the existing project
 * Writing or extending tests where the project supports them
-* Running available lint / build / test commands (Section 10)
-* Checking the actual running result
+* Running available lint / build / test commands (Section 10) and checking the actual running result
 * Keeping the change scope as small as reasonably possible
 * Reporting exactly what was changed (Section 11)
-* Updating technical documentation (README, data-schema notes, implementation notes in a feature spec) when the implementation changes it
+* Updating technical documentation (README, `docs/data-schema.md`, implementation notes in a feature spec) when the implementation changes it
 * Helping prepare datasets and data structures for Tableau
 
 Codex should not redefine product requirements. If the spec is unclear, incomplete, or conflicts with the existing code, Codex should stop and report the issue instead of guessing.
@@ -96,6 +88,7 @@ Codex should not redefine product requirements. If the spec is unclear, incomple
 * Chat can be used for discussion, but confirmed requirements must be written into project documents.
 * Agents must not independently redefine the same requirement.
 * Important implementation decisions must be documented.
+* No agent commits, pushes, deploys, or publishes to GitHub Pages without explicit Product Owner approval for that specific action.
 
 ---
 
@@ -105,8 +98,10 @@ When sources disagree, use this priority order:
 
 1. The Product Owner's latest explicit and confirmed requirement
 2. Approved documents in this repository: `REQUIREMENTS.md`, `docs/features/*.md`, other approved docs
-3. The currently maintained code in this repository
-4. The public reference repository: https://github.com/cassielu0/nc-ops-console
+3. The currently maintained code in this repository (the primary implementation, Section 4.1)
+4. The historical reference repository https://github.com/cassielu0/nc-ops-console (Section 4.2)
+
+**Always check the current repository first.** Consult the historical reference repository only as described in Section 4.2.
 
 If documents, code, and the actual implementation are inconsistent, **point out the inconsistency first and confirm with the Product Owner which version is correct** before acting on either one.
 
@@ -114,32 +109,42 @@ A confirmed requirement that exists only in chat must be written into the docume
 
 ---
 
-## 4. Existing Application and Reference Baseline
+## 4. Repositories and Current Implementation
 
-### 4.1 Reference Repository
+### 4.1 Primary Repository (this repository)
 
-https://github.com/cassielu0/nc-ops-console is the existing baseline / reference implementation of the NC Ops Console.
+https://github.com/SaltedFishyy/Norcal-dashboard is the **primary implementation** of the NC Ops Console. All new development, documentation, and specs happen here.
 
 * Treat the current product as an **existing product, not a blank-slate project**.
-* Before designing UI, page structure, navigation, interactions, data structures, or architecture changes, inspect the existing implementation first.
+* Before designing UI, page structure, navigation, interactions, data structures, or architecture changes, inspect the existing implementation in this repository first.
 * Where reasonable, continue the existing components, layout patterns, naming conventions, interaction logic, and data structures instead of rewriting equivalent functionality.
-* The reference repository is **not** permanently the highest-priority source of requirements. If it conflicts with a confirmed requirement, the confirmed requirement wins (Section 3).
-* The reference repository is **public** and GitHub Pages is enabled. Anything committed there is publicly visible (see Section 14).
+* Visibility and GitHub Pages deployment of this repository are tracked in `docs/open-questions.md`. Until confirmed, treat anything committed here as potentially public (Section 14).
 
-### 4.2 Current Implementation
+### 4.2 Historical Reference Repository
 
-The application is a static website hosted through GitHub Pages. There is no build step and no backend.
+https://github.com/cassielu0/nc-ops-console is a **historical / reference repository only**. The application in `nc-ops-console-main/` was originally imported from it.
 
-Current technologies:
+It may be used **only** to:
 
-* HTML / CSS / vanilla JavaScript (inline in HTML files)
-* Leaflet 1.9.4 (map, loaded from CDN)
-* Chart.js 4.4.1 (analytics subpages, loaded from CDN)
-* Data embedded as JSON inside HTML (`<script type="application/json">`)
-* CSV data (`data/price_adjustments.csv`) fetched at runtime
-* GitHub Pages (deploy from branch `main`, root folder)
+* understand the historical implementation;
+* look up earlier UI / interaction patterns;
+* recover historical behavior that is missing from the current repository.
 
-Current application files (in `nc-ops-console-main/`, which mirrors the reference repository root):
+It is **not** a source of new requirements, and old code must not be used to infer what the Product Owner wants now. Always check the current repository first. Do not push changes to it.
+* It is public and has GitHub Pages enabled; anything there is publicly visible.
+
+### 4.3 Repository Layout
+
+```text
+AGENTS.md                         Project-wide rules for all agents (this file)
+CLAUDE.md                         Claude-specific working rules
+docs/                             Requirements, specs, data and workflow docs (Section 6)
+docs/workflow/claude-codex-handoff.md   Claude → Codex handoff process
+scripts/codex-handoff.sh          Optional automated handoff script (Section 7.4)
+nc-ops-console-main/              The application (static site)
+```
+
+Application files (`nc-ops-console-main/`):
 
 ```text
 index.html                     Main network map (Station / DSP / Route / Volume / Price)
@@ -149,11 +154,21 @@ data/price_adjustments.csv     ZIP price sheet (zip,price), applied on page load
 README.md                      Deployment and price-update instructions
 ```
 
+### 4.4 Current Technology
+
+The application is a static website. There is no build step and no backend.
+
+* HTML / CSS / vanilla JavaScript (inline in HTML files)
+* Leaflet 1.9.4 (map, loaded from CDN)
+* Chart.js 4.4.1 (analytics subpages, loaded from CDN)
+* Data embedded as JSON inside HTML (`<script type="application/json">`)
+* CSV data (`data/price_adjustments.csv`) fetched at runtime
+
 Important implementation details:
 
 * `index.html` embeds station / ZIP / DSP / route data in `#mapdata` and ZIP boundaries in `#zipgeo`.
 * The main map logic is stored in `<script type="text/plain" id="mapmain">` and runs only after `data/price_adjustments.csv` has been fetched and applied (route, station, and DSP average prices are recomputed as volume-weighted averages).
-* Opening `index.html` via `file://` cannot fetch the CSV; use a local HTTP server or GitHub Pages.
+* Opening `index.html` via `file://` cannot fetch the CSV; use a local HTTP server or a deployed site.
 * New analytics subpages go in `analytics/` and are linked from the map sidebar (`subweb-link` in `index.html`).
 
 Update this section when the actual structure changes.
@@ -164,33 +179,13 @@ Update this section when the actual structure changes.
 
 Unless a confirmed requirement explicitly says otherwise, do not remove or break:
 
-### Station Interaction
-
-Users can select stations and highlight their related operational areas.
-
-### DSP Interaction
-
-Users can select DSPs and highlight ZIP codes and operational areas related to those DSPs.
-
-### Route Interaction
-
-Users can select routes and visually identify route coverage.
-
-### ZIP Search
-
-Users can search for ZIP codes and navigate directly to them on the map.
-
-### Map Interaction
-
-The existing Leaflet-based map should continue functioning unless a replacement is explicitly requested.
-
-### Price Sheet Workflow
-
-Prices in `data/price_adjustments.csv` are applied on load, and derived average prices recompute from it.
-
-### Existing Views and Pages
-
-Preserve existing useful views such as Station, DSP, Route, Volume, and Price, and the existing analytics subpages.
+* **Station interaction** — users can select stations and highlight their related operational areas.
+* **DSP interaction** — users can select DSPs and highlight related ZIP codes and operational areas.
+* **Route interaction** — users can select routes and visually identify route coverage.
+* **ZIP search** — users can search for ZIP codes and navigate directly to them on the map.
+* **Map interaction** — the Leaflet-based map keeps working unless a replacement is explicitly requested.
+* **Price sheet workflow** — prices in `data/price_adjustments.csv` are applied on load, and derived average prices recompute from it.
+* **Existing views and pages** — Station, DSP, Route, Volume, and Price views, and the existing analytics subpages.
 
 New views may be added later.
 
@@ -201,23 +196,16 @@ New views may be added later.
 ### 6.1 Document Responsibilities
 
 ```text
-AGENTS.md                 Long-term, project-wide rules: roles, workflow, principles,
-                          security, coding standards, review process, testing requirements.
+AGENTS.md                 Long-term, project-wide rules shared by all agents: roles, workflow,
+                          principles, security, coding standards, review, testing.
+CLAUDE.md                 Claude's own working process and behavior rules.
 REQUIREMENTS.md           Current core product capabilities and product-level requirements.
 docs/features/*.md        One file per feature: requirement, spec, Codex tasks, implementation notes.
-docs/open-questions.md    Unresolved business rules and requirement questions.
-docs/data-schema.md       Data fields, granularity, sources, cleaning rules.
-docs/tableau.md           Tableau datasets and dashboards.
+docs/open-questions.md    Unresolved business rules, requirement, and permission questions.
+docs/data-schema.md       Data fields, granularity, sources, freshness, cleaning rules.
+docs/tableau.md           Tableau datasets, dashboards, and integration options.
+docs/workflow/*.md        Development workflow details (e.g. Claude → Codex handoff).
 README.md                 How to run, deploy, and update data.
-```
-
-Example feature files:
-
-```text
-docs/features/station-dashboard.md
-docs/features/dsp-management.md
-docs/features/route-analytics.md
-docs/features/dms-refresh.md
 ```
 
 Not all of these files exist yet. Create them when they are first needed. If a referenced document does not exist, do not invent its contents.
@@ -227,19 +215,15 @@ Not all of these files exist yet. Create them when they are first needed. If a r
 A feature spec should cover, where applicable:
 
 * Feature goal and why it is needed
-* Page / UI changes
-* User flow
-* Interaction logic
-* Data fields and data source (Section 13)
-* Business logic (Section 12 — do not invent rules)
-* Affected modules and files
-* Existing functionality that can be reused
+* Page / UI changes, user flow, interaction logic
+* Data fields and data source (Sections 15–16, `docs/data-schema.md`)
+* Business logic (Section 13 — do not invent rules)
+* Affected modules and files, and existing functionality that can be reused
 * Edge cases, including loading / error / empty states
-* Acceptance criteria
+* Acceptance criteria (numbered and checkable, e.g. AC1, AC2…)
 * Test requirements
-* Risks
-* Security and permission considerations
-* Impact on existing features
+* Risks, security and permission considerations
+* Impact on existing features (Section 5)
 * Status (Draft / Approved / In progress / In review / Awaiting preview sign-off / Done)
 * Codex task list and implementation notes
 
@@ -257,21 +241,21 @@ Documentation must reflect the actual project state. Do not update documentation
 
 ```text
 Product Owner states a requirement
-→ Claude analyzes the requirement
-→ Claude inspects the existing repo
+→ Claude analyzes the requirement and inspects the existing repo
 → Claude organizes the requirement (and raises problems / alternatives)
 → Claude updates REQUIREMENTS.md / feature spec / open questions
-→ Claude gives Codex a clear task
-→ Codex reads AGENTS.md and the relevant spec
-→ Codex gives an implementation plan
-→ Codex changes the code
-→ Codex runs tests / lint / build and checks the result
-→ Claude reviews the diff and results against the spec
-→ Product Owner reviews the preview
+→ Product Owner explicitly authorizes implementation (Section 7.4)
+→ Claude hands Codex a clear task (Section 7.4)
+→ Codex reads AGENTS.md and the relevant spec, gives a plan, changes the code
+→ Codex runs available checks and reports (Sections 10–11)
+→ Claude reviews the diff and results against the spec (Section 8)
+→ Product Owner reviews the preview (Section 9)
 → If changes are needed: Claude updates the spec first → Codex changes again → Claude reviews → Product Owner re-confirms
 ```
 
-Preview feedback (for example "button position", "Station card too crowded", "too many KPIs", "reorder the data") follows the same loop: the spec is updated first, then Codex receives a new, explicit task.
+Preview feedback (for example "button position", "Station card too crowded", "too many KPIs") follows the same loop: the spec is updated first, then Codex receives a new, explicit task.
+
+**Lightweight changes.** Obvious small changes — typo / copy edits, small UI position or style tweaks, small bug fixes that do not change business logic, small documentation fixes — may skip the feature spec and the full handoff documents: Claude judges that the task is lightweight → Claude gives Codex a short, explicit task brief → Codex makes the change and checks the result → Claude does a brief review → report. Codex still makes the code change by default; the lightweight flow does not give Claude permission to edit product code (only an explicit Product Owner request does). A specific small change requested by the Product Owner that Claude judges to be lightweight counts as authorized; no separate confirmation is needed before handing it to Codex. If checking shows it affects business logic, data structures, architecture, or security, or is larger than expected, stop and re-confirm with the Product Owner. Anything touching business rules, data structures, new features, architecture, security, or larger multi-file changes follows the normal spec flow.
 
 ### 7.2 Codex Task Brief
 
@@ -279,14 +263,11 @@ Tasks for Codex must be explicit, executable, and reviewable. Vague tasks such a
 
 Each task brief should state:
 
-* What to implement
-* Which page
-* Expected interaction
+* What to implement, on which page, with what expected interaction
 * Which data to use
 * Which files or modules are likely involved
 * What must not be changed
-* Acceptance criteria
-* Required tests / checks
+* Acceptance criteria and required tests / checks
 * Definition of done
 * Link to the relevant spec
 
@@ -305,24 +286,28 @@ Task 5: Add refresh backend endpoint
 Task 6: Connect approved DMS data source
 ```
 
-For larger changes, Codex must, before modifying code:
+For larger changes, Codex must, before modifying code: read `AGENTS.md`, read the relevant spec, inspect the existing code, provide an implementation plan, and only then start coding.
 
-1. Read `AGENTS.md`
-2. Read the relevant `REQUIREMENTS.md` / feature spec
-3. Inspect the existing code
-4. Provide an implementation plan
-5. Only then start coding
+### 7.4 Claude → Codex Handoff
 
-### 7.4 Automated Handoff (Claude → Codex → Claude)
+Details: `docs/workflow/claude-codex-handoff.md`.
 
-Claude hands tasks to Codex through `scripts/codex-handoff.sh`. Full usage: `docs/workflow/claude-codex-handoff.md`.
+**Trigger.** Codex starts **only** after the Product Owner explicitly authorizes implementation. No fixed wording is required — any clear statement such as "开始实现", "开始做吧", "交给 Codex 实现", or "可以开始写了" counts. Discussing requirements, confirming understanding, or saving a spec does not.
 
-* Claude starts Codex **only** when the Product Owner explicitly says "开始实现" or "运行工作流". Discussing requirements or saving a spec never starts Codex.
+**Handoff mode.** Use whichever works in the current environment:
+
+* **Mode A — automated handoff (optional).** If `scripts/codex-handoff.sh` runs correctly in the current environment, Claude may use it to start Codex and collect the result.
+* **Mode B — manual handoff (default fallback).** If the script is unavailable, fails, or has not been verified in the current environment, Claude writes a complete Codex task brief (Section 7.2), and the Product Owner runs it in the Codex CLI. Claude then reviews the resulting changes.
+
+The automated script is a convenience, not a required step. A failed script run must never block the workflow; switch to Mode B and report the failure.
+
+**Rules for both modes:**
+
 * The spec handed to Codex must list the goal, scope, and checkable acceptance criteria.
 * After each Codex run, Claude reviews the actual code, the diff, and the run result against the acceptance criteria.
-* Claude may send concrete problems back to Codex for **at most two fix rounds**, then reports to the Product Owner.
+* Claude may send concrete problems back to Codex for **at most two fix rounds**, then reports to the Product Owner. Stop immediately and report instead if review finds a requirement conflict, an architecture decision, a data / permission issue, a significant security risk, or anything else the Product Owner must decide — do not let Codex guess.
 * Neither Claude nor Codex commits, pushes, or deploys as part of this workflow.
-* If the Codex CLI call fails, Claude reports the exact error and must not claim the handoff succeeded.
+* If a Codex run or the handoff script fails, Claude reports the exact error and must not claim the handoff succeeded.
 
 ---
 
@@ -330,13 +315,7 @@ Claude hands tasks to Codex through `scripts/codex-handoff.sh`. Full usage: `doc
 
 Claude reviews Codex's work. Review is not only "does the code run" — compare the implementation with the original requirement and spec item by item.
 
-Review inputs, in priority order:
-
-* Original requirement
-* Feature spec
-* Diff of the change (`git diff` when available)
-* Affected files
-* Test / lint / build results
+Review inputs, in priority order: original requirement, feature spec, diff of the change (`git diff` when available), affected files, test / lint / build results.
 
 Review checklist:
 
@@ -363,24 +342,14 @@ When problems are found, Claude states each problem and the suggested fix clearl
 
 For frontend or UI work, **passing tests does not mean the feature is done**.
 
-The Product Owner must be able to see a real preview and confirm:
+The Product Owner must be able to see a real preview and confirm page layout, visual appearance, interaction, text, data display, information hierarchy, and user experience.
 
-* Page layout
-* Visual appearance
-* Interaction
-* Text
-* Data display
-* Information hierarchy
-* User experience
-
-The Product Owner's product judgment takes priority over an AI's opinion of whether the UI is "reasonable".
-
-A UI feature is done only after Product Owner sign-off.
+The Product Owner's product judgment takes priority over an AI's opinion of whether the UI is "reasonable". A UI feature is done only after Product Owner sign-off.
 
 Preview options:
 
-* Local preview: run a static server from the app folder (for example `python3 -m http.server`) and open `http://localhost:8000/`.
-* Publishing a preview to the public GitHub Pages site is an outward-facing action and requires Product Owner approval first.
+* Local preview: run any static server from `nc-ops-console-main/` (for example `python -m http.server 8000` or `npx http-server -p 8000`) and open `http://localhost:8000/`.
+* Publishing a preview to any public GitHub Pages site is an outward-facing action and requires Product Owner approval first.
 
 ---
 
@@ -390,11 +359,8 @@ Preview options:
 
 After meaningful changes, check at minimum:
 
-* Page loads successfully
-* Map loads successfully
-* Station selection works
-* DSP selection works
-* Route selection works
+* Page loads successfully and the map loads successfully
+* Station, DSP, and Route selection work
 * ZIP search works
 * Price sheet is applied (status line shows loaded ZIPs)
 * Existing data still appears
@@ -407,7 +373,7 @@ After meaningful changes, check at minimum:
 * If the project has lint, build, or test commands configured, Codex must run them and report the results.
 * The project currently has **no** package manager, lint configuration, build step, or automated test suite. In that case Codex must say so explicitly and must not claim that lint/build/tests were run.
 * When possible, add automated tests for reusable logic (for example CSV parsing and price aggregation).
-* Introducing a toolchain (npm, bundler, linter, test framework) is an architecture change: propose it first and get Product Owner approval.
+* Tooling that changes the production runtime, build, deployment, or dependency architecture needs Product Owner approval first. Temporary development, local check, and preview tools may be used without approval, but say what was run. Do not add permanent project dependencies (e.g. `package.json`) without approval.
 
 ### 10.3 Reporting
 
@@ -419,29 +385,14 @@ Report results honestly. If a check failed or was skipped, say so and include th
 
 After completing significant work, Codex provides a short summary containing:
 
-### Files Changed
+* **Files Changed** — which files were created or modified
+* **What Changed** — what functionality was added or updated
+* **Data Changes** — any data schema or dataset changes
+* **Checks Run** — which tests / lint / build / manual checks were run, and their results
+* **Assumptions** — any assumptions made during implementation
+* **Remaining Work** — any incomplete functionality or recommended next steps
 
-Which files were created or modified.
-
-### What Changed
-
-What functionality was added or updated.
-
-### Data Changes
-
-Any data schema or dataset changes.
-
-### Checks Run
-
-Which tests / lint / build / manual checks were run, and their results.
-
-### Assumptions
-
-Any assumptions made during implementation.
-
-### Remaining Work
-
-Any incomplete functionality or recommended next steps.
+When the task has acceptance criteria, also state for each one whether it is met.
 
 ---
 
@@ -453,61 +404,41 @@ Any incomplete functionality or recommended next steps.
 * Prefer extending the current implementation over rebuilding equivalent functionality from scratch.
 * Before implementing a feature, inspect the relevant existing files first.
 * Avoid touching unrelated files.
-* Avoid unnecessary large-scale rewrites or refactors.
-* Do not overturn the existing implementation just because another architecture looks "cleaner".
+* Avoid unnecessary large-scale rewrites or refactors, and do not overturn the existing implementation just because another architecture looks "cleaner".
 * If a proposed change conflicts with the current architecture, explain the conflict before implementation.
 * If existing code has clear technical debt, propose improvements, but do not perform a large rewrite without Product Owner confirmation.
 * Explain assumptions when requirements are unclear.
 * Document significant architecture changes.
 
-Prefer:
-
-```text
-Existing functionality
-+ better structure
-+ better data
-+ new features
-```
-
-over:
-
-```text
-Complete rewrite
-```
+Prefer "existing functionality + better structure + better data + new features" over "complete rewrite".
 
 ### Code Organization
 
 The current project contains large HTML files. Do not refactor purely for aesthetic reasons.
 
-Refactor only when it materially improves maintainability, reusability, testing, data management, feature development, or performance.
-
-A possible future structure may include `src/`, `components/`, `services/`, `data/`, `analytics/`, `docs/`, but migration must be gradual, justified, and approved.
+Refactor only when it materially improves maintainability, reusability, testing, data management, feature development, or performance. A possible future structure may include `src/`, `components/`, `services/`, `data/`, `analytics/`, `docs/`, but migration must be gradual, justified, and approved.
 
 ### Comments
 
-Add comments when they explain business logic, non-obvious calculations, data cleaning rules, complex interactions, or important architecture decisions.
+Add comments when they explain business logic, non-obvious calculations, data cleaning rules, complex interactions, or important architecture decisions. Avoid comments that simply repeat the code.
 
-Avoid comments that simply repeat the code.
+Source code comments are in English by default; follow the existing comment language of the file being edited. Documentation aimed at operations staff may be in Chinese. If the Product Owner asks for another language, follow that.
 
-Follow the existing comment language of the file being edited (existing code uses English comments). For new files, use Chinese comments unless the Product Owner specifies otherwise.
+### Environment
+
+The primary development environment is Windows + VS Code + PowerShell. Scripts and instructions should either work on Windows or clearly state their platform requirements. Detect which tools (Python, Node, CLIs) are available when needed instead of assuming.
 
 ---
 
 ## 13. Business Rules
 
-Do not invent operational business rules.
+Do not invent operational business rules. Examples include:
 
-Examples include:
-
-* What counts as an Easy route
-* What counts as a Hard route
-* Minimum acceptable PPH
-* Minimum acceptable Delivery Success Rate
+* What counts as an Easy / Hard route
+* Minimum acceptable PPH or Delivery Success Rate
 * Which DSP should receive a route
-* DSP qualification rules
-* Route pricing rules
+* DSP qualification rules, route pricing rules, route allocation rules
 * Driver requirements
-* Route allocation rules
 
 If a business rule is not clearly defined:
 
@@ -525,6 +456,8 @@ Example entry:
 - Should volume affect difficulty?
 ```
 
+The application provides decision-support information (for example for route reallocation). It must not automatically make final business decisions unless explicitly required.
+
 ---
 
 ## 14. Security and Data Protection
@@ -541,8 +474,8 @@ Example entry:
 ### 14.2 Internal Data and Public Deployment
 
 * Frontend code deployed to GitHub Pages is visible to anyone who can open the site. Data embedded in HTML, JSON, or CSV is equally public.
-* If the repository or GitHub Pages site is public, real GOFO internal operational data must **not** be published to it by default.
-* Never commit private employee information or sensitive DSP contact information.
+* If a repository or its GitHub Pages site is public, real GOFO internal operational data must **not** be published to it by default.
+* Never commit private employee information or sensitive DSP contact information. DSP contact person / contact information must never appear on a public page.
 * If production or sensitive data is needed, review the deployment architecture (access control, private hosting, backend) with the Product Owner first.
 * Any change that adds new real data to a public page requires explicit Product Owner confirmation that the data may be public.
 
@@ -554,7 +487,7 @@ When a task involves GOFO internal data, DMS, internal APIs, scrapers, browser a
 * Permissions and the principle of least privilege
 * Whether automated access / scraping is allowed
 * Whether the data may be made public
-* Whether internal data could be exposed through the public GitHub Pages site
+* Whether internal data could be exposed through a public GitHub Pages site
 
 If DMS integration is needed, prefer in this order:
 
@@ -568,16 +501,7 @@ Do not store account sessions or cookies in the frontend without explicit confir
 
 ## 15. Data Sources and Freshness
 
-Every data-update mechanism must state its data source and its type:
-
-* Manual maintenance
-* CSV / Excel
-* Google Sheet
-* API
-* Database
-* Scraper
-* Browser automation
-* Internal system
+Every data-update mechanism must state its data source and its type (manual maintenance, CSV / Excel, Google Sheet, API, database, scraper, browser automation, internal system).
 
 Record this in the feature spec and in `docs/data-schema.md`.
 
@@ -589,115 +513,19 @@ If data is not real-time, the UI must show a **Last Updated** time or a similar 
 
 Prefer structured and reusable data. Avoid duplicating the same business data across multiple pages or components when possible.
 
-The long-term goal is a flow similar to:
-
-```text
-Raw Data
-   ↓
-Data Cleaning
-   ↓
-Structured Dataset
-   ↓
-Database / API
-   ↓
-Web Dashboard + Tableau
-```
+The long-term flow is: Raw Data → Data Cleaning → Structured Dataset → Database / API → Web Dashboard + Tableau.
 
 During the prototype stage the project may continue using CSV, Excel, embedded JSON, or static data. Do not introduce unnecessary backend infrastructure before it is needed.
 
-### 16.1 Core Operational Metrics
+Project-wide data rules (field-level details, metric definitions, and candidate fields are in `docs/data-schema.md`):
 
-Design to support these fields where available:
-
-```text
-Date
-Region
-Station
-Route
-ZIP
-DSP
-Daily Volume
-PPH
-Delivery Success Rate
-Price
-Difficulty
-Driver Count
-DSP Capacity
-```
-
-Additional fields may be introduced later. Do not assume every dataset contains every field.
-
-### 16.2 Excel and CSV Data
-
-Source files may have different column names, missing values, duplicate records, different date formats, and different DSP / Route / ZIP naming conventions.
-
-When preparing data:
-
-1. Preserve the original raw source when possible.
-2. Perform cleaning in a reproducible (scripted) way.
-3. Avoid manual one-off transformations when they can be scripted.
-4. Document important cleaning rules.
-5. Do not overwrite raw source files unless explicitly requested.
-
-### 16.3 ZIP Codes
-
-Treat ZIP codes as strings, not numbers (for example `"94005"`, `"94112"`), to preserve leading zeros and avoid formatting problems.
-
-### 16.4 PPH
-
-* Preserve the original source value.
-* Do not invent missing PPH values.
-* Clearly distinguish actual values from calculated estimates.
-* Support analysis at ZIP, Route, Station, and DSP level when appropriate.
-* Document the calculation method for aggregated PPH metrics.
-
-### 16.5 Volume
-
-Volume may exist at ZIP, Route, Station, DSP, and Date level. Values from different aggregation levels are not interchangeable. Make sure totals and averages use correct aggregation logic.
-
-### 16.6 Delivery Success Rate
-
-Use **Delivery Success Rate** as the English name unless another internal term is specified. Do not confuse it with **On-Time Delivery Rate** — they are different concepts.
-
-### 16.7 Route Difficulty
-
-Possible categories: Easy, Medium, Hard, Very Hard.
-
-Do not hardcode difficulty rules unless approved or explicitly provided. Possible inputs include PPH, volume, delivery density, distance, Delivery Success Rate, and historical performance. Difficulty logic must remain configurable.
-
-### 16.8 DSP Resource Pool
-
-Potential fields:
-
-```text
-DSP Name
-Operating Area
-Current Station
-Current Routes
-Driver Count
-Maximum Daily Capacity
-Available Capacity
-Interested Area
-Local Resources
-Contact Person
-Contact Information
-Status
-Notes
-```
-
-Do not expose contact information in a public GitHub Pages deployment (Section 14).
-
-### 16.9 Route Reallocation
-
-Example use case: if a DSP's routes are released, which existing or new DSPs could take them?
-
-Analysis may use capacity, current volume, driver availability, existing routes, route difficulty, PPH, delivery performance, and local readiness.
-
-The application provides decision-support information. It must not automatically make final business decisions unless explicitly required.
-
-### 16.10 Mock Data
-
-Use mock data when real data is unavailable or cannot be public. Mock data must be clearly distinguishable from real operational data (labelled in the UI and in file names / metadata). Never present fabricated numbers as real business data.
+* **Raw data** — preserve the original raw source when possible; perform cleaning in a reproducible (scripted) way; document important cleaning rules; do not overwrite raw source files unless explicitly requested.
+* **ZIP codes** — treat ZIP codes as strings, not numbers (for example `"94005"`), to preserve leading zeros.
+* **No invented values** — do not invent missing values (for example PPH). Clearly distinguish actual source values from calculated estimates, and document aggregation methods.
+* **Aggregation levels** — values from different aggregation levels (ZIP / Route / Station / DSP / Date) are not interchangeable; totals and averages must use correct aggregation logic.
+* **Terminology** — use **Delivery Success Rate**; do not confuse it with On-Time Delivery Rate.
+* **Configurable logic** — derived classifications such as route difficulty must remain configurable and must not be hard-coded without approval (Section 13).
+* **Mock data** — use mock data when real data is unavailable or cannot be public. Mock data must be clearly labelled (in the UI and in file names / metadata). Never present fabricated numbers as real business data.
 
 ---
 
@@ -705,71 +533,19 @@ Use mock data when real data is unavailable or cannot be public. Mock data must 
 
 Tableau is an analytics layer that complements the web dashboard rather than replacing it.
 
-### Web Dashboard Focus
+* Web dashboard focus: interactive map, Station / DSP / Route navigation, ZIP-level operations, DSP resource management, operational workflows, route allocation tools.
+* Tableau focus: historical trends, PPH, volume, Delivery Success Rate, DSP and route performance, route difficulty, operational reporting.
+* Tableau datasets must have a clearly defined row granularity; do not mix granularities in one dataset unless the structure explicitly supports it.
+* Do not assume Tableau must be embedded; keep the integration approach flexible until confirmed.
+* Tableau credentials follow Section 14.
 
-Interactive map, Station / DSP / Route navigation, ZIP-level operations, DSP resource management, operational workflows, route allocation tools.
-
-### Tableau Focus
-
-Historical trends, PPH analysis, volume analysis, Delivery Success Rate, DSP performance, route performance, route difficulty analysis, operational reporting.
-
-### Initial Tableau Metrics
-
-```text
-Station
-Route
-ZIP
-DSP
-Daily Volume
-PPH
-Delivery Success Rate
-Difficulty
-Date
-```
-
-Possible visualizations: Route Volume Comparison, ZIP PPH Comparison, PPH vs Volume, DSP Performance, Route Difficulty Distribution, Delivery Success Rate Trends, Station Performance.
-
-### Tableau Data Preparation
-
-Prefer a clean tabular structure, for example:
-
-```text
-Date | Station | Route | ZIP | DSP | Volume | PPH | Delivery Success Rate | Difficulty
-```
-
-Each row must have a clearly defined granularity. Do not mix ZIP-level and Station-level rows in one dataset unless the structure explicitly supports it.
-
-### Tableau Integration
-
-Do not assume Tableau must be embedded. Possible approaches:
-
-* A: Web dashboard and Tableau remain separate
-* B: Tableau dashboards are linked from the web application
-* C: Selected Tableau views are embedded later
-* D: Both systems use the same central database
-
-Keep the architecture flexible until requirements are confirmed. Tableau credentials follow Section 14.
+Datasets, metrics, visualizations, and integration options: `docs/tableau.md`.
 
 ---
 
 ## 18. Database and API
 
-A database and API may be introduced later. Possible architectures:
-
-```text
-Database → API → Web Dashboard
-Database → Tableau
-```
-
-or:
-
-```text
-Database
-      ↓
-     API
-   ↙     ↘
-Web     Tableau
-```
+A database and API may be introduced later, for example `Database → API → Web Dashboard` and `Database → Tableau`, or a shared database behind one API serving both.
 
 Do not introduce a database or API before it is needed and approved. Credentials follow Section 14.
 
@@ -777,29 +553,12 @@ Do not introduce a database or API before it is needed and approved. Credentials
 
 ## 19. Current Priority
 
-### Phase 1
-
-Understand and preserve the existing NorCal Operations Console.
-
-### Phase 2
-
-Prepare operational datasets for Tableau.
-
-### Phase 3
-
-Create initial Tableau route analytics (PPH, Daily Volume, Delivery Success Rate, Route, ZIP, DSP, Station).
-
-### Phase 4
-
-Improve the web dashboard using the newly structured data.
-
-### Phase 5
-
-Evaluate database/API integration.
-
-### Phase 6
-
-Add DSP Resource Pool and route reallocation capabilities.
+1. Understand and preserve the existing NorCal Operations Console.
+2. Prepare operational datasets for Tableau.
+3. Create initial Tableau route analytics (PPH, Daily Volume, Delivery Success Rate, Route, ZIP, DSP, Station).
+4. Improve the web dashboard using the newly structured data.
+5. Evaluate database/API integration.
+6. Add DSP Resource Pool and route reallocation capabilities.
 
 The exact order may change based on operational needs. The Product Owner decides the order.
 
@@ -809,19 +568,7 @@ The exact order may change based on operational needs. The Product Owner decides
 
 The purpose of this project is not simply to create attractive dashboards.
 
-The system should help the Northern California operations team:
-
-* Understand the network
-* Identify operational problems
-* Compare routes
-* Compare ZIP performance
-* Analyze DSP performance
-* Understand PPH
-* Understand package volume
-* Track delivery performance
-* Manage DSP resources
-* Evaluate route reallocation scenarios
-* Make better operational decisions
+The system should help the Northern California operations team understand the network, identify operational problems, compare routes and ZIP performance, analyze DSP performance, understand PPH and package volume, track delivery performance, manage DSP resources, evaluate route reallocation scenarios, and make better operational decisions.
 
 Build features with this operational purpose in mind.
 
@@ -829,8 +576,7 @@ Build features with this operational purpose in mind.
 
 ## 21. Communication Language
 
-* Respond to the user in Chinese by default.
-* Use clear and natural Simplified Chinese.
+* Respond to the user in Chinese by default, in clear and natural Simplified Chinese.
 * Keep code, variable names, file names, commands, API names, library names, and technical identifiers in their original English form.
 * When technical terms are easier to understand in English, include the English term in parentheses after the Chinese explanation.
 * Do not switch to English unless the user explicitly asks for English.
