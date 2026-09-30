@@ -298,10 +298,10 @@ Details: `docs/workflow/claude-codex-handoff.md`.
 
 **Handoff mode.** Use whichever works in the current environment:
 
-* **Mode A — automated handoff (optional).** If `scripts/codex-handoff.sh` runs correctly in the current environment, Claude may use it to start Codex and collect the result.
-* **Mode B — manual handoff (default fallback).** If the script is unavailable, fails, or has not been verified in the current environment, Claude writes a complete Codex task brief (Section 7.2), and the Product Owner runs it in the Codex CLI. Claude then reviews the resulting changes.
+* **Mode A — automated handoff (preferred).** Claude runs `scripts/codex-handoff.sh` to start Codex, then reviews the saved result and diff, and may send fixes back automatically. Verified on Windows 11 + Git Bash.
+* **Mode B — manual handoff (fallback).** If Mode A fails, or the task needs something the Codex sandbox cannot do, Claude writes a complete Codex task brief (Section 7.2), and the Product Owner runs it in the Codex CLI. Claude then reviews the resulting changes.
 
-The automated script is a convenience, not a required step. A failed script run must never block the workflow; switch to Mode B and report the failure.
+A failed script run must never block the workflow; report the failure and switch to Mode B.
 
 **Rules for both modes:**
 

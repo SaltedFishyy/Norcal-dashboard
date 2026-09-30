@@ -1,0 +1,2 @@
+# 确保 shell 脚本在 Windows checkout 后仍使用 LF
+*.sh text eol=lf

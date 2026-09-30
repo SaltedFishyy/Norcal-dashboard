@@ -14,7 +14,7 @@
 
 ## Claude → Codex 自动交接
 
-- [ ] 是否要修复 `scripts/codex-handoff.sh` 使其在 Windows Git Bash 下可用？现状见 `docs/workflow/claude-codex-handoff.md` 第 6 节。修复前默认使用手动交接（Mode B）。
+- [x] 修复 `scripts/codex-handoff.sh` 使其在 Windows Git Bash 下可用 → 已修复并通过 smoke test（2026-09-30），Mode A 为优先方式。见 `docs/workflow/claude-codex-handoff.md` 第 6 节。
 
 ## DMS 数据刷新
 

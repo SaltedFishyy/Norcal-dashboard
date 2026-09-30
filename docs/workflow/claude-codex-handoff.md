@@ -14,24 +14,37 @@
 
 ## 2. 两种交接方式
 
-**先确认 spec 已写好：** 目标、涉及范围、可检查的验收标准（AC1、AC2…）。
+**先确认 spec / task brief 已写好：** 目标、涉及范围、可检查的验收标准（AC1、AC2…）。任务文件必须放在仓库内（正式 spec 放 `docs/features/`；临时 task brief 可放 `.handoff/briefs/`，已被 gitignore）。
 
-### Mode A — 自动交接（可选）
+### Mode A — 自动交接（优先）
 
-仅在 `scripts/codex-handoff.sh` 已在当前环境验证可用时使用（当前 Windows 环境**未满足**，见第 6 节）。
+2026-09-30 起在 Windows 11 + Git Bash 上验证通过（见第 6 节），**默认优先使用**。
 
 ```text
-1. 第 0 轮：bash scripts/codex-handoff.sh docs/features/<slug>.md
-2. Claude 审查：last-message.md、changes.diff、实际代码，逐条核对验收标准
-3. 有问题：Claude 写 review 文件，交回 Codex 修复
-      bash scripts/codex-handoff.sh docs/features/<slug>.md --fix <review.md> --round 1
-   仍有问题最多再来一轮 --round 2
-4. Claude 向 Product Owner 汇报
+1. 第 0 轮：bash scripts/codex-handoff.sh <task.md>
+2. Claude 审查（自动进行，不需要 Product Owner 转述）：
+   - 读 last-message.md（Codex 总结）和 changes.diff / changed-files.txt（本轮实际变化）
+   - 检查实际文件，必要时运行测试
+   - 按 AGENTS.md 第 8 节逐条对照 spec 和验收标准
+3. 有问题：Claude 写 review 文件 .handoff/reviews/<slug>-r<轮次>.md，自动交回 Codex 修复
+      bash scripts/codex-handoff.sh <task.md> --fix <review.md> --round 1
+   仍有问题最多再来一轮 --round 2（脚本拒绝 --round 3 及以上）
+4. Claude 向 Product Owner 汇报：改了什么、验收结果、仍存在的问题、如何本地预览
 ```
 
-脚本失败时：Claude 原样报告错误，不声称交接成功，改用 Mode B。
+**以下情况立即停止自动修复，直接向 Product Owner 汇报**（不为了用满两轮而让 Codex 猜）：
 
-### Mode B — 手动交接（默认后备）
+- 需求冲突（requirement conflict）
+- 架构决策（architecture decision）
+- 安全 / 权限问题（security / permission issue）
+- 数据含义不明确（data ambiguity）
+- 其他需要 Product Owner 决定的问题
+
+脚本或 Codex 失败时：Claude 读取 `stderr.log` 和 `exit-code`，原样报告错误，不声称交接成功；需要时改用 Mode B。
+
+### Mode B — 手动交接（fallback）
+
+适用于：Mode A 失败；任务需要 Codex 沙箱做不到的操作（例如联网安装依赖，见第 6 节已知限制）；或 Product Owner 希望自己在 Codex CLI 里交互执行。
 
 ```text
 1. Claude 输出完整的 Codex task brief（AGENTS.md 第 7.2 节），并注明 spec 路径
@@ -55,27 +68,40 @@ spec 不清楚或与现有代码冲突时停止并说明，不要猜测。
 
 ### 两种方式共同规则
 
-- 修复最多 **2 轮**。两轮后仍未通过，Claude 停止并如实汇报。遇到需要 Product Owner 决定的问题时立即停止（`AGENTS.md` 第 7.4 节）。
-- review 问题写明：位置、现象、期望、对应验收标准。Mode A 的 review 文件放在 `.handoff/reviews/<slug>-r<轮次>.md`。
+- 修复最多 **2 轮**。两轮后仍未通过，Claude 停止并如实汇报。遇到上面列出的需要 Product Owner 决定的问题时立即停止（`AGENTS.md` 第 7.4 节）。
+- review 问题写明：位置、现象、期望、对应验收标准。
 - UI 功能在 Product Owner 预览确认前不算完成（`AGENTS.md` 第 9 节）。
 
 ## 3. 脚本说明：`scripts/codex-handoff.sh`
 
-它做的事：
+1. `set -euo pipefail`；启动前检查 `git`、`codex`，缺失时立即退出（退出码 127）。任务文件不存在、不在仓库内、修复轮缺少 review 文件、轮次超过 2 时也会立即退出。
+2. **运行前快照：** 记录 `git status`，并用临时 git index 把整个工作区（tracked + untracked，排除 gitignored）写成一个 tree 对象。不修改真实 index，也不修改任何文件；快照失败时停止，不会启动 Codex。
+3. 生成 `prompt.md`：要求 Codex 先读 AGENTS.md 和任务文件、检查当前仓库结构、不假设项目是纯静态站、只做任务范围内改动、不清楚就停止、禁止 commit / push / 部署 / 写入凭据、按第 11 节格式总结。
+4. 调用：`codex exec -C <仓库根> -s workspace-write --color never --json -o last-message.md -`（Windows 下路径自动转换为原生格式）。
+5. **运行后快照**，对比前后两个 tree 生成 `changes.diff` 和 `changed-files.txt`。因此：
+   - 运行前已存在的未提交改动（例如另一个进行中的任务）**不会**被算作本轮改动；
+   - 新建的 untracked 文件会被捕获。
+6. Codex 失败时也会生成全部产物。退出码非 0 或没有最终回复时，脚本以非 0 退出并打印 `stderr.log` 末尾。
 
-1. 运行前用 `rsync` 给仓库做快照，用于生成本轮 diff（脚本编写时仓库还不是 git 仓库；现在已是 git 仓库，也可以直接用 `git diff`）。
-2. 生成指令 `prompt.md`：要求 Codex 读 AGENTS.md 和 spec、只做 spec 范围、禁止 commit/push/部署、按第 11 节格式总结。
-3. 调用：`codex exec -C <仓库根> -s workspace-write --skip-git-repo-check --json -o last-message.md`
-   - `workspace-write`：Codex 只能写仓库目录，默认无网络。
-4. 运行后生成 `changes.diff`，打印变更文件和退出码。
-5. Codex 退出码非 0 或没有最终回复时，脚本以非 0 退出并打印 stderr 末尾。
+每次运行的产物在 `.handoff/runs/<时间戳>-<任务名>-r<轮次>/`（已被 gitignore，仅本地保留）：
 
-每次运行的产物在 `.handoff/runs/<时间戳>-<slug>-r<轮次>/`（已加入 `.gitignore`，仅本地保留）。
+| 文件 | 内容 |
+|---|---|
+| `prompt.md` | 发给 Codex 的完整指令 |
+| `status-before.txt` / `status-after.txt` | 运行前 / 后的 `git status --porcelain`（含 untracked） |
+| `changes.diff` | 本轮 Codex 造成的变化 |
+| `changed-files.txt` | 本轮变化的文件清单（A / M / D） |
+| `last-message.md` | Codex 最终回复（失败时可能为空） |
+| `events.jsonl` | Codex 事件流 |
+| `stderr.log` | Codex 标准错误输出 |
+| `exit-code` | Codex 退出码 |
+| `snapshot.log` | 快照过程的 git 警告（通常为空） |
 
 ## 4. 安全边界
 
 - 脚本、Claude 和 Codex 都不会 `git commit`、`git push`、部署或发布 GitHub Pages。
 - 不向 Codex 传递任何凭据；Codex 使用本机已登录的账户。
+- gitignored 文件（如 `.env`）不会进入快照和 diff。
 - 涉及真实内部数据上公开页面时，仍需 Product Owner 按 `AGENTS.md` 第 14 节确认。
 
 ## 5. 手动运行脚本
@@ -87,25 +113,20 @@ cd C:\Users\kenny\OneDrive\Desktop\Norcal-dashboard
 bash scripts/codex-handoff.sh docs/features/<slug>.md
 ```
 
-（macOS / Linux 下可直接运行 `scripts/codex-handoff.sh ...`。）
+（macOS / Linux 下可直接运行 `scripts/codex-handoff.sh ...`。）`.gitattributes` 固定 `*.sh` 为 LF 换行，Windows checkout 后仍可执行。
 
 ## 6. 平台兼容性与验证记录
 
 | 日期 | 环境 | 结果 |
 |---|---|---|
-| 2026-09-28 | macOS（原开发机） | `docs/features/handoff-smoke-test.md` 冒烟测试通过 |
-| 2026-09-30 | Windows 11 + Git Bash（MSYS2 bash 5.3），codex-cli 0.159.2 | **未通过完整运行（未启动 Codex）**。参数检查正常；但发现下列问题 |
+| 2026-09-28 | macOS（原开发机），旧版脚本（rsync 快照） | `docs/features/handoff-smoke-test.md` 冒烟测试通过 |
+| 2026-09-30 | Windows 11 + Git Bash（MSYS2 bash 5.3），codex-cli 0.159.2，旧版脚本 | 不可用：缺 `rsync`，会误报“无文件变更” |
+| 2026-09-30 | 同上，**新版脚本（git 快照）** | **通过。** 第 0 轮：Codex 新建临时文件，`changes.diff` 正确捕获（A），`exit-code` 为 0，`last-message.md` 正常，`status-before/after` 只多出该文件；当时工作区有 T1 的未提交改动，未被误算。第 1 轮（`--fix --round 1`）：修改该文件，diff 正确捕获（M）。模拟 Codex 失败（退出码 7）：全部产物保留，脚本以 7 退出。`--round 3`、缺少 `git` / `codex` 时正确拒绝。测试文件已清理。单次运行约 40 秒 |
 
-Windows 下的已知问题（2026-09-30 检查，未修改脚本）：
+已知限制：
 
-1. **缺少 `rsync`**：Git for Windows 默认不带 `rsync`。脚本没有检查它，且未使用 `set -e`，因此快照失败后仍会继续启动 Codex；之后 `diff` 对比不存在的快照目录会直接报错，`changes.diff` 为空，脚本会打印“（无文件变更）”——即使 Codex 实际改了文件。审查结果会被误导。
-2. **CRLF 换行**：本机 `core.autocrlf=true`，检出的 `.sh` 是 CRLF。本机 Git Bash 目前能执行，但不同 bash 环境可能报错。仓库没有 `.gitattributes` 固定 `*.sh` 为 LF。
-3. **PowerShell 不能直接运行**：必须通过 `bash scripts/codex-handoff.sh`。
-4. **文档路径过时**：旧版本文件中的 `cd ~/Desktop/北加州数据看板` 是原 macOS 路径（已在本版更正）。
-
-可能的修复方向（需 Product Owner 同意后，作为单独的 Codex 任务）：
-
-- 用 `git diff` / `git status` 代替 `rsync` 快照（仓库现在是 git 仓库）；或在缺少 `rsync` 时退回 `cp -a`。
-- 启动 Codex 前检查所有依赖命令，缺失时立即退出。
-- 新增 `.gitattributes`：`*.sh text eol=lf`。
-- 修复后在 Windows 上重新跑一次冒烟测试，并更新本节记录。
+1. **Codex 沙箱的限制：** `workspace-write` 下 Codex 默认不能联网，在 Windows 上曾因 EACCES / EPERM 无法完成 `npm install` 等操作（T1 时遇到）。`codex exec` 是非交互的，无法中途请求批准。需要安装依赖或联网的任务，改用 Mode B，或由 Product Owner 先完成安装。
+2. **gitignored 文件的变化不会被捕获**（例如 `node_modules/`、`.env`、`.handoff/`）。这是有意的设计；需要时 Claude 另行检查。
+3. **运行期间不要手动修改仓库文件**，否则这些修改会被计入本轮 Codex 的改动。
+4. **Claude 工具超时：** Claude 的单条命令最长 10 分钟。预计更长的任务，Claude 应在后台运行脚本，并等待完成通知。
+5. 快照会在 `.git/objects` 中留下少量松散对象，不影响仓库，`git gc` 会清理。
