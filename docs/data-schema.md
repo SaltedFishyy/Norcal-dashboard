@@ -126,3 +126,30 @@ Notes
 - 真实数据不可用或不能公开时使用 mock data。
 - Mock data 必须在 UI 和文件名 / 元数据中明确标注。
 - 不得把编造的数字当作真实业务数据展示。
+
+---
+
+## 8. Route Profile（路区画像，DMS 刷新）
+
+- 规格：`docs/features/dms-refresh.md`（Draft v2）
+- 来源类型：Scraper / browser automation（Playwright，使用 Product Owner 本人的 DMS 登录态），只在用户点击刷新时运行
+- 粒度：一行 = 一个 Station 下的一条 Route（最新一次成功抓取）
+- 新鲜度：每个 Station 单独记录 `fetched_at`（Last Updated）；第一阶段不保存历史
+- 存储：本机 runtime 目录中的 `route-profiles.json`（不进 Git）
+
+| 字段 | 类型 | 定义 | 状态 |
+|---|---|---|---|
+| `station` | string | Station 代码，如 `SFO01` | 已确认 |
+| `route_name` | string | DMS 原值 | 已确认 |
+| `dsp_name` | string | DSP / Fleet Name，DMS 原值 | 已确认 |
+| `pickup_volume` | number \| null | **领件量**。不是 Daily Volume，不要混用 | 统计窗口待确认（D6） |
+| `pph` | number \| null | DMS 原值，不自行计算 | 已确认 |
+| `first_mile_distance` | number \| null | DMS 原值 | 单位 / 口径待确认（D2） |
+| `address_type_distribution` | object | 地址类型 → 占比或数量 | 结构待确认（D3） |
+| `route_difficulty` | string \| null | 只存 DMS 提供的值，不自行推算 | 来源待确认（D4） |
+| `fetched_at` | ISO datetime（Station 级） | 该 Station 最近一次成功抓取的时间 | 已确认 |
+| `source_as_of` | ISO datetime \| null | DMS 页面显示的数据截至时间（如有） | 待 T4 确认 |
+
+Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Station，**不从 `route_name` 解析**（即使形如 `SFO02-042`）。第一阶段逻辑标识 = `station + route_name`；以后如果能拿到稳定的 DMS route ID，再引入唯一 ID。
+
+术语：`pickup_volume` 与 legacy `#mapdata` 中的 `volume` 口径不同，两者不能直接比较或合并。

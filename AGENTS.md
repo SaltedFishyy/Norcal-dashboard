@@ -158,6 +158,8 @@ README.md                      Deployment and price-update instructions
 
 The application is a static website. There is no build step and no backend.
 
+This static site is the existing prototype / legacy implementation, not a constraint on the final architecture. With Product Owner approval, a frontend/backend architecture may be introduced (see `docs/features/dms-refresh.md`); reuse the legacy site's good UI, interaction, and data patterns rather than rewriting them without reason.
+
 * HTML / CSS / vanilla JavaScript (inline in HTML files)
 * Leaflet 1.9.4 (map, loaded from CDN)
 * Chart.js 4.4.1 (analytics subpages, loaded from CDN)
