@@ -146,7 +146,7 @@ Notes
 | `pickup_volume` | number \| null | **领件量**（DMS `receiptQty`）。不是 Daily Volume，不要混用 | 统计窗口待确认（D6） |
 | `pph` | number \| null | DMS 原值，不自行计算 | 已确认 |
 | `first_mile_distance` | number \| null | DMS 原值（`firstOrderMileage`），单位 mile | 已确认（T2） |
-| `address_type_distribution` | object | DMS `receiveAddressType[]`：地址类型 → 占比（每个 Route 合计 1.0） | 已确认（T2） |
+| `address_type_distribution` | array \| null | DMS `receiveAddressType[]` → `[{ type_code, type_name, share }]`，`share` 为占比（每个 Route 合计 1.0） | 已确认（T2 / T3） |
 | `route_difficulty` | string \| null | DMS 系统难易度（`roadAreaDifficulty`，另存 code），不自行推算；前端默认展示 | 已确认（D4b） |
 | `route_difficulty_manual` | string \| null | DMS 人工难易度（`roadAreaDifficultyManual(Name)`），空值为 null | 已确认（D4b） |
 | `fetched_at` | ISO datetime（Station 级） | 该 Station 最近一次成功抓取的时间 | 已确认 |

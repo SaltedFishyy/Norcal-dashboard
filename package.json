@@ -5,6 +5,7 @@
   "engines": { "node": ">=22.9" },
   "scripts": {
     "dms:login": "node --env-file-if-exists=.env server/bin/dms-login.js",
+    "dms:scrape": "node --env-file-if-exists=.env server/bin/dms-scrape.js",
     "test": "node --test server/test/"
   },
   "dependencies": { "playwright": "^1.58.0" }

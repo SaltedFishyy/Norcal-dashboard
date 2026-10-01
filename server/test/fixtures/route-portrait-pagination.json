@@ -1,0 +1,176 @@
+{
+  "_comment": "Sanitized synthetic fixture derived from the structure of DMS roadAreaPortrait queryList/pagination response (T2, 2026-09-30). All values are synthetic. Record 2 has a manual difficulty to cover non-null manual fields.",
+  "code": 200,
+  "success": true,
+  "status": 200,
+  "data": {
+    "records": [
+      {
+        "roadAreaId": 900001,
+        "roadAreaName": "SFO01-901",
+        "sortName": "00-TEST-SFO01-901",
+        "hubShortName": "00",
+        "regionName": "TEST.H",
+        "transitStationName": "SFO01",
+        "fleetName": "DSP-ALPHA",
+        "postalCodeNum": 3,
+        "newOpenFlag": "TEST",
+        "actualPph": 20.5,
+        "actualPPHComparedToYesterday": 0.01,
+        "firstOrderMileage": 12.5,
+        "receiveAddressType": [
+          {
+            "typeCode": "0",
+            "typeName": "独栋住宅 / 别墅",
+            "typeValue": 0.5
+          },
+          {
+            "typeCode": "2",
+            "typeName": "公寓",
+            "typeValue": 0.3
+          },
+          {
+            "typeCode": "5",
+            "typeName": "商业",
+            "typeValue": 0.15
+          },
+          {
+            "typeCode": "10",
+            "typeName": "未知",
+            "typeValue": 0.05
+          }
+        ],
+        "roadAreaDifficultyCode": "3",
+        "roadAreaDifficulty": "A级 难",
+        "safetyLevel": "TEST",
+        "roadAreaStatus": "TEST",
+        "businessModel": "TEST",
+        "currentDayAbnormalAlert": null,
+        "postalCodeList": "00001,00002,00003",
+        "pphP25": 0,
+        "pphP50": 0,
+        "pphP75": 0,
+        "pphDelta": 0,
+        "pphSl": 0,
+        "pphOldSl": 0,
+        "receiptQty": 800,
+        "roadAreaDifficultyManual": null,
+        "roadAreaDifficultyManualName": null,
+        "roadAreaDifficultyJumpCode": null
+      },
+      {
+        "roadAreaId": 900002,
+        "roadAreaName": "SFO01-902",
+        "sortName": "00-TEST-SFO01-902",
+        "hubShortName": "00",
+        "regionName": "TEST.H",
+        "transitStationName": "SFO01",
+        "fleetName": "DSP-BETA",
+        "postalCodeNum": 4,
+        "newOpenFlag": "TEST",
+        "actualPph": 25.25,
+        "actualPPHComparedToYesterday": 0.01,
+        "firstOrderMileage": 8.75,
+        "receiveAddressType": [
+          {
+            "typeCode": "0",
+            "typeName": "独栋住宅 / 别墅",
+            "typeValue": 0.5
+          },
+          {
+            "typeCode": "2",
+            "typeName": "公寓",
+            "typeValue": 0.3
+          },
+          {
+            "typeCode": "5",
+            "typeName": "商业",
+            "typeValue": 0.15
+          },
+          {
+            "typeCode": "10",
+            "typeName": "未知",
+            "typeValue": 0.05
+          }
+        ],
+        "roadAreaDifficultyCode": "2",
+        "roadAreaDifficulty": "B级 中",
+        "safetyLevel": "TEST",
+        "roadAreaStatus": "TEST",
+        "businessModel": "TEST",
+        "currentDayAbnormalAlert": null,
+        "postalCodeList": "00001,00002,00003",
+        "pphP25": 0,
+        "pphP50": 0,
+        "pphP75": 0,
+        "pphDelta": 0,
+        "pphSl": 0,
+        "pphOldSl": 0,
+        "receiptQty": 1000,
+        "roadAreaDifficultyManual": "2",
+        "roadAreaDifficultyManualName": "B级 中",
+        "roadAreaDifficultyJumpCode": null
+      },
+      {
+        "roadAreaId": 900003,
+        "roadAreaName": "SFO01-903",
+        "sortName": "00-TEST-SFO01-903",
+        "hubShortName": "00",
+        "regionName": "TEST.H",
+        "transitStationName": "SFO01",
+        "fleetName": "DSP-ALPHA",
+        "postalCodeNum": 5,
+        "newOpenFlag": "TEST",
+        "actualPph": 18,
+        "actualPPHComparedToYesterday": 0.01,
+        "firstOrderMileage": 30,
+        "receiveAddressType": [
+          {
+            "typeCode": "0",
+            "typeName": "独栋住宅 / 别墅",
+            "typeValue": 0.5
+          },
+          {
+            "typeCode": "2",
+            "typeName": "公寓",
+            "typeValue": 0.3
+          },
+          {
+            "typeCode": "5",
+            "typeName": "商业",
+            "typeValue": 0.15
+          },
+          {
+            "typeCode": "10",
+            "typeName": "未知",
+            "typeValue": 0.05
+          }
+        ],
+        "roadAreaDifficultyCode": "1",
+        "roadAreaDifficulty": "C级 易",
+        "safetyLevel": "TEST",
+        "roadAreaStatus": "TEST",
+        "businessModel": "TEST",
+        "currentDayAbnormalAlert": null,
+        "postalCodeList": "00001,00002,00003",
+        "pphP25": 0,
+        "pphP50": 0,
+        "pphP75": 0,
+        "pphDelta": 0,
+        "pphSl": 0,
+        "pphOldSl": 0,
+        "receiptQty": 650,
+        "roadAreaDifficultyManual": null,
+        "roadAreaDifficultyManualName": null,
+        "roadAreaDifficultyJumpCode": null
+      }
+    ],
+    "total": 3,
+    "size": 100,
+    "current": 1,
+    "pages": 1
+  },
+  "msg": "X",
+  "message": "X",
+  "params": null
+}

@@ -2,6 +2,36 @@ import path from 'node:path';
 
 const pathApi = (platform) => platform === 'win32' ? path.win32 : path.posix;
 
+export function resolveRuntimeDir({ env, platform, homedir, repoRoot }) {
+  const p = pathApi(platform);
+  const override = env.RUNTIME_DATA_DIR?.trim();
+  const base = platform === 'win32' && env.LOCALAPPDATA?.trim()
+    ? p.join(env.LOCALAPPDATA, 'nc-ops-console')
+    : p.join(homedir, '.nc-ops-console');
+  return p.resolve(repoRoot, override || p.join(base, 'runtime-data'));
+}
+
+export function checkRuntimeDir(runtimeDir, repoRoot, platform = process.platform) {
+  const p = pathApi(platform);
+  const absolutePath = p.resolve(repoRoot, runtimeDir);
+  const normalize = (s) => platform === 'win32' ? s.toLowerCase() : s;
+  const relative = p.relative(normalize(p.resolve(repoRoot)), normalize(absolutePath));
+  const warnings = [];
+  if (!relative || (relative !== '..' && !relative.startsWith(`..${p.sep}`) && !p.isAbsolute(relative))) {
+    warnings.push('warning: Runtime 目录位于仓库内，建议使用仓库外的默认路径。');
+  }
+  if (/onedrive|dropbox|google drive|icloud/i.test(absolutePath)) {
+    warnings.push('warning: Runtime 目录包含同步目录名称，建议使用 LOCALAPPDATA 下的默认路径。');
+  }
+  return { path: absolutePath, warnings };
+}
+
+export function parseMaxListRequests(value) {
+  const count = value?.trim() ? Number(value) : 3;
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('MAX_PAGE_LOADS_PER_STATION 必须是正整数。');
+  return count;
+}
+
 export function resolveStatePath({ env, platform, homedir, repoRoot }) {
   const p = pathApi(platform);
   const override = env.DMS_STATE_PATH?.trim();

@@ -239,10 +239,12 @@ runtime-data/
       "source_as_of": null,
       "source": "dms-playwright",
       "rows": [
-        { "station": "SFO01", "route_name": "…", "dsp_name": "…",
+        { "route_id": 0, "station": "SFO01", "route_name": "…", "dsp_name": "…",
           "pickup_volume": 0, "pph": 0, "first_mile_distance": 0,
-          "address_type_distribution": { "…": 0 },
-          "route_difficulty": "…", "raw": { } }
+          "address_type_distribution": [ { "type_code": "0", "type_name": "…", "share": 0.5 } ],
+          "route_difficulty": "…", "route_difficulty_code": "…",
+          "route_difficulty_manual": null, "route_difficulty_manual_code": null,
+          "raw": { }, "parse_errors": [ ] }
       ]
     }
   }
@@ -317,8 +319,8 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 |---|---|---|---|
 | T1 | **Playwright session state / login bootstrap**：`package.json`、Playwright（Chromium）、config（`.env` / `.env.example`）、`.gitignore`（`playwright/.auth/`、`runtime-data/` 作为额外保护）、默认路径基于 `LOCALAPPDATA` 并做路径检查（第 5 节）、`npm run dms:login`（有界面的浏览器 → 手动登录 → 保存 storageState）、验证 storageState 能否保持登录 | Codex 实现，PO 本机运行验证 | — |
 | T2 | **DMS「路区画像」页面摸底**（受控探索，停止条件见第 6.2 节）：PO 本人登录，和 Claude 一起确认页面路径、每个 Station 的请求次数、字段定义（D2–D4、D6），保存清理过的 fixture | PO + Claude | T1 |
-| T3 | **单 Station scraper**：先只抓 SFO01；只读、白名单、请求计数、熔断、session 过期检测；输出原始抓取结果 | Codex 实现，PO 本机运行验证 | T2 |
-| T4 | **标准化输出 JSON**：transform（纯函数，fixture 单元测试）→ runtime data 目录下的 `route-profiles.json`（原子写）+ `last-failure.json` | Codex | T3 |
+| T3 | **单 Station scraper + 标准化输出**（Product Owner 2026-09-30 决定：原 T4 并入 T3）：只抓 SFO01；只读、白名单、请求计数、熔断、session 过期检测；transform（纯函数，fixture 单元测试）→ runtime data 目录下的 `route-profiles.json`（原子写）+ `last-failure.json` | Codex 实现，PO 本机运行验证 | T2 |
+| T4 | （已并入 T3） | — | — |
 | T5 | **多 Station 串行抓取**：`--station SFO01,MFR01`；串行、Station 间隔、文件锁、cooldown、部分成功保留旧数据 | Codex 实现，PO 本机运行验证 | T4 |
 | T6 | **Node backend API**：Express（`127.0.0.1`）、`/legacy/`、第 9 节 API、刷新任务复用 T3–T5 模块、进程内锁 | Codex | T5 |
 | T7 | **Dashboard Refresh button**：`web/` Route Profile 页面（第 8 节），按钮禁用、进度、各状态、Last Updated | Codex，PO 预览签字 | T6 |
@@ -451,3 +453,21 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 #### 停止条件检查
 
 没有触发任何一项：不需要逐 Route 请求，单个 Station 请求很少，没有复杂分页或虚拟滚动带来的额外请求，没有观察到明显负载风险。唯一较重的是页面启动请求，见上方说明。
+
+### T3 — SFO01 单 Station scraper（2026-09-30）
+
+- Product Owner 明确授权执行 `.handoff/briefs/T3-sfo01-scraper.md`；本次只实现 T3，未实现多 Station、页头全局站点切换、lock / cooldown、API、前端或数据库。保留原有 T1 / T2 记录及需求、验收标准。
+- 新增 `server/src/dms/route-profile-page.js`：复用 storageState 打开路区画像页面，通过 T2 已确认的控件选择 SFO01、100 条/页并查询，捕获 POST 列表响应并原样返回。页面层不映射数据字段；统计全部请求及 roadAreaPortrait 请求，默认上限 3，遇到登录失效、控件不可用、超限或 `/prod-api/` 429 / 5xx 即停止并关闭浏览器，不重试。
+- 新增 `server/src/transform/route-profile.js`：无 I/O、无 Playwright 依赖的纯函数；验证响应结构、Station、必需字段、整数且唯一的 route_id 和分页完整性。映射标准行、保留规定来源字段的 raw 值及 parse_errors，单独保存系统 / 人工难易度，不计算运营指标或分类。total 超出当前 records 数量时拒绝，T3 不翻页。
+- 新增 `server/src/store/route-profiles-file.js`：读写 schema_version 为 1 的 route-profiles.json，仅更新本次 Station 并保留其他 Station；使用同目录临时文件 + rename 原子更新。CLI 失败时写 last-failure.json，仅保存固定说明、阶段、错误类型和时间；不写浏览器原始错误、响应内容或 URL，失败不改旧 snapshot。
+- 扩展 `server/src/config.js` / `.env.example`：RUNTIME_DATA_DIR 默认 Windows LOCALAPPDATA 下的 nc-ops-console/runtime-data，无 LOCALAPPDATA 时回退到用户目录；覆盖路径以仓库根目录解析，仓库内及同步目录输出 warning。MAX_PAGE_LOADS_PER_STATION 留空默认 3，要求正整数。T1 session 路径规则和登录行为保持不变。
+- 新增 `server/bin/dms-scrape.js` 和 package.json 的 dms:scrape script。本机使用：`npm.cmd run dms:scrape -- --station SFO01`；可追加 `--headless`，默认有界面。其他 Station、缺少 session 或无效配置在加载浏览器前退出。成功摘要包括 Station、行数、total、list 请求数、输出路径、parse_errors 数量。
+- 新增合成 fixture `server/test/fixtures/route-portrait-pagination.json`（复制 brief 指定样本）与 `server/test/t3.test.js`，接入现有测试入口。`npm.cmd test` 离线通过 **70 项**（T1 原有 25 项 + T3 新增 45 项）。覆盖字段 / raw / manual 映射、数字转换、schema 拒绝、空数据、存储原子性与失败保留、配置 warning、页面 mock 的登录 / 超限 / 熔断、CLI mock 全链路及真实 CLI 进程的提前拒绝。
+- 未安装依赖、未联网、未读取或写入真实 session、未运行真实 dms:login / dms:scrape。未配置 lint / build；legacy 页面未修改，未重复执行地图及 analytics 浏览器回归。真实 DMS 抓取及 UI selector 验证待 Claude / Product Owner 本机完成；离线测试不能代替真实验证。未 commit / push / deploy。
+- **第 1 轮修复（Claude review 后）：** 失败时 CLI 输出并在 `last-failure.json.detail` 中记录模块生成的具体原因；响应捕获要求请求体包含 `transitStationCodeList` 数组且 `pageSize` 匹配，避免误拿“每页条数”切换触发的响应。`npm test` 75/75 通过。
+- **本机真实验证（2026-09-30，Claude 在 Product Owner 本机运行 `npm run dms:scrape -- --station SFO01`）：通过。**
+  - 流程：打开 → 展开 → 转运站点 → 每页条数 → 查询，与 T2 记录的 selector 一致。
+  - 结果：输出 51 行，`total` = 51；`parse_errors` = 0；`route_id` 51 个全部唯一；所有行的 `station` 都是 SFO01。
+  - 字段：除 `route_difficulty_manual` 外，其余字段都没有 null；`route_difficulty_manual` 51 行全为 null，与 T2 样本一致。地址类型占比每行合计 1.000。难易度分布涵盖 D / C / B / A / S 五级。
+  - 请求：列表请求共 3 次（页面加载 1 次 + 切换每页条数 1 次 + 查询 1 次），**刚好等于默认上限 3**。没有 429 / 5xx。
+  - 输出位置：`%LOCALAPPDATA%\nc-ops-console\runtime-data\route-profiles.json`（约 175 KB，在仓库外）。仓库内没有出现 runtime 或 session 文件。
