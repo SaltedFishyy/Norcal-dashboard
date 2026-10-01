@@ -117,7 +117,7 @@ T1–T5 的 scraper 代码直接写在 `server/src/dms/`、`server/src/transform
 | 项 | 选择 | 理由 |
 |---|---|---|
 | Runtime | Node.js（本机已有 v24，要求 ≥ 20） | 已批准；Playwright 官方支持 |
-| HTTP | Express | 常见、简单，Codex 熟悉 |
+| HTTP | Node.js 内置 `http`（Product Owner 2026-10-01：优先内置模块，不新增 Express；需要新增永久依赖时先请示） | 不增加依赖；当前只读 API 足够 |
 | 浏览器自动化 | Playwright（只装 Chromium） | 已批准 |
 | 前端 | 原生 HTML / CSS / ES modules，由 server 直接提供，**不引入 bundler** | 功能简单，与 legacy 同一套技术，不需要构建步骤。以后复杂度上来（例如接入地图、多页面）再评估 Vite 等工具 |
 | 测试 | `node:test` | 不增加依赖 |
@@ -295,6 +295,17 @@ runtime-data/
 
 Phase 1 登录仍通过命令行 `npm run dms:login` 完成，不提供在线登录接口。页面在 `needs_login` 时提示“请运行 dms:login”。
 
+**T6 已确认的最小 API（Product Owner 2026-10-01）：** 只实现以下两个只读接口，表中其余接口留待后续任务。
+
+| Method | Path | 成功 | 错误 |
+|---|---|---|---|
+| GET | `/api/health` | 200 `{ "ok": true }` | — |
+| GET | `/api/route-profiles?station=SFO01` | 200 `{ station, fetched_at, source_as_of, total, rows }`（`rows` 结构沿用 T3 / `docs/data-schema.md` 第 8 节） | 400 `invalid_station`（缺少或格式非法）；404 `station_not_found`；404 `snapshot_not_found`（还没有 `route-profiles.json`）；500 `snapshot_invalid`（文件损坏或结构不合法） |
+
+- 只监听 `127.0.0.1`，不提供 HOST 覆盖；端口默认 3000，可用 `PORT` 覆盖。
+- 只读：不访问 DMS，不读 session，不启动浏览器，不修改 `route-profiles.json`。
+- 不加 CORS 头；错误响应只有稳定错误码，不包含本地路径或 stack trace。
+
 ---
 
 ## 10. 待确认的细节
@@ -322,7 +333,7 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 | T3 | **单 Station scraper + 标准化输出**（Product Owner 2026-09-30 决定：原 T4 并入 T3）：只抓 SFO01；只读、白名单、请求计数、熔断、session 过期检测；transform（纯函数，fixture 单元测试）→ runtime data 目录下的 `route-profiles.json`（原子写）+ `last-failure.json` | Codex 实现，PO 本机运行验证 | T2 |
 | T4 | （已并入 T3） | — | — |
 | T5 | **多 Station 串行抓取**：`--station SFO01,MFR01`；串行、Station 间隔、文件锁、cooldown、部分成功保留旧数据 | Codex 实现，PO 本机运行验证 | T4 |
-| T6 | **Node backend API**：Express（`127.0.0.1`）、`/legacy/`、第 9 节 API、刷新任务复用 T3–T5 模块、进程内锁 | Codex | T5 |
+| T6 | **最小 Node backend API**（Product Owner 2026-10-01 收窄范围）：Node 内置 `http`、`127.0.0.1`、只读 `GET /api/health` 和 `GET /api/route-profiles?station=`（第 9 节 “T6 已确认的最小 API”）。`/legacy/` 静态页面、刷新接口、session 状态、进程内锁留到后续任务 | Codex | T3 |
 | T7 | **Dashboard Refresh button**：`web/` Route Profile 页面（第 8 节），按钮禁用、进度、各状态、Last Updated | Codex，PO 预览签字 | T6 |
 | T8 | 以后再考虑：database、online auth、team deployment（不在本 spec 内） | — | — |
 
@@ -471,3 +482,19 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
   - 字段：除 `route_difficulty_manual` 外，其余字段都没有 null；`route_difficulty_manual` 51 行全为 null，与 T2 样本一致。地址类型占比每行合计 1.000。难易度分布涵盖 D / C / B / A / S 五级。
   - 请求：列表请求共 3 次（页面加载 1 次 + 切换每页条数 1 次 + 查询 1 次），**刚好等于默认上限 3**。没有 429 / 5xx。
   - 输出位置：`%LOCALAPPDATA%\nc-ops-console\runtime-data\route-profiles.json`（约 175 KB，在仓库外）。仓库内没有出现 runtime 或 session 文件。
+
+### T6 — 最小只读 Backend API（2026-10-01）
+
+- 扩展 `server/src/store/route-profiles-file.js`：新增 `getStationSnapshot` 和三个固定名称的读取错误类，校验 schema_version、stations 和被请求 Station 的必需字段；读取失败只输出固定说明，不改变既有写入行为。
+- 新增 `server/src/api/app.js`、`http-utils.js`、`server.js`：使用 Node 内置 HTTP，提供 `GET /api/health` 和 `GET /api/route-profiles?station=SFO01`；返回原有 rows（含 raw、parse_errors），统一 JSON / no-store / nosniff 响应头，不设置 CORS。错误体只含 error；请求日志只记录状态码。
+- 新增 `server/bin/server.js` 和 package.json 的 server script：本机运行 `npm.cmd run server`，默认端口 3000，支持 PORT（1–65535），固定监听 127.0.0.1。复用 runtime 配置及 warning；CLI 启动摘要按任务要求显示地址与 runtime 路径，启动失败不输出 stack。未新增依赖，package-lock.json 未修改。
+- 新增 `server/test/t6.test.js` 并接入 `server/test/index.js`。`npm.cmd test` 离线 **85/85 通过**（原有 T1 / T3 75 项 + T6 10 项），使用临时目录和合成 mock snapshot，覆盖成功响应、参数和 schema 错误、错误脱敏、方法限制、响应头、loopback 监听、文件内容 / mtime 不变、CLI 端口校验及占用、默认 / 覆盖配置、import 链无 DMS / Playwright。
+- 未配置 lint / build；未联网、未读取真实 runtime data 或 session、未启动浏览器，未修改 legacy 或执行其浏览器回归。未实现前端、refresh、session、legacy 静态服务或数据库；未 commit / push / deploy。
+- **本机真实验证（2026-10-01，Claude 在 Product Owner 本机运行 `npm run server`）：通过。**
+  - 启动：只监听 `127.0.0.1:3000`（netstat 确认，不是 0.0.0.0）。
+  - 健康检查：`GET /api/health` 返回 200 `{"ok":true}`，响应头包含 `no-store` 和 `nosniff`。
+  - 数据接口：`GET /api/route-profiles?station=SFO01` 返回 200，内容与 T3 真实 snapshot 一致：`station` = SFO01，有 `fetched_at`，`source_as_of` 为 null，`total` = 51，`rows` 共 51 行（每行 14 个字段）。
+  - 错误码：缺少参数或参数为空、非法字符、重复参数 → 400 `invalid_station`；`MFR01` → 404 `station_not_found`；POST → 405；未知路径 → 404 `not_found`。错误响应只包含错误码。
+  - 带 `Origin` 请求头访问时，响应中没有 `Access-Control-*` 头。
+  - 只读：请求前后 `route-profiles.json` 的修改时间不变。
+  - 验证结束后已停止 server。
