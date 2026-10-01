@@ -140,16 +140,18 @@ Notes
 | 字段 | 类型 | 定义 | 状态 |
 |---|---|---|---|
 | `station` | string | Station 代码，如 `SFO01` | 已确认 |
-| `route_name` | string | DMS 原值 | 已确认 |
+| `route_id` | number | DMS `roadAreaId`，Route 的稳定唯一标识（首选） | 已确认（D9） |
+| `route_name` | string | DMS 原值（`roadAreaName`） | 已确认 |
 | `dsp_name` | string | DSP / Fleet Name，DMS 原值 | 已确认 |
-| `pickup_volume` | number \| null | **领件量**。不是 Daily Volume，不要混用 | 统计窗口待确认（D6） |
+| `pickup_volume` | number \| null | **领件量**（DMS `receiptQty`）。不是 Daily Volume，不要混用 | 统计窗口待确认（D6） |
 | `pph` | number \| null | DMS 原值，不自行计算 | 已确认 |
-| `first_mile_distance` | number \| null | DMS 原值 | 单位 / 口径待确认（D2） |
-| `address_type_distribution` | object | 地址类型 → 占比或数量 | 结构待确认（D3） |
-| `route_difficulty` | string \| null | 只存 DMS 提供的值，不自行推算 | 来源待确认（D4） |
+| `first_mile_distance` | number \| null | DMS 原值（`firstOrderMileage`），单位 mile | 已确认（T2） |
+| `address_type_distribution` | object | DMS `receiveAddressType[]`：地址类型 → 占比（每个 Route 合计 1.0） | 已确认（T2） |
+| `route_difficulty` | string \| null | DMS 系统难易度（`roadAreaDifficulty`，另存 code），不自行推算；前端默认展示 | 已确认（D4b） |
+| `route_difficulty_manual` | string \| null | DMS 人工难易度（`roadAreaDifficultyManual(Name)`），空值为 null | 已确认（D4b） |
 | `fetched_at` | ISO datetime（Station 级） | 该 Station 最近一次成功抓取的时间 | 已确认 |
-| `source_as_of` | ISO datetime \| null | DMS 页面显示的数据截至时间（如有） | 待 T4 确认 |
+| `source_as_of` | ISO datetime \| null | DMS 页面显示的数据截至时间（如有） | T2：列表接口中没有，暂为 null |
 
-Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Station，**不从 `route_name` 解析**（即使形如 `SFO02-042`）。第一阶段逻辑标识 = `station + route_name`；以后如果能拿到稳定的 DMS route ID，再引入唯一 ID。
+Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Station，**不从 `route_name` 解析**（即使形如 `SFO02-042`）。唯一标识首选 `route_id`（DMS `roadAreaId`）；`station + route_name` 继续保存，用于展示和一致性校验。
 
 术语：`pickup_volume` 与 legacy `#mapdata` 中的 `volume` 口径不同，两者不能直接比较或合并。

@@ -36,18 +36,20 @@
 | 字段 | 内部字段名 | 说明 |
 |---|---|---|
 | Station | `station` | 如 `SFO01`，字符串 |
+| Route ID | `route_id` | DMS `roadAreaId`，**Route 的稳定唯一标识（首选）**（D9，2026-09-30） |
 | Route Name | `route_name` | 保留 DMS 原值；**不从中解析 Station** |
 | DSP / Fleet Name | `dsp_name` | 保留 DMS 原值 |
-| Pickup Volume | `pickup_volume` | **领件量**。不要叫 Daily Volume，避免以后和真正的日均单量混淆 |
+| Pickup Volume | `pickup_volume` | **领件量**（DMS `receiptQty`），保留原值。不要叫 Daily Volume；统计窗口未知，不猜测（D6） |
 | PPH | `pph` | DMS 原值，不自己计算、不补缺失值 |
-| First-mile Distance | `first_mile_distance` | DMS 原值；单位待确认（D2） |
-| Address Type Distribution | `address_type_distribution` | 地址类型 → 占比或数量的映射；结构待确认（D3） |
-| Route Difficulty | `route_difficulty` | **只存 DMS 提供的值，系统不自己计算**（`AGENTS.md` 第 13 节）；来源待确认（D4） |
+| First-mile Distance | `first_mile_distance` | DMS 原值（`firstOrderMileage`），单位 mile |
+| Address Type Distribution | `address_type_distribution` | DMS `receiveAddressType[]`：地址类型 → 占比 |
+| Route Difficulty | `route_difficulty` | DMS 系统难易度 `roadAreaDifficulty`（另存 code）。**只存 DMS 提供的值，系统不自己计算**（`AGENTS.md` 第 13 节）。前端默认展示这个值（D4b） |
+| Route Difficulty（人工） | `route_difficulty_manual` | DMS 人工难易度 `roadAreaDifficultyManual(Name)`，空值为 `null`（D4b） |
 | Last Updated | `fetched_at`（Station 级） | 该 Station 本次成功抓取的时间。如果 DMS 页面上显示了数据截至时间，另存为 `source_as_of` |
 
 规则：
 
-- **Station / Route 关联：** `station` 取用户在 DMS 中选择并抓取时的真实 Station。即使 Route Name 形如 `SFO02-042`，也不通过字符串解析判断它属于哪个 Station。第一阶段用 `station + route_name` 作为逻辑组合标识；以后如果能拿到稳定的 DMS route ID，再引入真正的唯一 ID。
+- **Station / Route 关联：** `station` 取用户在 DMS 中选择并抓取时的真实 Station。即使 Route Name 形如 `SFO02-042`，也不通过字符串解析判断它属于哪个 Station。唯一标识首选 `route_id`（DMS `roadAreaId`，D9）；`station + route_name` 继续保存，用于展示和一致性校验，不再作为首选唯一标识。
 - 缺失值存 `null`，不补值。
 - 每个字段保留 DMS 原始文本（`raw` 字段）。数值解析失败时保留原文并标记，不猜测。
 - 字段定义和单位确认后写入 `docs/data-schema.md` 第 8 节。
@@ -296,11 +298,11 @@ Phase 1 登录仍通过命令行 `npm run dms:login` 完成，不提供在线登
 ## 10. 待确认的细节
 
 - **D1** Station 列表：第一阶段用配置文件（按 legacy 9 个 Station 初始化），还是从 DMS 读取？
-- **D2** First-mile Distance 的单位和计算口径（DMS 页面上的定义）。
-- **D3** Address Type Distribution 在 DMS 上的形式：有哪些类型？是占比还是数量？
-- **D4** Route Difficulty 是 DMS 直接提供的字段吗？如果不是，第一阶段不显示，**不自行推算**。
+- **D2** First-mile Distance 的单位和计算口径（DMS 页面上的定义）。→ T2：接口字段 `firstOrderMileage`，页面单位为 **mile**（列名“首单里程”）。
+- **D3** Address Type Distribution 在 DMS 上的形式：有哪些类型？是占比还是数量？→ T2：**占比**（每个 Route 合计 1.0），共 10 种类型，见实现记录 T2。
+- **D4** Route Difficulty 是 DMS 直接提供的字段吗？如果不是，第一阶段不显示，**不自行推算**。→ T2：**是**，`roadAreaDifficulty`（D / C / B / A / S 五级）。另有人工难易度字段，用哪个待 Product Owner 决定。
 - **D5** DMS 的 Route Name 与 legacy route（例如 `SFO02-042`）能否对应？（第二阶段接地图时需要）
-- **D6** Pickup Volume 的统计窗口（DMS 页面上显示的是哪段时间的领件量）？
+- **D6** Pickup Volume 的统计窗口（DMS 页面上显示的是哪段时间的领件量）？→ 仍未知（2026-09-30）。目前只确认 `receiptQty` = 页面“领件量”；不猜测，不称为 Daily Volume，保留原值，后续确认。
 - **D7** ~~session 和 runtime data 放在仓库（OneDrive 同步目录）内？~~ **已决定（2026-09-30）：不接受。** 默认改到 `%LOCALAPPDATA%\nc-ops-console\`，见第 5 节。
 
 D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/data-schema.md`，不猜测。
@@ -321,6 +323,13 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 | T6 | **Node backend API**：Express（`127.0.0.1`）、`/legacy/`、第 9 节 API、刷新任务复用 T3–T5 模块、进程内锁 | Codex | T5 |
 | T7 | **Dashboard Refresh button**：`web/` Route Profile 页面（第 8 节），按钮禁用、进度、各状态、Last Updated | Codex，PO 预览签字 | T6 |
 | T8 | 以后再考虑：database、online auth、team deployment（不在本 spec 内） | — | — |
+
+**T3 架构要求（Product Owner 2026-09-30）：** 页面控制和数据转换分开。
+- Playwright 层（`server/src/dms/`）只负责：打开页面、执行最少必要的 UI 操作、等待并捕获 `queryList/pagination` 的响应，原样交给下一层。
+- transform 层（`server/src/transform/`）单独负责：`records[]` 字段映射、类型转换、保留 raw 值、null / 解析错误处理。用 fixture 做单元测试。
+- 字段解析逻辑不能写在 Playwright 页面控制代码里。
+
+**多 Station（D8，2026-09-30）：** 现在不自动切换 DMS 页头的全局站点。T3 只做 SFO01。T3 稳定后再单独设计受控测试（记录原站点 → 切到 MFR01 → 验证 → 切回原站点），**Product Owner 明确授权前不执行**。T5 依赖这个结论。
 
 每个任务完成后，文档同步更新（README 运行说明、`docs/data-schema.md` 字段定稿、`AGENTS.md` 第 4.3 节目录结构）。Codex 在沙箱里无法登录 DMS，所以 T1、T3、T5 都需要 Product Owner 在本机运行验证，T3 / T4 的测试依赖 T2 保存的 fixture。
 
@@ -377,3 +386,68 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 - 使用：复制 `.env.example` 为本地 `.env`，只配置 `DMS_BASE_URL` 和可选 `DMS_STATE_PATH`，然后从仓库根目录运行 `npm.cmd run dms:login`（PowerShell 执行策略允许时可用 `npm run dms:login`）。账号密码只在浏览器里手动输入。
 - **本机验证（2026-09-30，Product Owner + Claude）：通过。** `npm run dms:login` 打开有界面的 Chromium → Product Owner 手动登录 → storageState 保存到 `%LOCALAPPDATA%\nc-ops-console\playwright\.auth\dms-state.json`（约 2.6 MB）→ 关闭浏览器 → 用 storageState 重新打开，Product Owner 确认仍是登录状态（y）→ 输出 “storageState 验证成功”，退出码 0。结论：Phase 1 用 storageState 足以保持登录，不需要 persistent profile。日志中没有 cookie / token；仓库内没有 session 或 runtime 文件。`DMS_BASE_URL` 配置为路区画像页（`/gofo-site/report/reportCenter/areaDepiction`）。
 - 未配置 lint / build；legacy 页面未修改，本次未重复执行地图交互回归。无数据 schema / dataset 变化，未 commit / push / deploy。真实 DMS 登录和 storageState 保持验证待 Product Owner 本机完成，Codex 未尝试访问 DMS。
+
+### T2 — DMS 路区画像页面摸底（2026-09-30，Claude 本机受控探索）
+
+**执行方式：** 没有用 Mode A。原因是 Codex 沙箱不能联网，也读不到仓库外的 session 文件；spec 也把 T2 定为 PO + Claude。临时探索脚本放在 `.handoff/t2/`（gitignore），输出放在 `%LOCALAPPDATA%\nc-ops-console\t2-exploration\`（仓库外，含内部数据，仅本机）。
+
+**访问量：**
+- 共打开页面 4 次（1 次纯被动观察 + 3 次只读交互）。
+- 只对 SFO01 点了 1 次“查询”。
+- 没有切换页头全局站点，没有任何提交 / 保存 / 删除操作。
+- 全程没有 429 / 5xx。
+- storageState 每次都有效，没有跳到登录页。
+
+#### 页面结构
+
+- 路径 `/gofo-site/report/reportCenter/areaDepiction`，标签页“站点看板 | 路区画像”。Vue + Ant Design 微前端，class 前缀为 `dbuMicroSysApp-`。
+- **筛选区：** 邮编、快递员工作区域名称、车队名称、筛选标签；点“展开”后还有“转运站点”“所属大区”。按钮：查询、重置。
+- **表格：** vxe-table，有虚拟滚动和横向滚动。列：路区名称、转运站点、车队名称、是否新开、PPH、首单里程、收件地址类型、路区难易度、路区难易度（人工）、安全度、领件量、邮编数、分拣码、业务模式、操作（画像详情 / 路区详情）。
+- **分页：** vxe-pager，默认 10 条/页，可选 10 / 20 / 30 / 50 / 100 / 200 / 500。SFO01 共 51 条。
+- **Station 的作用范围：** 由**页头全局站点切换器**（右上角 “SFO01 ∨”）决定。页面内“转运站点”下拉只列出当前全局站点（SFO01）。列表接口默认不带 Station 参数，也只返回当前全局站点的数据。
+
+#### 数据来源：接口响应（不是 DOM）
+
+| 接口 | 用途 | 说明 |
+|---|---|---|
+| `POST /prod-api/dlvs-dataApi/roadAreaPortrait/home/frontPage/queryList/pagination` | 路区画像列表 | 请求体 `{pageNum, pageSize, siteHandleType:"ALL", transitStationCodeList:[<站点内部 ID>], pageType:""}`；返回 `data.records[]` + `total/pages/current/size`。**一条 record = 一个 Route，Phase 1 字段全部在内** |
+| `POST /prod-api/dlvs-dataApi/siteOffline/regionalSiteDropdownBox` | 站点下拉数据 | 请求体 `{groupType:[4,5]}`；按大区返回站点列表（`groupName` 是站点代码，`id` 是内部 ID） |
+
+- 鉴权方式：请求头 `authorization` 加 `auth-tag-x`，来自 storageState 中的 localStorage。没有专门表示站点的请求头。
+- 不需要逐条 Route 请求。“画像详情 / 路区详情”是按需打开的弹窗，Phase 1 字段不需要它们。
+
+#### 字段映射（Phase 1）
+
+| Phase 1 字段 | 接口字段 | 页面列 | 说明 |
+|---|---|---|---|
+| Station | `transitStationName` | 转运站点 | 以抓取时选择的 Station 为准，并校验与该字段一致；不从 Route Name 解析 |
+| Route Name | `roadAreaName` | 路区名称 | 如 `SFO01-001` |
+| （Route ID） | `roadAreaId` | — | 数字，样本内唯一，可作为稳定 route ID（见待决定问题） |
+| DSP / Fleet Name | `fleetName` | 车队名称 | 如 `SFO-AAS` |
+| Pickup Volume | `receiptQty` | 领件量 | 统计窗口未确认（D6） |
+| PPH | `actualPph` | PPH（件/h） | 另有 `pphP25/P50/P75`、`pphDelta`、环比字段，Phase 1 不用 |
+| First-mile Distance | `firstOrderMileage` | 首单里程 | 页面单位显示为 **mile** |
+| Address Type Distribution | `receiveAddressType[]` | 收件地址类型 | `{typeCode, typeName, typeValue}`。`typeValue` 是**占比**，样本中每个 Route 合计为 1.000。类型：0 独栋住宅/别墅、1 工业园区/仓库、2 公寓、4 农场、5 商业、6 学校、7 医院、8 政府机构、9 其它、10 未知 |
+| Route Difficulty | `roadAreaDifficulty` + `roadAreaDifficultyCode` | 路区难易度 | DMS 直接提供：0 D级 极易、1 C级 易、2 B级 中、3 A级 难、4 S级 极难。另有人工字段 `roadAreaDifficultyManual(Name)`，样本中全为 null |
+| Last Updated | （抓取时间） | — | 列表中没有数据截至时间，`source_as_of` 暂为 null |
+
+样本（SFO01 前 10 条）中上述字段都没有 null。
+
+#### 请求数量与加载机制（单个 Station）
+
+- **打开页面一次**会触发应用启动请求：`/prod-api/` 接口约 20 个，包括约 1.2 MB 的 `lookupItem/findAllLookupItem` 和约 600 KB 的 `i18n`，另有大量静态资源。**这部分开销按“每次刷新任务打开一次页面”计算，不按 Station 计算。**
+- 列表数据：页面加载时有 1 次默认请求（10 条）。通过页面把条数调到 100 并查询，**1 次请求即可拿到 SFO01 全部 51 条**。
+- 没有逐 Route 请求，没有懒加载，也没有“展开后加载”。分页很简单（`total` / `pages`），不属于复杂分页。
+- 表格 DOM 有虚拟滚动和横向滚动，单元格是格式化后的文本（如“21.37件/h”“24.58mile”）。**DOM 抓取不可靠**。
+
+#### 推荐 T3 方案：页面驱动 + 截获接口响应（network）
+
+- 用 storageState 打开页面，通过页面 UI 选择“转运站点”并把每页条数调到 100 / 200，点“查询”，用 `page.waitForResponse` 截获列表接口的 JSON 并解析。
+- 不自己拼接口请求、不处理鉴权头，所有请求都和人工操作页面完全一样。
+- 如果 `total` 大于每页条数，按页面翻页（预计不会发生）。
+- 不解析 DOM。DOM 只用于定位筛选控件（`.dbuMicroSysApp-form-item` + 标签文本、`.vxe-pager--sizes`）。
+- `MAX_PAGE_LOADS_PER_STATION` 建议默认 3（含默认加载的 1 次请求）。
+
+#### 停止条件检查
+
+没有触发任何一项：不需要逐 Route 请求，单个 Station 请求很少，没有复杂分页或虚拟滚动带来的额外请求，没有观察到明显负载风险。唯一较重的是页面启动请求，见上方说明。
