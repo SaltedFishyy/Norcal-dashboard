@@ -122,6 +122,7 @@ bash scripts/codex-handoff.sh docs/features/<slug>.md
 | 2026-09-28 | macOS（原开发机），旧版脚本（rsync 快照） | `docs/features/handoff-smoke-test.md` 冒烟测试通过 |
 | 2026-09-30 | Windows 11 + Git Bash（MSYS2 bash 5.3），codex-cli 0.159.2，旧版脚本 | 不可用：缺 `rsync`，会误报“无文件变更” |
 | 2026-09-30 | 同上，**新版脚本（git 快照）** | **通过。** 第 0 轮：Codex 新建临时文件，`changes.diff` 正确捕获（A），`exit-code` 为 0，`last-message.md` 正常，`status-before/after` 只多出该文件；当时工作区有 T1 的未提交改动，未被误算。第 1 轮（`--fix --round 1`）：修改该文件，diff 正确捕获（M）。模拟 Codex 失败（退出码 7）：全部产物保留，脚本以 7 退出。`--round 3`、缺少 `git` / `codex` 时正确拒绝。测试文件已清理。单次运行约 40 秒 |
+| 2026-10-01 | 同上，codex-cli 0.159.2，Windows Terminal，**新增 `scripts/codex-watch.mjs`（第 7 节）**，`codex-handoff.sh` 未改 | **通过。** Mode A 冒烟任务（两次约 20 秒的等待、一次故意失败、新建并修改一个临时文件）：Claude 在后台启动脚本后，用 `--window` 成功打开 Windows Terminal 观察窗口（标题 `Codex watch: <run>`）；进程列表中只有一条 `codex exec`。另一个 watcher 采样显示事件实时出现（命令开始约 20 秒后显示“命令完成”）。运行中结束窗口里的 watcher 进程，Codex 继续运行；再次 `--window` 打开时会先补显示已有事件再继续跟踪。Codex 退出码 0，`stderr.log` 为空，`changes.diff` / `changed-files.txt` 只包含该临时文件（A），工作区里 T6 的未提交改动没有被算进去。失败命令显示为 `✖ 命令失败` 并附带输出。`npm test` 85/85。临时文件已清理 |
 
 已知限制：
 
@@ -130,3 +131,43 @@ bash scripts/codex-handoff.sh docs/features/<slug>.md
 3. **运行期间不要手动修改仓库文件**，否则这些修改会被计入本轮 Codex 的改动。
 4. **Claude 工具超时：** Claude 的单条命令最长 10 分钟。预计更长的任务，Claude 应在后台运行脚本，并等待完成通知。
 5. 快照会在 `.git/objects` 中留下少量松散对象，不影响仓库，`git gc` 会清理。
+
+## 7. 可选的只读观察窗口（codex-watch）
+
+`scripts/codex-watch.mjs` 是可选的旁观者：只读取 run 产物，不参与任务执行，不写任何文件，不启动 Codex。它不改变 Mode A 的 artifacts，也不改变 review / fix 流程。关闭 watcher 窗口或按 Ctrl+C 只退出 watcher，不影响后台 Codex。
+
+Claude 可在 Mode A 已生成 run 目录后，自动执行下面的命令打开一个独立 Windows Terminal 窗口；该窗口结束时等待按 Enter 关闭：
+
+```powershell
+node scripts/codex-watch.mjs --window .handoff/runs/<run-name>
+```
+
+Product Owner 也可以在 VS Code / PowerShell 终端手动观察：
+
+```powershell
+node scripts/codex-watch.mjs
+node scripts/codex-watch.mjs .handoff/runs/<run-name>
+node scripts/codex-watch.mjs --hold .handoff/runs/<run-name>
+```
+
+无参数时选择目录名排序后的最新 run；没有 run 时等待第一个 run 出现。选定后持续观察该 run，不自动切换。指定目录可以是相对当前工作目录的路径或绝对路径；默认 run 搜索位置由脚本位置确定，不依赖当前工作目录。
+
+回看已完成的 run：
+
+```powershell
+node scripts/codex-watch.mjs --once .handoff/runs/<run-name>
+node scripts/codex-watch.mjs --help
+```
+
+watcher 每约 500ms 读取新增事件，显示会话、命令、文件变化和 Codex 消息。它显示的是 JSONL 事件，而不是逐字输出或完整命令日志。非法 JSON 行会警告并跳过。run 结束摘要包含 Codex 退出码、变更文件和最终回复路径；watcher 正常退出码为 0，与 Codex 的退出码无关。默认结束时最多等待约 15 秒生成 `changed-files.txt`；`--once` 不等待，缺失时显示“尚未生成”。
+
+`--window` 依赖本机可用的 `wt.exe`，无 run 时会报错，启动失败会给出手动命令。2026-10-01 已在本机验证（见第 6 节）。其余模式仅需要 Node，无新增依赖。路径不应包含 `;`（Windows Terminal 会将其作为命令分隔符）。
+
+watcher 的已知限制：
+
+1. **只显示 Codex 用自己的编辑工具改的文件。** Codex 通过 shell 命令写文件时（例如 PowerShell `WriteAllText`），watcher 只显示那条命令，不会显示 `＋ 新增文件` / `✎ 修改文件`。本轮实际改了哪些文件，以 `changes.diff` / `changed-files.txt` 为准。
+2. **显示的是事件，不是逐字输出。** 一条命令只在开始和结束时各显示一行；命令运行期间没有新输出。
+3. **失败命令的退出码以 Codex 报告的为准。** Codex 在 Windows 上通过 PowerShell 包装执行命令，内部的退出码（例如 3）可能显示为 1。
+4. **无参数模式只选启动时的最新 run。** Claude 打开窗口时应传入本次 run 目录（脚本启动时会输出 `输出目录: ...`），避免选到上一次 run。
+
+Claude 的固定做法：后台启动 `codex-handoff.sh` → 从输出中读取 run 目录 → 运行 `node scripts/codex-watch.mjs --window <run-dir>`。打开窗口失败时把手动命令告诉 Product Owner，交接本身照常进行。
