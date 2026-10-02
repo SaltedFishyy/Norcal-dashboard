@@ -81,6 +81,32 @@ Codex 完成后：
 5. 审查时不大规模重写 Codex 的代码。
 6. UI 功能：告诉 Product Owner 如何本地预览；Product Owner 签字前不算完成。
 
+### 5.1 代码健康 / 架构检查（Product Owner 2026-10-02）
+
+写 task brief 和审查 Codex 结果时，都做一次轻量检查。目标分层保持不变：
+
+```text
+DMS / browser automation → transform / normalization → store → API → frontend
+```
+
+写 brief 时守住这些边界。重点关注：
+
+- 一个文件承担多个不相关的职责
+- DMS / Playwright 的生命周期或请求保护逻辑重复
+- transform / 校验规则重复
+- store / 原子写逻辑重复
+- API、数据访问、浏览器自动化、transform、UI 逻辑混在一起
+- 数据结构定义在代码、store、API、前端、文档之间出现偏差
+- 文件越来越大、难以理解
+- 测试只按任务编号组织，而按模块组织会更清楚
+- 新功能继续往已经很重的模块里追加逻辑
+
+处理方式：
+
+- **问题小且局部：** 在 Codex 任务里带上有限的重构，行为不变，补充或保留测试，不扩大成整体重写。
+- **需要架构变更、数据迁移、schema version 变更、大范围移动文件、改依赖或大规模重写：** 停下来先问 Product Owner。
+- 不因为代码“不够理想”就重构。出现真实的重复或耦合时，再逐步清理。
+
 ---
 
 ## 6. 行为边界
