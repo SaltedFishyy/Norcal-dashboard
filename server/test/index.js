@@ -5,3 +5,6 @@ import './t3.test.js';
 import './t6.test.js';
 import './t7.test.js';
 import './rd1.test.js';
+import './postal-codes.test.js';
+import './atomic-file.test.js';
+import './tableau-export.test.js';

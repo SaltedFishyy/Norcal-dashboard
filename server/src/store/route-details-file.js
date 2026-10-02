@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { writeFileAtomic } from './atomic-file.js';
 import { StoreError } from './route-profiles-file.js';
 
 export class RouteDetailNotFoundError extends Error {
@@ -29,18 +29,14 @@ const validFile = (data) => object(data) && data.schema_version === 1 && object(
 
 export async function saveRouteDetail({ runtimeDir, route, fileOps = fs }) {
   const filename = path.join(runtimeDir, 'route-details.json');
-  const temporary = `${filename}.${randomUUID()}.tmp`;
   try {
     let data;
     try { data = JSON.parse(await fileOps.readFile(filename, 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; data = { schema_version: 1, routes: {} }; }
     if (!validFile(data) || !validRoute(route, String(route?.route_id))) throw new StoreError();
-    await fileOps.mkdir(runtimeDir, { recursive: true });
-    await fileOps.writeFile(temporary, JSON.stringify({ ...data, routes: { ...data.routes, [String(route.route_id)]: route } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-    await fileOps.rename(temporary, filename);
+    await writeFileAtomic(filename, JSON.stringify({ ...data, routes: { ...data.routes, [String(route.route_id)]: route } }, null, 2) + '\n', { fileOps });
     return filename;
   } catch { throw new StoreError(); }
-  finally { await fileOps.rm(temporary, { force: true }).catch(() => {}); }
 }
 
 export async function getRouteDetail({ runtimeDir, routeId, fileOps = fs }) {

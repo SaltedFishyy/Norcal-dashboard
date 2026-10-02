@@ -26,7 +26,7 @@ test('T3 fixture maps all fields, types, raw values and separate manual difficul
   assert.equal(snapshot.fetched_at, options.fetchedAt);
   assert.equal(snapshot.total, 3);
   assert.deepEqual(warnings, []);
-  const keys = ['route_id','station','route_name','dsp_name','pickup_volume','pph','first_mile_distance','address_type_distribution','route_difficulty','route_difficulty_code','route_difficulty_manual','route_difficulty_manual_code','raw','parse_errors'].sort();
+  const keys = ['postal_codes','route_id','station','route_name','dsp_name','pickup_volume','pph','first_mile_distance','address_type_distribution','route_difficulty','route_difficulty_code','route_difficulty_manual','route_difficulty_manual_code','raw','parse_errors'].sort();
   snapshot.rows.forEach((row, i) => {
     assert.deepEqual(Object.keys(row).sort(), keys);
     assert.equal(row.route_id, fixture.data.records[i].roadAreaId);

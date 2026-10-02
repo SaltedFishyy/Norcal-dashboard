@@ -1,3 +1,5 @@
+import { parseRoutePostalCodes, findPostalCodeConflicts } from './postal-codes.js';
+
 export class SchemaError extends Error {
   constructor(message) { super(message); this.name = 'SchemaError'; }
 }
@@ -34,8 +36,8 @@ export function transformRoutePortrait(body, { station, fetchedAt }) {
     if (!Number.isSafeInteger(id)) throw new SchemaError('路区 ID 必须为整数');
     if (ids.has(id)) throw new SchemaError('路区 ID 重复');
     ids.add(id);
-    const row = { route_id: id, station, route_name: record.roadAreaName, raw: {}, parse_errors: [] };
-    for (const key of ['roadAreaId', 'roadAreaName', 'transitStationName', ...Object.values(fields)]) {
+    const row = { route_id: id, station, route_name: record.roadAreaName, postal_codes: parseRoutePostalCodes(record), raw: {}, parse_errors: [] };
+    for (const key of ['roadAreaId', 'roadAreaName', 'transitStationName', 'postalCodeList', 'postalCodeNum', ...Object.values(fields)]) {
       row.raw[key] = own(record, key) ? structuredClone(record[key]) : null;
     }
     const error = (field, raw, reason) => row.parse_errors.push({ field, raw: raw === undefined ? null : structuredClone(raw), reason });
@@ -86,6 +88,8 @@ export function transformRoutePortrait(body, { station, fetchedAt }) {
     }
     return row;
   });
+  const conflicts = findPostalCodeConflicts(rows);
+  if (conflicts.length) throw new SchemaError(`Station ${station} ZIP 冲突: ${JSON.stringify(conflicts)}`);
   return { stationSnapshot: { fetched_at: fetchedAt, source_as_of: null, source: 'dms-playwright', total, rows },
     warnings: rows.flatMap((row) => row.parse_errors.map(({ field, reason }) => ({ route_id: row.route_id, field, reason }))) };
 }

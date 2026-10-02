@@ -242,6 +242,7 @@ runtime-data/
         { "route_id": 0, "station": "SFO01", "route_name": "…", "dsp_name": "…",
           "pickup_volume": 0, "pph": 0, "first_mile_distance": 0,
           "address_type_distribution": [ { "type_code": "0", "type_name": "…", "share": 0.5 } ],
+          "postal_codes": [ "94607", "94608" ],
           "route_difficulty": "…", "route_difficulty_code": "…",
           "route_difficulty_manual": null, "route_difficulty_manual_code": null,
           "raw": { }, "parse_errors": [ ] }
