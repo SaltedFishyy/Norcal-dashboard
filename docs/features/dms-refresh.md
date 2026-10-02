@@ -280,6 +280,16 @@ runtime-data/
 
 第二阶段（不在本 spec 内）：路区画像接入地图（依赖 D5）、legacy 功能逐步迁移。
 
+**T7 已确认的最小页面（Product Owner 2026-10-01）：** 只读显示 SFO01，上面列出的其他内容留到 T7b。
+
+- server 在 `GET /` 返回 `web/index.html`，静态资源只从 `web/` 中固定的白名单文件提供；现有两个 API 行为不变。
+- 页头：标题 `North California Route Profile`、Station `SFO01`、Last Updated（来自 `fetched_at`）、Total Routes（来自 `total`），并注明数据是 DMS snapshot，不是实时数据（`AGENTS.md` 第 15 节）。
+- 表格列：Route Name、DSP / Fleet、Pickup Volume、PPH、First-mile Distance（mi）、Route Difficulty、Manual Difficulty。按 API 返回顺序显示，不排序、不筛选。空值显示 `—`（普通文字，不加标签框）。数字格式（Product Owner 2026-10-01 预览后确认）：Pickup Volume 显示为整数（千分位），PPH 和 First-mile Distance 固定 2 位小数。表格行高约 32–36px，单行显示。难易度直接显示 `route_difficulty` / `route_difficulty_manual` 原值，不计算。
+- 数据只来自 `GET /api/route-profiles?station=SFO01`，页面中没有写死的业务数据。
+- 状态：Loading / 成功 / No data（`snapshot_not_found`、`station_not_found` 或 0 行）/ API error（其他错误码，以及 server 不可达）。错误只显示简洁说明和错误码，不显示 stack trace 或本地路径。
+- 原生 HTML / CSS / ES modules，不加框架、bundler 或依赖。视觉参考 legacy，但不复制大段代码，也不修改 `nc-ops-console-main/`。
+- 不做：多 Station、Refresh from DMS、POST API、地图、Tableau、登录 / 权限、Address Type Distribution 可视化、排序 / 筛选、数据编辑、`/legacy/` 静态服务。
+
 ---
 
 ## 9. API 草案（T6）
@@ -334,7 +344,8 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 | T4 | （已并入 T3） | — | — |
 | T5 | **多 Station 串行抓取**：`--station SFO01,MFR01`；串行、Station 间隔、文件锁、cooldown、部分成功保留旧数据 | Codex 实现，PO 本机运行验证 | T4 |
 | T6 | **最小 Node backend API**（Product Owner 2026-10-01 收窄范围）：Node 内置 `http`、`127.0.0.1`、只读 `GET /api/health` 和 `GET /api/route-profiles?station=`（第 9 节 “T6 已确认的最小 API”）。`/legacy/` 静态页面、刷新接口、session 状态、进程内锁留到后续任务 | Codex | T3 |
-| T7 | **Dashboard Refresh button**：`web/` Route Profile 页面（第 8 节），按钮禁用、进度、各状态、Last Updated | Codex，PO 预览签字 | T6 |
+| T7 | **最小只读前端**（Product Owner 2026-10-01 收窄范围）：`web/` 显示 SFO01 Route Profile，server 提供 `GET /` 和静态资源（第 8 节 “T7 已确认的最小页面”） | Codex，PO 预览签字 | T6 |
+| T7b | **Dashboard Refresh button**（原 T7 其余部分）：多 Station chip、Refresh 按钮禁用 / 进度、session 状态、刷新中 / 部分失败 / needs_login 状态、按列排序、Address Type Distribution、`/legacy/` 链接与静态服务 | Codex，PO 预览签字 | T5、T7 |
 | T8 | 以后再考虑：database、online auth、team deployment（不在本 spec 内） | — | — |
 
 **T3 架构要求（Product Owner 2026-09-30）：** 页面控制和数据转换分开。
@@ -498,3 +509,17 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
   - 带 `Origin` 请求头访问时，响应中没有 `Access-Control-*` 头。
   - 只读：请求前后 `route-profiles.json` 的修改时间不变。
   - 验证结束后已停止 server。
+
+### T7 — 最小只读前端（2026-10-01）
+
+- 新增 `web/index.html`、`styles.css`、`app.js`、`format.js`：原生 ES modules，同源 GET `/api/route-profiles?station=SFO01`；显示七列及 API 的 total / fetched_at，保持 rows 顺序。Last Updated 使用浏览器本地时间、分钟和时区，title 保存完整来源时间。空值显示 `—`，难易度只显示原值；沿用 legacy 深色 / teal 视觉参考，窄屏表格独立横向滚动。
+- `format.js` 提供格式化及 Loading / success / empty / error 状态纯函数；错误码仅展示已知稳定值，未知错误归为 internal_error，不展示响应文本或异常详情。Retry 只重新 GET，不自动重试。所有 API 值通过 textContent 渲染，无外部资源、inline script 或 inline style。
+- 新增 `server/src/api/static-files.js`：固定四个路径对应四个文件，通过 createStaticReader 注入 handler；createApiServer / startApiServer 支持覆盖 webDir，默认仓库根 web/。静态路径按原始请求路径匹配，避免 URL dot-segment normalization 绕过白名单；GET 之外返回 405 / Allow: GET，读取失败返回固定 internal_error。静态响应设置 no-store、nosniff、CSP；现有 API 响应头及行为保持不变，请求日志仍只记录状态码。
+- 新增 `server/test/t7.test.js` 并接入测试入口。`npm.cmd test` **95/95 通过**（原有 85 项 + T7 10 项），原有 T6 测试未修改。覆盖静态文件原文、响应头、原始路径穿越、方法限制、webDir 覆盖、注入与读取失败脱敏、格式化、状态映射，以及用最小 DOM doubles 验证实际 app 的行顺序、HTML 字符串作为文本、空值、时间 title、Retry、网络及 JSON 解析失败。
+- package.json / package-lock.json、legacy、数据 schema 及真实 runtime 文件未改；未新增依赖。未配置 lint / build，`git diff --check` 通过。测试只使用临时目录及合成数据 / doubles，未访问 DMS、真实 session / runtime data，未启动浏览器，未 commit / push / deploy。
+- 本机真实数据、浏览器 console、CSP 执行及宽 / 窄屏视觉验收待 Claude / Product Owner：运行 `npm run server` 后打开 `http://127.0.0.1:3000/`。离线检查不替代 Product Owner 的预览签字。
+- **本机真实验证（2026-10-01，Claude 在 Product Owner 本机运行 `npm run server`）：功能通过，UI 待 Product Owner 预览签字。**
+  - server 只监听 `127.0.0.1:3000`（netstat 确认）。`/`、`/styles.css`、`/app.js`、`/format.js` 返回 200，Content-Type 正确，带 CSP / no-store / nosniff；`/index.html`、`/../package.json`、`/%2e%2e/package.json` 返回 404；`/api/health` 仍为 200。
+  - `GET /api/route-profiles?station=SFO01`：total = 51，rows 51 行，与 T3 真实 snapshot 的 rows 和 `fetched_at` 完全一致；`source_as_of` 为 null。
+  - 无界面 Chromium（1440 宽和 390 宽）：页头显示 SFO01 / Last Updated `2026-09-30 17:46 PDT`（title 为完整 ISO 时间）/ Total Routes 51，表格 51 行、7 列，Manual Difficulty 全部显示 `—`；console 没有 error / warning；页面只发出 5 个同源 GET 请求（页面、3 个静态文件、1 个 API），没有外部请求；窄屏时只有表格区域横向滚动，页面本身不横向滚动。
+- **第 1 轮修复（2026-10-01，Product Owner 预览后）：** 仅修改 web/styles.css、web/app.js、web/format.js 和 server/test/t7.test.js。单元格保留 13px 字号，使用 20px line-height、上下 6px padding 和 nowrap，数据行约 33px；难易度标签缩小为 20px 高，保留表格独立横向滚动。两列难易度的 null / undefined / 空字符串只渲染普通 `—`，非空值继续用 textContent 原样显示标签。Pickup Volume 使用千分位整数，PPH / First-mile Distance 固定 2 位小数，空值及非有限数字仍显示 `—`，仅改变显示格式。补充纯函数与实际 app DOM doubles 测试，覆盖数字格式、两列空值不生成标签、非空标签及跨 Station 名称原样显示；`npm.cmd test` **96/96 通过**。未配置 lint / build；未修改 server 实现、API、静态路由、package 文件、legacy 或真实数据，未访问 DMS / session、未启动浏览器，未 commit / push / deploy。本轮宽 / 窄屏视觉效果与 console 检查待 Claude / Product Owner 本机预览确认。

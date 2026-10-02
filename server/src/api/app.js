@@ -1,4 +1,5 @@
 import { sendJson } from './http-utils.js';
+import { isStaticPath } from './static-files.js';
 
 const errors = new Map([
   ['StationNotFoundError', [404, 'station_not_found']],
@@ -6,7 +7,7 @@ const errors = new Map([
   ['SnapshotInvalidError', [500, 'snapshot_invalid']],
 ]);
 
-export function createRequestHandler({ getSnapshot, log = () => {} }) {
+export function createRequestHandler({ getSnapshot, getStaticFile, log = () => {} }) {
   return (req, res) => {
     // Never log caller-controlled URLs or exception details; they may contain secrets.
     const respond = (status, body) => {
@@ -17,6 +18,27 @@ export function createRequestHandler({ getSnapshot, log = () => {} }) {
       let url;
       try { url = new URL(req.url, 'http://127.0.0.1'); }
       catch { respond(404, { error: 'not_found' }); return; }
+      // Match static assets against the raw path, before URL dot-segment normalization.
+      const rawPath = req.url.split('?')[0];
+      if (isStaticPath(rawPath)) {
+        res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'");
+        if (req.method !== 'GET') {
+          res.setHeader('Allow', 'GET');
+          respond(405, { error: 'method_not_allowed' }); return;
+        }
+        try {
+          const { body, contentType } = await getStaticFile(rawPath);
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'",
+          });
+          res.end(body);
+          try { log('HTTP 200'); } catch { /* Logging must not affect responses. */ }
+        } catch { respond(500, { error: 'internal_error' }); }
+        return;
+      }
       if (!['/api/health', '/api/route-profiles'].includes(url.pathname)) {
         respond(404, { error: 'not_found' }); return;
       }

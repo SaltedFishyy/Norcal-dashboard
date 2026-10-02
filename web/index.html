@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>North California Route Profile</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">NC OPS CONSOLE</p>
+      <h1>North California Route Profile</h1>
+      <p class="snapshot">Snapshot from DMS — not live data</p>
+      <dl class="metrics">
+        <div><dt>Station</dt><dd>SFO01</dd></div>
+        <div><dt>Last Updated</dt><dd id="updated">—</dd></div>
+        <div><dt>Total Routes</dt><dd id="total">—</dd></div>
+      </dl>
+    </header>
+    <section class="panel" aria-label="Route profiles" aria-busy="true" id="profiles">
+      <div class="status" role="status" aria-live="polite">
+        <p id="message">Loading route profiles…</p>
+        <button id="retry" type="button" hidden>Retry</button>
+      </div>
+      <div class="table-scroll" id="table-container" hidden tabindex="0" role="region" aria-label="Route profile table">
+        <table>
+          <caption class="sr-only">SFO01 route profiles from the latest DMS snapshot</caption>
+          <thead><tr>
+            <th scope="col">Route Name</th><th scope="col">DSP / Fleet</th>
+            <th scope="col" class="numeric">Pickup Volume</th><th scope="col" class="numeric">PPH</th>
+            <th scope="col" class="numeric">First-mile Distance (mi)</th>
+            <th scope="col">Route Difficulty</th><th scope="col">Manual Difficulty</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+    <noscript>Enable JavaScript to load route profiles from the local server.</noscript>
+  </main>
+</body>
+</html>
