@@ -32,6 +32,12 @@ export function parseMaxListRequests(value) {
   return count;
 }
 
+export function parseMaxRouteDetailRequests(value) {
+  const count = value?.trim() ? Number(value) : 20;
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('MAX_ROUTE_DETAIL_REQUESTS 必须是正整数。');
+  return count;
+}
+
 export function resolveStatePath({ env, platform, homedir, repoRoot }) {
   const p = pathApi(platform);
   const override = env.DMS_STATE_PATH?.trim();

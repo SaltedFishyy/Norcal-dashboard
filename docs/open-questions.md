@@ -31,6 +31,15 @@
 - [ ] D6 Pickup Volume 的统计窗口（目前只确认 `receiptQty` = 页面“领件量”；不猜测，不称为 Daily Volume，保留原值）
 - [x] D7 session 和 runtime data 不允许被 OneDrive 同步 → 默认放在 `%LOCALAPPDATA%\nc-ops-console\`，可配置覆盖（2026-09-30）
 
+## Route Detail / ZIP Profile
+
+见 `docs/features/route-detail.md`。
+
+- [ ] RD-Q1 `postalCodeTag` 的含义：样本中 `"1"` 对应页面 `94617NEW`，其余为 `"0"`。确认前只保存原值，不解释（2026-10-02）
+- [ ] RD-Q2 ZIP 难易度接口只有文字没有 code，颜色按五级文字匹配；DMS 若改文字会落到灰色。是否需要找到带 code 的来源（2026-10-02）
+- [ ] RD-Q3 第一版只按单条 Route 手动抓取。以后是否需要多条 / 全部 Route，以及可接受的 DMS 请求量（全部 51 条约 560 个请求）（2026-10-02）
+- [ ] RD-Q4 ZIP 指标的统计窗口（「路区画像由近 30 天的数据生成」是否同样适用于标签详情）
+
 ## Route Difficulty
 
 - [ ] 什么 PPH 范围算 Hard？

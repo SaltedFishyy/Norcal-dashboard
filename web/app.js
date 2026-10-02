@@ -1,4 +1,5 @@
-import { formatValue, formatNumber, formatUpdated, pageState } from './format.js';
+import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from './format.js';
+import { openRouteDetail } from './route-detail.js';
 
 const updated = document.getElementById('updated');
 const total = document.getElementById('total');
@@ -34,8 +35,15 @@ function render(result, data) {
       const value = row?.[field];
       if (style === 'numeric') td.className = 'numeric';
       const hasDifficulty = style === 'difficulty' && value !== null && value !== undefined && value !== '';
-      const content = hasDifficulty ? document.createElement('span') : td;
-      if (hasDifficulty) { content.className = 'difficulty'; td.append(content); }
+      const isRoute = field === 'route_name';
+      const content = isRoute ? document.createElement('button') : hasDifficulty ? document.createElement('span') : td;
+      if (isRoute) {
+        content.type = 'button'; content.className = 'route-link';
+        content.addEventListener('click', () => openRouteDetail(row, content)); td.append(content);
+      }
+      if (hasDifficulty) {
+        content.className = `difficulty tone-${difficultyTone(value)}`; td.append(content);
+      }
       content.textContent = style === 'numeric' ? formatNumber(value, digits, digits) : formatValue(value);
       tr.append(td);
     }

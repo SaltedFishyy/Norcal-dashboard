@@ -2,6 +2,16 @@ export function formatValue(value) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
 }
 
+export function formatPercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '—';
+}
+
+export function difficultyTone(text) {
+  const tones = { 'D级 极易': 'easy', 'C级 易': 'easy', 'B级 中': 'medium', 'A级 难': 'hard', 'S级 极难': 'hard' };
+  const key = typeof text === 'string' ? text.trim() : '';
+  return Object.hasOwn(tones, key) ? tones[key] : 'unknown';
+}
+
 export function formatNumber(value, maximumFractionDigits = 2, minimumFractionDigits = 0) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
   return new Intl.NumberFormat('en-US', { maximumFractionDigits, minimumFractionDigits }).format(value);

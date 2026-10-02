@@ -7,11 +7,12 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startApiServer } from '../src/api/server.js';
 import { createRequestHandler } from '../src/api/app.js';
-import { formatValue, formatNumber, formatUpdated, pageState } from '../../web/format.js';
+import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from '../../web/format.js';
 
 const webDir = fileURLToPath(new URL('../../web/', import.meta.url));
 const assets = [['/', 'index.html', 'text/html'], ['/styles.css', 'styles.css', 'text/css'],
-  ['/app.js', 'app.js', 'text/javascript'], ['/format.js', 'format.js', 'text/javascript']];
+  ['/app.js', 'app.js', 'text/javascript'], ['/format.js', 'format.js', 'text/javascript'],
+  ['/route-detail.js', 'route-detail.js', 'text/javascript']];
 
 async function fixture(t, options = {}) {
   // A temporary directory ensures these tests never read the real runtime snapshot.
@@ -241,12 +242,12 @@ test('T7 app renders API order and text safely, and handles retries and failures
   assert.equal(elements.total.textContent, '2');
   const rendered = elements.rows.children;
   assert.equal(rendered.length, 2);
-  assert.deepEqual(rendered[0].children.slice(0, 5).map((cell) => cell.textContent),
+  assert.deepEqual(rendered[0].children.slice(0, 5).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
     ['Mock Z', malicious, '12,345', '2.35', '1.20']);
   assert.equal(rendered[0].children[5].children[0].textContent, 'S');
   assert.equal(rendered[0].children[6].textContent, '—');
   assert.equal(rendered[0].children[6].children.length, 0);
-  assert.equal(rendered[1].children[0].textContent, 'Mock A');
+  assert.equal(rendered[1].children[0].children[0].textContent, 'Mock A');
   assert.equal(rendered[1].children[1].textContent, '—');
   for (const value of [null, undefined, '']) {
     reply = { status: 200, json: async () => ({ total: 1, rows: [{
@@ -255,7 +256,7 @@ test('T7 app renders API order and text safely, and handles retries and failures
     }] }) };
     await elements.retry.listeners.click();
     const cells = elements.rows.children[0].children;
-    assert.deepEqual(cells.slice(0, 5).map((cell) => cell.textContent),
+    assert.deepEqual(cells.slice(0, 5).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
       ['SFO02-042', '—', '1,150', '30.00', '3.90']);
     for (const cell of cells.slice(5)) {
       assert.equal(cell.textContent, '—');
@@ -271,8 +272,20 @@ test('T7 app renders API order and text safely, and handles retries and failures
   assert.deepEqual(cells.slice(2, 5).map((cell) => cell.textContent), ['—', '—', '—']);
   for (const [index, expected] of [[5, 'A级 难'], [6, 'B级 中']]) {
     assert.equal(cells[index].children.length, 1);
-    assert.equal(cells[index].children[0].className, 'difficulty');
+    assert.equal(cells[index].children[0].className, `difficulty tone-${difficultyTone(expected)}`);
     assert.equal(cells[index].children[0].textContent, expected);
+  }
+  for (const [value, tone] of [['D级 极易', 'easy'], ['C级 易', 'easy'], ['B级 中', 'medium'],
+    ['A级 难', 'hard'], ['S级 极难', 'hard'], ['unknown', 'unknown']]) {
+    reply = { status: 200, json: async () => ({ total: 1, rows: [{
+      route_difficulty: value, route_difficulty_manual: value,
+    }] }) };
+    await elements.retry.listeners.click();
+    for (const cell of elements.rows.children[0].children.slice(5)) {
+      assert.equal(cell.children.length, 1);
+      assert.equal(cell.children[0].className, `difficulty tone-${tone}`);
+      assert.equal(cell.children[0].textContent, value);
+    }
   }
   for (const failure of [
     { status: 404, json: async () => ({ error: 'snapshot_not_found' }) },
@@ -287,5 +300,5 @@ test('T7 app renders API order and text safely, and handles retries and failures
     assert.equal(elements.rows.children.length, 0);
     assert.doesNotMatch(elements.message.textContent, /secret|stack|private-path/);
   }
-  assert.equal(requests, 9);
+  assert.equal(requests, 15);
 });

@@ -6,6 +6,7 @@ const files = new Map([
   ['/styles.css', ['styles.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/format.js', ['format.js', 'text/javascript']],
+  ['/route-detail.js', ['route-detail.js', 'text/javascript']],
 ]);
 
 export function isStaticPath(pathname) {

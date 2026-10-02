@@ -155,3 +155,59 @@ Notes
 Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Station，**不从 `route_name` 解析**（即使形如 `SFO02-042`）。唯一标识首选 `route_id`（DMS `roadAreaId`）；`station + route_name` 继续保存，用于展示和一致性校验。
 
 术语：`pickup_volume` 与 legacy `#mapdata` 中的 `volume` 口径不同，两者不能直接比较或合并。
+
+## 9. Route Detail / ZIP Profile（路区 ZIP 画像，按 Route 抓取）
+
+- 规格：`docs/features/route-detail.md`（Approved 2026-10-02）
+- 来源类型：Scraper / browser automation（Playwright，Product Owner 本人的 DMS 登录态），只在手动运行 `npm run dms:scrape-route-detail -- --route <route_name>` 时访问 DMS
+- DMS 接口：`POST …/roadAreaPortraitDetails/details/getRoadAreaContent`（请求体 `{roadAreaId}`），校验用 `…/details/getRoadAreaHeader`
+- 粒度：一行 = 某条 Route 下的一个 ZIP（最新一次成功抓取）。逻辑唯一标识 `route_id + postal_code`
+- 新鲜度：每条 Route 单独记录 `fetched_at`，与 `route-profiles.json` 中 Station 的 `fetched_at` 互相独立
+- 存储：本机 runtime 目录中的 `route-details.json`（不进 Git），不修改 `route-profiles.json`
+
+```json
+{
+  "schema_version": 1,
+  "routes": {
+    "831": {
+      "route_id": 831, "station": "SFO01", "route_name": "SFO01-001",
+      "route_difficulty": "A级 难", "route_difficulty_code": "3",
+      "fetched_at": "2026-10-02T18:20:00Z", "source": "dms-playwright",
+      "zip_count": 21,
+      "zips": [
+        { "postal_code": "…", "postal_code_tag": "0", "postal_code_difficulty": "…",
+          "first_mile_distance": 0, "experienced_pph": 0,
+          "delivery_fail_rate": 0, "dnr_rate": 0, "safety_level": "…",
+          "raw": { }, "parse_errors": [ ] }
+      ],
+      "parse_errors": [ ]
+    }
+  }
+}
+```
+
+Route 级字段：
+
+| 字段 | 类型 | 来源 | 说明 |
+|---|---|---|---|
+| `route_id` | number | 列表响应 `roadAreaId`（= 详情请求体 `roadAreaId`） | 主标识；`routes` 的 key 为其字符串形式 |
+| `station` | string | 抓取时选择的 Station | 不从 `route_name` 解析 |
+| `route_name` | string | `getRoadAreaHeader.roadAreaName` | 必须与 `--route` 和列表行一致 |
+| `route_difficulty` / `route_difficulty_code` | string \| null | `getRoadAreaHeader.roadAreaDifficulty` / `roadAreaDifficultyCode` | DMS 原值 |
+| `zip_count` | number \| null | `getRoadAreaHeader.postalCodeNum` | 与 `zips.length` 不一致时记入 Route 级 `parse_errors`，不修正 |
+| `fetched_at` | ISO datetime | 抓取时间 | |
+
+ZIP 级字段（`getRoadAreaContent.data[]`）：
+
+| 字段 | 类型 | DMS 字段 | 说明 |
+|---|---|---|---|
+| `postal_code` | string | `postalCode` | 保持字符串，不转数字 |
+| `postal_code_tag` | string \| null | `postalCodeTag` | **只存原值**。样本中 `"1"` 对应页面显示 `94617NEW`，但未确认含义，不解释 |
+| `postal_code_difficulty` | string \| null | `postalCodeDifficulty` | DMS 原值（五级文字），**接口没有 code**；不自行计算 |
+| `first_mile_distance` | number \| null | `assignedRouteAreaFirstOrderMileage` | 单位 mile。**Route 级「所属路区首单里程」，在每个 ZIP 行重复，不是 ZIP 独立指标** |
+| `experienced_pph` | number \| null | `experiencedPph` | 熟手 PPH，DMS 原值 |
+| `delivery_fail_rate` | number \| null | `deliveryFailRate` | 派送异常率，**小数**（0.0206 = 2.06%）；前端 ×100 显示 |
+| `dnr_rate` | number \| null | `dnrRate` | DNR 率，**小数**；前端 ×100 显示 |
+| `safety_level` | string \| null | `safetyLevel` | DMS 原值（样本：安全 / 一般 / 风险 / 高危），接口没有 code |
+| `raw` | object | 整条原始记录 | 调试用；API 不返回 |
+| `parse_errors` | array | — | 类型不符时记录字段名，值存为 null |

@@ -24,3 +24,20 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 [hidden] { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) { main { padding: 20px 12px; } .metrics { gap: 20px; } }
+
+.route-link { background: transparent; border: 0; padding: 0; margin: 0; color: #65dace; text-decoration: underline; font: inherit; }
+.tone-easy { color: #92e7b3; background: #15382a; border-color: #357652; }
+.tone-medium { color: #ffe396; background: #3b3015; border-color: #856d2e; }
+.tone-hard { color: #ffb1b1; background: #3b2028; border-color: #8d4653; }
+.tone-unknown { color: #c2cbdb; background: #283142; border-color: #566075; }
+#route-detail { width: min(1200px, calc(100% - 24px)); max-width: calc(100% - 24px); max-height: 85vh; padding: 20px; border: 1px solid #35415a; border-radius: 8px; background: #101828; color: #e9eef9; overflow: auto; }
+#route-detail::backdrop { background: rgb(0 0 0 / 70%); }
+.detail-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.detail-heading h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; min-width: 0; }
+.detail-heading button { flex-shrink: 0; }
+.detail-metrics { gap: 16px 32px; }
+.detail-metrics > div { min-width: 0; max-width: 100%; }
+.detail-table-scroll { overflow: auto; max-height: 48vh; width: 100%; }
+.detail-table-scroll th { z-index: 1; }
+.detail-note, .detail-status { font-size: 13px; color: #a0adc5; overflow-wrap: anywhere; }
+@media (max-width: 600px) { #route-detail { padding: 14px; } }

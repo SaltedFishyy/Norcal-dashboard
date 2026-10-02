@@ -7,7 +7,7 @@ const errors = new Map([
   ['SnapshotInvalidError', [500, 'snapshot_invalid']],
 ]);
 
-export function createRequestHandler({ getSnapshot, getStaticFile, log = () => {} }) {
+export function createRequestHandler({ getSnapshot, getRouteDetail, getStaticFile, log = () => {} }) {
   return (req, res) => {
     // Never log caller-controlled URLs or exception details; they may contain secrets.
     const respond = (status, body) => {
@@ -39,7 +39,7 @@ export function createRequestHandler({ getSnapshot, getStaticFile, log = () => {
         } catch { respond(500, { error: 'internal_error' }); }
         return;
       }
-      if (!['/api/health', '/api/route-profiles'].includes(url.pathname)) {
+      if (!['/api/health', '/api/route-profiles', '/api/route-details'].includes(url.pathname)) {
         respond(404, { error: 'not_found' }); return;
       }
       if (req.method !== 'GET') {
@@ -47,6 +47,19 @@ export function createRequestHandler({ getSnapshot, getStaticFile, log = () => {
         respond(405, { error: 'method_not_allowed' }); return;
       }
       if (url.pathname === '/api/health') { respond(200, { ok: true }); return; }
+      if (url.pathname === '/api/route-details') {
+        const ids = url.searchParams.getAll('route_id');
+        if (ids.length !== 1 || !/^\d+$/.test(ids[0]) || !Number.isSafeInteger(Number(ids[0])) || Number(ids[0]) < 1) {
+          respond(400, { error: 'invalid_route_id' }); return;
+        }
+        try { respond(200, await getRouteDetail(Number(ids[0]))); }
+        catch (error) {
+          const mappings = { RouteDetailNotFoundError: [404, 'route_detail_not_found'], RouteDetailInvalidError: [500, 'route_detail_invalid'] };
+          const [status, code] = Object.hasOwn(mappings, error?.name) ? mappings[error.name] : [500, 'internal_error'];
+          respond(status, { error: code });
+        }
+        return;
+      }
       const stations = url.searchParams.getAll('station');
       if (stations.length !== 1 || !/^[A-Za-z0-9._-]{1,32}$/.test(stations[0])) {
         respond(400, { error: 'invalid_station' }); return;

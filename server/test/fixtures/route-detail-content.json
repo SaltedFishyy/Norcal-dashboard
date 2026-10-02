@@ -1,0 +1,9 @@
+{
+  "code": 200,
+  "success": true,
+  "data": [
+    { "postalCode": "00123", "postalCodeTag": "1", "postalCodeDifficulty": "A级 难", "assignedRouteAreaFirstOrderMileage": 12.34, "experiencedPph": 23.45, "deliveryFailRate": 0.0047, "dnrRate": 0.5, "safetyLevel": "安全" },
+    { "postalCode": "00987", "postalCodeTag": "0", "postalCodeDifficulty": null, "assignedRouteAreaFirstOrderMileage": null, "experiencedPph": null, "deliveryFailRate": null, "dnrRate": null, "safetyLevel": "一般" },
+    { "postalCode": "00888", "postalCodeTag": null, "postalCodeDifficulty": "D级 极易", "assignedRouteAreaFirstOrderMileage": 12.34, "experiencedPph": 0, "deliveryFailRate": 0, "dnrRate": 0, "safetyLevel": null }
+  ]
+}

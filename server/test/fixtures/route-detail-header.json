@@ -1,0 +1,5 @@
+{
+  "code": 200,
+  "success": true,
+  "data": { "roadAreaName": "MOCK-001", "postalCodeNum": 3, "postalCodeList": "00123,00987,00888", "roadAreaDifficulty": "A级 难", "roadAreaDifficultyCode": "3" }
+}
