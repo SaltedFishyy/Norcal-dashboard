@@ -40,6 +40,17 @@
 - [ ] RD-Q3 第一版只按单条 Route 手动抓取。以后是否需要多条 / 全部 Route，以及可接受的 DMS 请求量（全部 51 条约 560 个请求）（2026-10-02）
 - [ ] RD-Q4 ZIP 指标的统计窗口（「路区画像由近 30 天的数据生成」是否同样适用于标签详情）
 
+## Tableau Route Map
+
+见 `docs/features/tableau-route-map.md`。
+
+- [x] TBL-Q1 → **已解决（2026-10-02）**：使用 Route Profile 列表接口的 `postalCodeList`，存为 `postal_codes`（TBL1.5 阶段 A 结论，见 spec 第 4.1 节）。原问题：Station → Route → ZIP 的正式来源：TBL1.5 探索 DMS 是否有 Station 级批量来源；没有时在 A（人工 CSV）/ B（旧 roster）/ C（逐 Route 抓取，约 560 请求 / Station）中选择（2026-10-02）
+- [ ] TBL-Q2 ZIP 归属冲突（同 Station 多 Route、或多 Station）出现时的业务规则。当前做法：抓取 / 导出失败并报告，不自动消解（2026-10-02）；SFO01 实测 0 冲突
+- [ ] TBL-Q3 无 ZCTA polygon 的 ZIP 以后是否用点显示；点位坐标从哪里来（2026-10-02）
+- [ ] TBL-Q4 边界截取的州范围（至少 CA + NV）和服务区 Station 清单（2026-10-02）
+- [ ] TBL-Q5 `.twbx` 和导出数据以后的存放位置（Tableau Server / Cloud 或其他内部位置）（2026-10-02）
+- [ ] TBL-Q6 SMF01 等非 SFO01 Station 的数据依赖 D8（切换页头全局站点）的受控测试授权（2026-10-02）
+
 ## Route Difficulty
 
 - [ ] 什么 PPH 范围算 Hard？

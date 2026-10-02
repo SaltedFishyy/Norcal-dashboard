@@ -147,6 +147,7 @@ Notes
 | `pph` | number \| null | DMS 原值，不自行计算 | 已确认 |
 | `first_mile_distance` | number \| null | DMS 原值（`firstOrderMileage`），单位 mile | 已确认（T2） |
 | `address_type_distribution` | array \| null | DMS `receiveAddressType[]` → `[{ type_code, type_name, share }]`，`share` 为占比（每个 Route 合计 1.0） | 已确认（T2 / T3） |
+| `postal_codes` | string[] | 该 Route 包含的 ZIP：DMS 列表字段 `postalCodeList`（逗号分隔字符串）按逗号拆分。每个都是 5 位字符串（保留前导 0）；数量必须等于 `postalCodeNum`；同一 Route 内不重复；同一 Station 内一个 ZIP 只能属于一条 Route。任一校验不通过时整次抓取失败、报告原因、不写 snapshot（不自动消解）。`raw` 中保留 `postalCodeList` / `postalCodeNum` 原值。schema_version 仍为 1：新 snapshot 必须写此字段；旧 snapshot 缺失时 reader / API 仍可读取；不做 migration | 已确认（Product Owner 2026-10-02，TBL2） |
 | `route_difficulty` | string \| null | DMS 系统难易度（`roadAreaDifficulty`，另存 code），不自行推算；前端默认展示 | 已确认（D4b） |
 | `route_difficulty_manual` | string \| null | DMS 人工难易度（`roadAreaDifficultyManual(Name)`），空值为 null | 已确认（D4b） |
 | `fetched_at` | ISO datetime（Station 级） | 该 Station 最近一次成功抓取的时间 | 已确认 |
@@ -211,3 +212,27 @@ ZIP 级字段（`getRoadAreaContent.data[]`）：
 | `safety_level` | string \| null | `safetyLevel` | DMS 原值（样本：安全 / 一般 / 风险 / 高危），接口没有 code |
 | `raw` | object | 整条原始记录 | 调试用；API 不返回 |
 | `parse_errors` | array | — | 类型不符时记录字段名，值存为 null |
+
+## 10. Tableau Route-ZIP 输入表（Station → Route → ZIP）
+
+- 规格：`docs/features/tableau-route-map.md`（设计 Approved 2026-10-02；TBL2 定稿前字段可能微调）
+- 来源：**`route-profiles.json` 中每行的 `postal_codes`（第 8 节）**，即 DMS 路区画像列表接口的 `postalCodeList`（Product Owner 2026-10-02 确认，TBL1.5 阶段 A 结论）。不需要逐 Route 抓取
+- 生成方式：`npm run export:tableau-route-zips`，只读 `route-profiles.json`，不访问 DMS
+- 粒度：一行 = 一个 Station 下某条 Route 的一个 ZIP
+- 存储：本机 runtime 目录 `tableau/route-zips.csv`（不进 Git）
+- 不包含任何指标（Difficulty / PPH / Volume 等）
+
+| 字段 | 类型 | 定义 | 状态 |
+|---|---|---|---|
+| `station` | string | Station 代码，取自数据来源中明确的 Station，**不从 `route_name` 解析** | 已确认 |
+| `route_id` | number \| null | DMS `roadAreaId`（与第 8、9 节相同）；来源不提供时为 null | 已确认 |
+| `route_name` | string | Route 名称原值 | 已确认 |
+| `postal_code` | string | 5 位 ZIP 字符串，保留前导 0，不转数字；与边界文件 `ZCTA5CE20` join | 已确认 |
+| `source` | string | 取 snapshot 的 `source`（目前为 `dms-playwright`） | 已确认（TBL2） |
+| `fetched_at` | ISO datetime | 该 Station snapshot 的 `fetched_at`（DMS 抓取时间，不是导出时间） | 已确认（TBL2） |
+
+校验与冲突（不自动消解，Product Owner 2026-10-02 更新 spec M5）：抓取时 transform 已校验（第 8 节 `postal_codes`）；导出时再校验一次。同一 Station 内一个 `postal_code` 属于多条 Route、一个 `postal_code` 属于多个 Station、或格式 / 数量不符时，**导出失败并报告冲突明细，不写 CSV**。旧 snapshot 没有 `postal_codes` 时导出失败并提示重新运行 `npm run dms:scrape`。
+
+CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数字，TBL3 中需把该字段设为字符串（北加 ZIP 没有前导 0，但规则上必须是字符串）。
+
+边界文件：Census 2020 ZCTA cb 1:500k（`cb_2020_us_zcta520_500k`），join key `ZCTA5CE20`。**ZCTA ≠ USPS 投递 ZIP 边界**；PO Box / 单一机构 / 2020 年后新设的 ZIP 可能没有 polygon（实测 SFO01-001 中 21 个 ZIP 有 6 个没有）。

@@ -2,7 +2,7 @@
 
 Tableau 数据集、看板和集成方式的说明。项目级原则见 `AGENTS.md` 第 17 节。
 
-> 状态：初版。内容迁移自旧版 `AGENTS.md` 第 17 节（2026-09-30），属于**规划方向**，目前还没有已建成的 Tableau 数据集或看板。
+> 状态：初版。2026-10-02 起有第一个确认的 Tableau 项目：Route Map，见 `docs/features/tableau-route-map.md`（Tableau Desktop；不使用 Tableau Public；`.twbx` 不进 Git）。内容迁移自旧版 `AGENTS.md` 第 17 节（2026-09-30），属于**规划方向**，目前还没有已建成的 Tableau 数据集或看板。
 
 ---
 
@@ -66,4 +66,5 @@ Date | Station | Route | ZIP | DSP | Volume | PPH | Delivery Success Rate | Diff
 
 | 数据集 | 粒度 | 来源 | 更新方式 | 状态 |
 |---|---|---|---|---|
-| （暂无） | | | | |
+| Route-ZIP 输入表（Route Map） | Station × Route × ZIP | 待 TBL1.5 确定（见 `docs/features/tableau-route-map.md` M3） | 待定（第一版手动导出） | 设计已确认，未实现 |
+| ZCTA 边界（截取） | ZIP（ZCTA） | Census 2020 ZCTA cb 1:500k | 十年一次（随人口普查） | 设计已确认，未生成 |
