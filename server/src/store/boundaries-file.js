@@ -1,0 +1,63 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+export class BoundaryInvalidError extends Error {
+  constructor() { super('Boundary data is invalid.'); this.name = 'BoundaryInvalidError'; }
+}
+export class BoundaryNotFoundError extends Error {
+  constructor() { super('Boundary data is unavailable.'); this.name = 'BoundaryNotFoundError'; }
+}
+
+const cache = new Map();
+
+export function validateBoundaries(geojson, meta) {
+  const fail = () => { throw new BoundaryInvalidError(); };
+  if (geojson?.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) fail();
+  const zips = new Set();
+  for (const feature of geojson.features) {
+    const zip = feature?.properties?.postal_code;
+    if (feature?.type !== 'Feature' || !['Polygon', 'MultiPolygon'].includes(feature.geometry?.type)
+      || typeof zip !== 'string' || !/^\d{5}$/.test(zip) || zips.has(zip)) fail();
+    // Reject malformed coordinates before they reach Leaflet; preserve the source geometry.
+    const polygonValid = polygon => Array.isArray(polygon) && polygon.length > 0 && polygon.every(ring =>
+      Array.isArray(ring) && ring.length >= 4 && ring.every(point => Array.isArray(point) && point.length >= 2
+        && point.every(Number.isFinite) && Math.abs(point[0]) <= 180 && Math.abs(point[1]) <= 90)
+      && ring[0].length === ring.at(-1).length && ring[0].every((n, i) => n === ring.at(-1)[i]));
+    const coordinates = feature.geometry.coordinates;
+    if (feature.geometry.type === 'Polygon' ? !polygonValid(coordinates)
+      : !Array.isArray(coordinates) || !coordinates.length || !coordinates.every(polygonValid)) fail();
+    zips.add(zip);
+  }
+  if (!meta || typeof meta.dataset !== 'string' || !meta.dataset || !Number.isInteger(meta.vintage)
+    || typeof meta.scope?.postal_code_pattern !== 'string' || !meta.scope.postal_code_pattern
+    || meta.feature_count !== geojson.features.length) fail();
+  let pattern;
+  try { pattern = new RegExp(meta.scope.postal_code_pattern); } catch { fail(); }
+  const inScope = zip => typeof zip === 'string' && /^\d{5}$/.test(zip) && pattern.test(zip);
+  if ([...zips].some(zip => !inScope(zip))) fail();
+  return { geojson, meta, byZip: new Map(geojson.features.map(feature => [feature.properties.postal_code, feature.geometry])), inScope };
+}
+
+export async function readBoundaries({ geoDir, fileOps }) {
+  // Only successful default reads are cached; injected file operations stay isolated for tests.
+  if (fileOps) return loadBoundaries(geoDir, fileOps);
+  const key = path.resolve(geoDir);
+  if (!cache.has(key)) {
+    const pending = loadBoundaries(key, { readFile }).catch(error => { cache.delete(key); throw error; });
+    cache.set(key, pending);
+  }
+  return cache.get(key);
+}
+
+async function loadBoundaries(geoDir, fileOps) {
+  let texts;
+  try {
+    texts = await Promise.all(['zcta2020_ca_nv_or.geojson', 'zcta2020_ca_nv_or.meta.json']
+      .map(filename => fileOps.readFile(path.join(geoDir, filename), 'utf8')));
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new BoundaryNotFoundError();
+    throw new BoundaryInvalidError();
+  }
+  try { return validateBoundaries(...texts.map(text => JSON.parse(text))); }
+  catch { throw new BoundaryInvalidError(); }
+}

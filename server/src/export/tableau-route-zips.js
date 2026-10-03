@@ -1,5 +1,5 @@
 import { SchemaError } from '../transform/route-profile.js';
-import { validatePostalCodes, parseRoutePostalCodes, findPostalCodeConflicts } from '../transform/postal-codes.js';
+import { validatePostalCodes, parseRoutePostalCodes, findPostalCodeConflicts, findCrossStationConflicts } from '../transform/postal-codes.js';
 
 export const columns = ['station', 'route_id', 'route_name', 'postal_code', 'source', 'fetched_at'];
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -12,7 +12,7 @@ export function exportTableauRouteZips(data) {
   if (!data || data.schema_version !== 1 || !data.stations || typeof data.stations !== 'object' || Array.isArray(data.stations)) {
     throw new SchemaError('Snapshot 结构无效');
   }
-  const rows = [], summary = [], issues = [], owners = new Map();
+  const rows = [], summary = [], issues = [], validStations = {};
   for (const station of Object.keys(data.stations).sort(compare)) {
     const snapshot = data.stations[station];
     if (!snapshot || !Array.isArray(snapshot.rows) || typeof snapshot.source !== 'string'
@@ -41,8 +41,6 @@ export function exportTableauRouteZips(data) {
           const entry = { station, route_id: row.route_id, route_name: row.route_name, postal_code,
             source: snapshot.source, fetched_at: snapshot.fetched_at };
           rows.push(entry);
-          if (!owners.has(postal_code)) owners.set(postal_code, []);
-          owners.get(postal_code).push(entry);
         }
       } catch (error) {
         if (!(error instanceof SchemaError)) throw error;
@@ -50,13 +48,12 @@ export function exportTableauRouteZips(data) {
       }
     }
     const conflicts = findPostalCodeConflicts(validRows);
+    Object.defineProperty(validStations, station, { value: { rows: validRows }, enumerable: true });
     if (conflicts.length) issues.push(`Station ${station} ZIP 冲突: ${JSON.stringify(conflicts)}`);
     summary.push({ station, route_count: snapshot.rows.length, row_count: validRows.reduce((n, row) => n + row.postal_codes.length, 0), unique_zip_count: zips.size });
   }
-  for (const [zip, entries] of owners) {
-    if (new Set(entries.map((entry) => entry.station)).size > 1) {
-      issues.push(`跨 Station ZIP 冲突 ${zip}: ${JSON.stringify(entries.map(({ station, route_id, route_name }) => ({ station, route_id, route_name })))}`);
-    }
+  for (const { postal_code, routes } of findCrossStationConflicts(validStations)) {
+    issues.push(`跨 Station ZIP 冲突 ${postal_code}: ${JSON.stringify(routes)}`);
   }
   if (issues.length) throw new SchemaError(issues.join('\n'));
   rows.sort((a, b) => compare(a.station, b.station) || compare(a.route_name, b.route_name) || compare(a.postal_code, b.postal_code));

@@ -1,3 +1,22 @@
+// Lightweight user-facing text shared by the profile page and detail modal.
+export const profileText = {
+  loading: '加载中…', networkError: '无法连接本地服务器。',
+  empty: 'SFO01 暂无数据。请运行 npm run dms:scrape 创建快照。',
+  loadError: code => `无法加载线路画像 (${code})。`,
+  routeName: '线路名称', routeId: 'Route ID', station: '站点', dsp: 'DSP',
+  volume: 'Pickup Volume', pph: 'PPH', firstMile: '首公里距离 (mi)',
+  difficulty: '线路难度', manualDifficulty: '人工难度', zipCount: 'ZIP 数',
+  profileUpdated: '线路数据更新时间', detailUpdated: 'ZIP 详情更新时间',
+  zipDifficulty: 'ZIP 难度', experiencedPph: '熟手 PPH', exceptionRate: '派送异常率',
+  dnrRate: 'DNR 率', safety: '安全等级', zipTable: 'ZIP 画像表',
+  zipCaption: '按 ZIP 升序显示的 ZIP 画像',
+  firstMileNote: '首公里距离为线路级数值，在每个 ZIP 行重复显示。',
+  noDetail: '该线路暂无详细数据',
+  scrapeHint: route => `可运行 npm run dms:scrape-route-detail -- --route ${route} 获取。`,
+  detailError: code => `无法加载线路详情 (${code})。`,
+  detailNetworkError: '无法连接本地服务器 (server_unreachable)。',
+};
+
 export function formatValue(value) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
 }
@@ -32,13 +51,13 @@ export function formatUpdated(value) {
 // Only stable API codes are shown; unexpected response text may contain private paths.
 const errorCodes = new Set(['invalid_station', 'snapshot_invalid', 'internal_error', 'not_found', 'method_not_allowed']);
 export function pageState({ loading = false, status, data, failed = false } = {}) {
-  if (loading) return { state: 'loading', message: 'Loading route profiles…' };
-  if (failed) return { state: 'error', message: 'Cannot reach the local server.' };
+  if (loading) return { state: 'loading', message: profileText.loading };
+  if (failed) return { state: 'error', message: profileText.networkError };
   if ((status === 404 && ['snapshot_not_found', 'station_not_found'].includes(data?.error)) ||
       (status === 200 && Array.isArray(data?.rows) && data.rows.length === 0)) {
-    return { state: 'empty', message: 'No data yet for SFO01. Run npm run dms:scrape to create a snapshot.' };
+    return { state: 'empty', message: profileText.empty };
   }
   if (status === 200 && Array.isArray(data?.rows)) return { state: 'success', message: '' };
   const code = errorCodes.has(data?.error) ? data.error : 'internal_error';
-  return { state: 'error', message: `Could not load route profiles (${code}).` };
+  return { state: 'error', message: profileText.loadError(code) };
 }

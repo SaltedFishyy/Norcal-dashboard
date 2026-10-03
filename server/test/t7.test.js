@@ -161,7 +161,10 @@ test('T7 page states cover loading, success, no data and sanitized errors', () =
     const result = pageState({ status, data: { error } });
     assert.equal(result.state, 'error'); assert.ok(result.message.includes(error));
   }
-  assert.equal(pageState({ failed: true }).message, 'Cannot reach the local server.');
+  assert.equal(pageState({ failed: true }).message, '无法连接本地服务器。');
+  assert.equal(pageState({ loading: true }).message, '加载中…');
+  assert.equal(pageState({ status: 200, data: { rows: [] } }).message, 'SFO01 暂无数据。请运行 npm run dms:scrape 创建快照。');
+  assert.equal(pageState({ status: 500, data: { error: 'snapshot_invalid' } }).message, '无法加载线路画像 (snapshot_invalid)。');
   assert.equal(pageState({ status: 200, data: {} }).state, 'error');
   assert.doesNotMatch(pageState({ status: 500, data: { error: 'C:/private/path stack' } }).message, /private|stack|C:/);
 });
@@ -169,9 +172,10 @@ test('T7 page states cover loading, success, no data and sanitized errors', () =
 test('T7 frontend structure and safe rendering use no external resources', async () => {
   const sources = await Promise.all(assets.map(([, filename]) => fs.readFile(path.join(webDir, filename), 'utf8')));
   const [html, css, app] = sources;
-  assert.match(html, /North California Route Profile/);
-  for (const label of ['Station', 'SFO01', 'Last Updated', 'Total Routes', 'Snapshot from DMS — not live data',
-    'Route Name', 'DSP / Fleet', 'Pickup Volume', 'PPH', 'First-mile Distance (mi)', 'Route Difficulty', 'Manual Difficulty']) {
+  assert.match(html, /北加州线路画像/);
+  assert.match(html, /lang="zh-CN"/);
+  for (const label of ['站点', 'SFO01', '更新时间', '线路总数', 'DMS 快照，非实时数据',
+    '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '人工难度', '重试', '线路地图', '关闭']) {
     assert.ok(html.includes(label), label);
   }
   assert.equal((html.match(/<th scope=/g) || []).length, 7);
@@ -225,7 +229,7 @@ test('T7 app renders API order and text safely, and handles retries and failures
     return reply;
   };
   await import('../../web/app.js');
-  assert.equal(elements.message.textContent, 'Loading route profiles…');
+  assert.equal(elements.message.textContent, '加载中…');
   assert.equal(elements.profiles.attributes['aria-busy'], 'true');
   const iso = '2026-10-01T18:20:35Z';
   const malicious = '<img src=x onerror=alert(1)>';

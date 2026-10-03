@@ -1,4 +1,4 @@
-import { formatValue, formatNumber, formatPercent, formatUpdated, difficultyTone } from './format.js';
+import { formatValue, formatNumber, formatPercent, formatUpdated, difficultyTone, profileText as t } from './format.js';
 
 let sequence = 0;
 let trigger;
@@ -6,9 +6,9 @@ let activeDialog;
 const initialized = new WeakSet();
 const codes = new Set(['invalid_route_id', 'route_detail_invalid', 'internal_error', 'not_found', 'method_not_allowed']);
 const columns = [
-  ['ZIP', 'postal_code'], ['ZIP Difficulty', 'postal_code_difficulty', 'difficulty'],
-  ['First-mile Distance (mi)', 'first_mile_distance', 'number'], ['Experienced PPH', 'experienced_pph', 'number'],
-  ['Delivery Exception Rate', 'delivery_fail_rate', 'percent'], ['DNR Rate', 'dnr_rate', 'percent'], ['Safety Level', 'safety_level'],
+  ['ZIP', 'postal_code'], [t.zipDifficulty, 'postal_code_difficulty', 'difficulty'],
+  [t.firstMile, 'first_mile_distance', 'number'], [t.experiencedPph, 'experienced_pph', 'number'],
+  [t.exceptionRate, 'delivery_fail_rate', 'percent'], [t.dnrRate, 'dnr_rate', 'percent'], [t.safety, 'safety_level'],
 ];
 const element = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -20,22 +20,32 @@ function difficulty(value) {
   if (value === null || value === undefined || value === '') return element('span', '—');
   return element('span', formatValue(value), `difficulty tone-${difficultyTone(value)}`);
 }
-function renderDetail(content, data, row) {
+function basicInfo(row, fetchedAt, data) {
   const metrics = element('dl', undefined, 'metrics detail-metrics');
+  const zipCount = data ? data.zip_count : Array.isArray(row.postal_codes) ? row.postal_codes.length : null;
   for (const [label, value, kind] of [
-    ['Route Name', data.route_name], ['Route Difficulty', data.route_difficulty, 'difficulty'],
-    ['ZIP Count', data.zip_count], ['DSP / Fleet', row.dsp_name], ['Last Updated', data.fetched_at, 'date'],
+    [t.routeName, row.route_name], [t.routeId, row.route_id], [t.station, row.station], [t.dsp, row.dsp_name],
+    [t.volume, row.pickup_volume, 'integer'], [t.pph, row.pph, 'number'],
+    [t.firstMile, row.first_mile_distance, 'number'], [t.difficulty, row.route_difficulty, 'difficulty'],
+    [t.manualDifficulty, row.route_difficulty_manual, 'difficulty'], [t.zipCount, zipCount, 'integer'],
+    [t.profileUpdated, fetchedAt, 'date'], [t.detailUpdated, data?.fetched_at, 'date'],
   ]) {
     const item = element('div'), dd = element('dd');
     if (kind === 'difficulty') dd.append(difficulty(value));
-    else dd.textContent = kind === 'date' ? formatUpdated(value) : formatValue(value);
+    else dd.textContent = kind === 'date' ? formatUpdated(value)
+      : kind === 'integer' ? formatNumber(value, 0, 0)
+      : kind === 'number' ? formatNumber(value, 2, 2) : formatValue(value);
     if (kind === 'date' && dd.textContent !== '—') dd.title = value;
     item.append(element('dt', label), dd); metrics.append(item);
   }
+  return metrics;
+}
+function renderDetail(content, data, row, fetchedAt) {
+  const metrics = basicInfo(row, fetchedAt, data);
   const scroll = element('div', undefined, 'detail-table-scroll');
-  scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', 'ZIP profile table');
+  scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', t.zipTable);
   const table = element('table'), head = element('thead'), header = element('tr'), body = element('tbody');
-  table.append(element('caption', 'ZIP profiles in ascending ZIP order', 'sr-only'));
+  table.append(element('caption', t.zipCaption, 'sr-only'));
   for (const [label, , kind] of columns) {
     const th = element('th', label, kind === 'number' || kind === 'percent' ? 'numeric' : undefined);
     th.setAttribute('scope', 'col'); header.append(th);
@@ -63,10 +73,10 @@ function renderDetail(content, data, row) {
     body.append(tr);
   }
   table.append(head, body); scroll.append(table);
-  content.replaceChildren(metrics, scroll, element('p', 'First-mile distance is the route-level value, repeated for each ZIP.', 'detail-note'));
+  content.replaceChildren(metrics, scroll, element('p', t.firstMileNote, 'detail-note'));
 }
 
-export async function openRouteDetail(row, source = document.activeElement) {
+export async function openRouteDetail(row, source = document.activeElement, fetchedAt) {
   const dialog = document.getElementById('route-detail');
   const content = document.getElementById('detail-content');
   trigger = source; activeDialog = dialog;
@@ -87,22 +97,23 @@ export async function openRouteDetail(row, source = document.activeElement) {
   }
   const current = ++sequence;
   document.getElementById('detail-title').textContent = formatValue(row.route_name);
-  content.replaceChildren(element('p', 'Loading route detail…', 'detail-status'));
+  const showStatus = (...nodes) => content.replaceChildren(basicInfo(row, fetchedAt), ...nodes);
+  showStatus(element('p', t.loading, 'detail-status'));
   content.setAttribute('aria-busy', 'true');
   if (!dialog.open) dialog.showModal();
   try {
     const response = await fetch(`/api/route-details?route_id=${encodeURIComponent(row.route_id)}`, { cache: 'no-store' });
     const data = await response.json();
     if (current !== sequence) return;
-    if (response.status === 200 && Array.isArray(data?.zips)) renderDetail(content, data, row);
+    if (response.status === 200 && Array.isArray(data?.zips)) renderDetail(content, data, row, fetchedAt);
     else if (response.status === 404 && data?.error === 'route_detail_not_found') {
-      content.replaceChildren(element('p', `No detail yet for ${formatValue(row.route_name)}. Run npm run dms:scrape-route-detail -- --route ${formatValue(row.route_name)} to fetch it.`, 'detail-status'));
+      showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(formatValue(row.route_name)), 'detail-note'));
     } else {
       const code = codes.has(data?.error) ? data.error : 'internal_error';
-      content.replaceChildren(element('p', `Could not load route detail (${code}).`, 'detail-status'));
+      showStatus(element('p', t.detailError(code), 'detail-status'));
     }
   } catch {
-    if (current === sequence) content.replaceChildren(element('p', 'Cannot reach the local server (server_unreachable).', 'detail-status'));
+    if (current === sequence) showStatus(element('p', t.detailNetworkError, 'detail-status'));
   } finally {
     if (current === sequence) content.setAttribute('aria-busy', 'false');
   }

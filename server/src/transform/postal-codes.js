@@ -37,3 +37,15 @@ export function findPostalCodeConflicts(rows) {
   return [...owners].filter(([, routes]) => routes.length > 1)
     .map(([postal_code, routes]) => ({ postal_code, routes }));
 }
+
+export function findCrossStationConflicts(stationsData) {
+  const owners = new Map();
+  for (const [station, snapshot] of Object.entries(stationsData)) {
+    for (const row of snapshot.rows) for (const zip of row.postal_codes) {
+      if (!owners.has(zip)) owners.set(zip, []);
+      owners.get(zip).push({ station, route_id: row.route_id, route_name: row.route_name });
+    }
+  }
+  return [...owners].filter(([, entries]) => new Set(entries.map(entry => entry.station)).size > 1)
+    .map(([postal_code, routes]) => ({ postal_code, routes }));
+}

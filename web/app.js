@@ -39,7 +39,7 @@ function render(result, data) {
       const content = isRoute ? document.createElement('button') : hasDifficulty ? document.createElement('span') : td;
       if (isRoute) {
         content.type = 'button'; content.className = 'route-link';
-        content.addEventListener('click', () => openRouteDetail(row, content)); td.append(content);
+        content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at)); td.append(content);
       }
       if (hasDifficulty) {
         content.className = `difficulty tone-${difficultyTone(value)}`; td.append(content);

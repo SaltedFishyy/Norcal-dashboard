@@ -1,22 +1,41 @@
 import http from 'node:http';
-import { getStationSnapshot } from '../store/route-profiles-file.js';
+import { getStationSnapshot, readRouteProfiles, StationNotFoundError } from '../store/route-profiles-file.js';
+import { readBoundaries } from '../store/boundaries-file.js';
+import { buildRouteMap, lookupZip } from '../route-map/route-map.js';
 import { getRouteDetail } from '../store/route-details-file.js';
 import { createRequestHandler } from './app.js';
 import { fileURLToPath } from 'node:url';
 import { createStaticReader } from './static-files.js';
+import path from 'node:path';
+import { readBasemap } from '../store/basemap-file.js';
 
 const defaultWebDir = fileURLToPath(new URL('../../../web/', import.meta.url));
+const defaultGeoDir = fileURLToPath(new URL('../../../geo/', import.meta.url));
+const defaultLeafletDir = fileURLToPath(new URL('../../../node_modules/leaflet/dist/', import.meta.url));
+const defaultProtomapsDir = fileURLToPath(new URL('../../../node_modules/protomaps-leaflet/dist/', import.meta.url));
 
-export function createApiServer({ runtimeDir, webDir = defaultWebDir, log } = {}) {
+export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = defaultGeoDir,
+  leafletDir = defaultLeafletDir, protomapsDir = defaultProtomapsDir,
+  basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, log } = {}) {
   return http.createServer(createRequestHandler({
     getSnapshot: (station) => getStationSnapshot({ runtimeDir, station }), log,
     getRouteDetail: (routeId) => getRouteDetail({ runtimeDir, routeId }),
-    getStaticFile: createStaticReader(webDir),
+    getRouteMap: async station => {
+      const profiles = await readRouteProfiles({ runtimeDir });
+      if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
+      const boundaries = await readBoundaries({ geoDir });
+      return buildRouteMap({ profiles, station, boundaries });
+    },
+    getMapStations: async () => Object.keys((await readRouteProfiles({ runtimeDir })).stations).sort(),
+    getZip: async postalCode => lookupZip({ profiles: await readRouteProfiles({ runtimeDir }),
+      boundaries: await readBoundaries({ geoDir }), postalCode }),
+    getStaticFile: createStaticReader(webDir, leafletDir, protomapsDir),
+    getBasemap: name => readBasemap({ basemapDir, name }),
   }));
 }
 
-export async function startApiServer({ port = 3000, runtimeDir, webDir, log } = {}) {
-  const server = createApiServer({ runtimeDir, webDir, log });
+export async function startApiServer({ port = 3000, ...options } = {}) {
+  const server = createApiServer(options);
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => {

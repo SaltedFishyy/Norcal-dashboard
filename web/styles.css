@@ -35,9 +35,61 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .detail-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .detail-heading h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; min-width: 0; }
 .detail-heading button { flex-shrink: 0; }
-.detail-metrics { gap: 16px 32px; }
+.detail-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 32px; }
 .detail-metrics > div { min-width: 0; max-width: 100%; }
 .detail-table-scroll { overflow: auto; max-height: 48vh; width: 100%; }
 .detail-table-scroll th { z-index: 1; }
 .detail-note, .detail-status { font-size: 13px; color: #a0adc5; overflow-wrap: anywhere; }
-@media (max-width: 600px) { #route-detail { padding: 14px; } }
+@media (max-width: 600px) { #route-detail { padding: 14px; } .detail-metrics { grid-template-columns: minmax(0, 1fr); } }
+
+.map-page a, header > a { color: #65dace; }
+.map-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.map-heading > div { margin-right: auto; }
+.map-heading label { display: flex; align-items: center; gap: 8px; }
+.map-heading select { background: #161f33; color: #e9eef9; border: 1px solid #8592ad; padding: 8px; max-width: 100%; }
+#map-message { color: #a0adc5; overflow-wrap: anywhere; }
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 20px; }
+#route-map { height: 70vh; min-height: 420px; background: #f8f4f0; border: 1px solid #263149; border-radius: 8px; }
+.map-sidebar { min-width: 0; display: grid; align-content: start; gap: 14px; }
+.map-sidebar input { width: 100%; min-width: 0; padding: 8px; margin: 8px 0; background: #161f33; color: #e9eef9; border: 1px solid #8592ad; border-radius: 4px; }
+.map-routes { max-height: 240px; overflow-y: auto; margin-bottom: 12px; }
+.map-route { width: 100%; display: flex; gap: 8px; align-items: center; text-align: left; margin: 0 0 4px; padding: 8px; font: inherit; font-size: 13px; }
+.map-route span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; flex: 1; }
+.map-route span:last-child { flex-shrink: 0; font-size: 11px; }
+.map-route[aria-pressed="true"] { border-color: #2dd9c6; background: #244044; }
+.map-swatch { width: 12px; height: 12px; flex-shrink: 0; border-radius: 2px; }
+.map-sidebar #map-coverage { font-size: 26px; margin: 0; }
+.map-sidebar .map-warning { color: #ffe396; }
+.map-sidebar summary { cursor: pointer; font-size: 15px; }
+.map-sidebar details[open] summary { margin-bottom: 12px; }
+.map-fit button { margin: 0; background: #101828; }
+.map-page .leaflet-control-attribution a { color: #65dace; }
+.map-sidebar .panel { padding: 16px; }
+.map-sidebar h2 { margin: 0 0 12px; font-size: 17px; }
+.map-sidebar p, .map-sidebar dd { font-size: 13px; overflow-wrap: anywhere; }
+.map-sidebar dl, .leaflet-tooltip dl { margin: 0; }
+.map-sidebar dl > div, .leaflet-tooltip dl > div { margin-bottom: 8px; }
+.map-missing { min-width: 0; table-layout: fixed; }
+.map-missing th, .map-missing td { white-space: normal; overflow-wrap: anywhere; padding: 6px 4px; }
+.map-missing th:first-child { width: 22%; }
+.map-missing th:nth-child(2) { width: 32%; }
+.map-page .leaflet-tooltip { background: #101828; color: #e9eef9; border-color: #8592ad; }
+.map-page .leaflet-tooltip { width: max-content; white-space: nowrap; }
+.map-page .leaflet-tooltip dl > div { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.map-page .leaflet-tooltip dl > div:last-child { margin-bottom: 0; }
+.map-page .leaflet-tooltip dt { margin: 0; }
+.map-page .leaflet-tooltip dd { margin: 0; font-size: 13px; white-space: nowrap; overflow-wrap: normal; }
+.map-page .leaflet-control-attribution { background: #101828; color: #a0adc5; font-size: 10px; }
+@media (max-width: 750px) {
+  .map-layout { grid-template-columns: minmax(0, 1fr); }
+  #route-map { height: 52vh; min-height: 330px; }
+  .map-heading { gap: 14px; }
+}
+
+.map-page #map-message.map-error, .map-page .map-error { color: #ffb1b1; border-left: 3px solid #e26981; padding-left: 10px; }
+.map-badge { display: inline-block; margin-left: 6px; padding: 2px 6px; border: 1px solid #8592ad; border-radius: 4px; color: #e9eef9; font-size: 11px; }
+.map-sidebar .map-route-name { font-size: 26px; margin: 0; overflow-wrap: anywhere; }
+.map-summary-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.map-sidebar .map-summary-metrics dd { font-size: 24px; line-height: 1.25; }
+.map-summary-metrics dt { font-size: 11px; }
+.map-summary-metrics small { font-size: 11px; color: #a0adc5; }
