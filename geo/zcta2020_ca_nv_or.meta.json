@@ -1,0 +1,12 @@
+{
+  "dataset": "cb_2020_us_zcta520_500k",
+  "vintage": 2020,
+  "source_url": "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+  "generated_at": "2026-10-02T23:20:18.925Z",
+  "boundary_file": "zcta2020_ca_nv_or.geojson",
+  "scope": {
+    "description": "All 2020 ZCTAs whose ZIP prefix is CA (90-96), NV (889-898) or OR (97)",
+    "postal_code_pattern": "^(9[0-6]|889|89[0-8]|97)"
+  },
+  "feature_count": 2519
+}
