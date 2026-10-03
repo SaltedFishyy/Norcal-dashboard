@@ -1,6 +1,9 @@
 # Tableau Route Map（Station → Route → ZIP 地图）— Spec
 
-- Status: **Approved（设计）**：Product Owner 2026-10-02 确认 TBL1 设计和实施顺序。**TBL1.5 的 DMS 探索等待 Product Owner 单独确认后才执行；TBL2 / TBL3 未授权实现。**
+- Status: **Tableau Desktop / workbook 路线：Paused / not selected**（Product Owner 2026-10-02：地图改为直接做进 NC Ops Console，见 `docs/features/route-map.md`）。
+  - **仍然有效、被 Web Route Map 复用的部分**：边界数据源决定（M1、M2、M6、第 3 节）、TBL1.5 的数据来源结论、TBL2 的 `postal_codes` 和 Route-ZIP 导出、TBL3 的边界截取和覆盖结果。
+  - **暂停的部分**：Tableau Desktop MVP（第 5、5.1 节）、`.twbx` 存放（M7）、Tableau 颜色方案（M8 的 Tableau 部分）。
+  - 历史：TBL1 设计 Approved；TBL1.5 阶段 A 完成；TBL2 已实现并提交；TBL3 边界准备完成，Tableau MVP 未搭建。
 - 更新：2026-10-02
 - 相关：`docs/tableau.md`；`docs/data-schema.md` 第 10 节；`docs/features/route-detail.md`；`docs/features/dms-refresh.md`（D8 全局站点）；`docs/open-questions.md`「Tableau Route Map」
 
@@ -87,6 +90,28 @@ SMF01   | 123      | SMF01-017  | 95667       | dms    | 2026-10-02T18:24:33Z
 - Missing Boundary ZIP 清单（当前 Station 中没有 polygon 的 ZIP，含 Route）。
 - 不做：Difficulty、PPH、Volume、自动刷新、dashboard 嵌入、Route label、point fallback、复杂颜色策略。
 
+### 5.1 Tableau Desktop 搭建步骤（TBL3 MVP）
+
+输入：
+- `%LOCALAPPDATA%\nc-ops-console\runtime-data\tableau\route-zips.csv`（`npm run export:tableau-route-zips` 生成；内部数据，不进 Git）
+- 仓库中的 `geo/zcta2020_sfo01.geojson`（边界，来源见 `geo/README.md`）
+
+1. **连接数据**：Connect → Text file → `route-zips.csv`。在数据源页把 `postal_code` 和 `route_id` 的类型改为 **String**（Tableau 可能默认推断为数字）。
+2. **加入边界**：在同一数据源里再添加连接 Spatial file → `zcta2020_sfo01.geojson`。拖到画布上，选择 **Left Join**，左边是 `route-zips.csv`，条件 `postal_code = postal_code`（GeoJSON 一侧也是字符串）。**必须是 left join**，这样没有 polygon 的 ZIP 仍然保留在数据中。
+3. **计算字段**：
+   - `Has Boundary` = `NOT ISNULL([Geometry])`
+   - `Mapped ZIP` = `COUNTD(IF [Has Boundary] THEN [postal_code] END)`
+   - `Total ZIP` = `COUNTD([postal_code])`
+   - `Coverage Label` = `"Mapped " + STR([Mapped ZIP]) + " / Total " + STR([Total ZIP])`
+4. **地图工作表（Route Map）**：双击 `Geometry`；`route_name` → Color；`postal_code` → Detail；在 Color 的 Border 中选深灰色细边界；Tooltip 编辑为 `ZIP: <postal_code>` / `Route: <route_name>` / `Station: <station>`。右下角 “N unknown” 是没有 polygon 的 ZIP，属于预期现象。
+5. **Station 筛选**：`station` → Filters，显示为 Single Value（dropdown），并设为 Apply to Worksheets → All Using This Data Source。
+6. **覆盖率工作表（Coverage）**：`Coverage Label` → Text。
+7. **缺失清单工作表（Missing Boundary ZIP）**：`route_name`、`postal_code` → Rows；`Has Boundary` → Filters，只保留 False。
+8. **Dashboard**：Route Map 为主体，旁边放 Coverage 和 Missing Boundary ZIP。
+9. **保存**：本机保存为 `.twb` 或 `.twbx`，放在仓库外（例如 `%LOCALAPPDATA%\nc-ops-console\tableau\`）。**不提交 Git、不发布到 Tableau Public。**
+
+SFO01 当前的预期结果：Coverage 显示 `Mapped 254 / Total 269`，缺失清单 15 行（见 `geo/README.md`）。
+
 ## 6. 实施顺序
 
 | 阶段 | 内容 | 状态 |
@@ -94,8 +119,8 @@ SMF01   | 123      | SMF01-017  | 95667       | dms    | 2026-10-02T18:24:33Z
 | TBL1 | 确认并记录 Census ZCTA 边界方案 | **完成**（本文档第 2、3 节） |
 | TBL1.5 | 受控、只读探索 DMS 的 Station 级 Route → ZIP 数据来源 | **完成**（阶段 A；阶段 B 不需要），见实现记录 |
 | TBL2 | Route Profile 增加 `postal_codes` + 校验；Route-ZIP CSV 导出 | **授权实现（2026-10-02）**，见第 4.1 节。边界截取不在本次范围 |
-| TBL3 | Tableau MVP（第 5 节） | 未授权 |
-| TBL4 | 自动更新、dashboard 嵌入、更多指标 | 以后再议 |
+| TBL3 | 边界准备 + Tableau MVP（第 5 节） | 边界准备**完成**（见实现记录，被 Web Route Map 复用）；Tableau MVP **Paused / not selected**（2026-10-02） |
+| TBL4 | 自动更新、dashboard 嵌入、更多指标 | Paused（随 Tableau 路线暂停） |
 
 ## 7. 验收标准（TBL2 / TBL3，届时细化）
 
@@ -139,3 +164,11 @@ SMF01   | 123      | SMF01-017  | 95667       | dms    | 2026-10-02T18:24:33Z
 - `npm run export:tableau-route-zips`：`runtime-data/tableau/route-zips.csv`，表头 `station,route_id,route_name,postal_code,source,fetched_at`，**51 条 Route、269 行、269 个唯一 ZIP、0 冲突**；全部是 5 位字符串；按 station → route_name → postal_code 排序；`source` = `dms-playwright`；`fetched_at` = snapshot 抓取时间；UTF-8 无 BOM、LF 换行。
 - SFO01-001：CSV 中 21 个 ZIP（route_id 831）与 Route Detail 缓存完全一致；全部 Route-ZIP 组合与 TBL1.5 阶段 A 的列表响应完全一致。
 - 向后兼容：用抓取前备份的旧 snapshot（无 `postal_codes`）验证——`getStationSnapshot` 正常读取 51 行；导出失败并提示 `npm run dms:scrape -- --station SFO01`，退出码 1，没有写出 CSV。
+
+### TBL3 边界准备（2026-10-02，Claude 在 Product Owner 本机执行）
+
+- 从 Census 下载 `cb_2020_us_zcta520_500k.zip`（约 66 MB，HTTP 200），解压到仓库外 `%LOCALAPPDATA%\nc-ops-console\geo-source\`；全国原始文件不进 Git。
+- 用 `npx --yes mapshaper@0.6` 截取（临时工具，`package.json` 未改）。输入为 `route-zips.csv` 中 SFO01 的 269 个 ZIP。全国 33,791 个 ZCTA 中保留 254 个，生成 `geo/zcta2020_sfo01.geojson`（约 0.86 MB，WGS84，只有 `postal_code` 一个属性，5 位字符串，每个 ZIP 一个 feature）。
+- 覆盖：**Total 269 / Mapped 254 / Missing 15 / Coverage 94.42%**，缺失清单见 `geo/README.md`。没有伪造或猜测 polygon。与旧 dashboard 简化版相比，94018 在 2020 原始数据中有 polygon。
+- 优先使用 GeoJSON；只有 Tableau 版本出现兼容问题时才另外生成 shapefile，本次没有生成。
+- 本机没有安装 Tableau Desktop（注册表中未找到），MVP 由 Product Owner 按第 5.1 节在装有 Tableau Desktop 的电脑上搭建。

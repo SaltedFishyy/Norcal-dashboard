@@ -2,7 +2,7 @@
 
 Tableau 数据集、看板和集成方式的说明。项目级原则见 `AGENTS.md` 第 17 节。
 
-> 状态：初版。2026-10-02 起有第一个确认的 Tableau 项目：Route Map，见 `docs/features/tableau-route-map.md`（Tableau Desktop；不使用 Tableau Public；`.twbx` 不进 Git）。内容迁移自旧版 `AGENTS.md` 第 17 节（2026-09-30），属于**规划方向**，目前还没有已建成的 Tableau 数据集或看板。
+> 状态：初版。2026-10-02 曾确认第一个 Tableau 项目 Route Map（`docs/features/tableau-route-map.md`），同日 Product Owner 决定**暂停 Tableau Desktop 路线**，地图改为做进 NC Ops Console（`docs/features/route-map.md`）。已完成的 Route-ZIP 导出和 ZCTA 边界仍保留，以后做 Tableau 时可直接使用。
 
 ---
 
@@ -66,5 +66,5 @@ Date | Station | Route | ZIP | DSP | Volume | PPH | Delivery Success Rate | Diff
 
 | 数据集 | 粒度 | 来源 | 更新方式 | 状态 |
 |---|---|---|---|---|
-| Route-ZIP 输入表（Route Map） | Station × Route × ZIP | 待 TBL1.5 确定（见 `docs/features/tableau-route-map.md` M3） | 待定（第一版手动导出） | 设计已确认，未实现 |
-| ZCTA 边界（截取） | ZIP（ZCTA） | Census 2020 ZCTA cb 1:500k | 十年一次（随人口普查） | 设计已确认，未生成 |
+| Route-ZIP 输入表（Route Map） | Station × Route × ZIP | Route Profile 列表接口的 `postalCodeList` → `postal_codes`（TBL1.5 / TBL2） | 手动运行 `npm run export:tableau-route-zips` | 已实现（TBL2，`npm run export:tableau-route-zips`）；Tableau 使用暂停 |
+| ZCTA 边界（截取） | ZIP（ZCTA） | Census 2020 ZCTA cb 1:500k | 十年一次（随人口普查） | 2026-10-02 起由 `geo/zcta2020_ca_nv_or.geojson`（CA + NV + OR 服务区边界库）取代；旧的 SFO01 单站点文件已删除 |

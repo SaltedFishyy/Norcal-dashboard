@@ -1,0 +1,609 @@
+# Web Route Map（Station → Route → ZIP 地图）— Spec
+
+- Status: **Approved**（Product Owner 2026-10-02 确认方案并授权实现 MVP；决定见第 2.1 节）
+- 更新：2026-10-02
+- 相关：`docs/features/tableau-route-map.md`（数据来源与边界决定、TBL1 / TBL1.5 / TBL2 记录；Tableau 路线已暂停）；`geo/README.md`；`docs/data-schema.md` 第 8、10 节；`docs/features/dms-refresh.md`（T7 前端、CSP）
+
+---
+
+## 1. 目标
+
+在现有 NC Ops Console（`npm run server` → `http://127.0.0.1:3000/`）里直接提供 Route 地图，用户不需要安装或打开 Tableau。
+
+- 选择 Station（第一版只有 SFO01）→ 显示该 Station 覆盖的 ZIP polygon（真实 ZCTA）。
+- 同一 Route 同色，不同 Route 不同色（颜色只表示 Route）。
+- Hover / click ZIP 显示 ZIP、Route、Station。
+- 显示 “Mapped X / Total Y” 和 Missing Boundary ZIP 清单。
+- 没有 polygon 的 ZIP 不伪造、不猜边界。
+
+不做：Difficulty、PPH、Volume、自动刷新、SMF01 / D8、多 Station 批量抓取、Route label、point fallback、复杂颜色策略。
+
+## 2. 复用（不作废）
+
+| 已有 | 用途 |
+|---|---|
+| `route-profiles.json` 每行的 `postal_codes`（TBL2） | Route → ZIP 关系 |
+| `server/src/transform/postal-codes.js`（格式 / 冲突校验） | 生成地图数据时复用，不复制规则 |
+| `geo/zcta2020_sfo01.geojson` + `geo/README.md`（Census 2020 ZCTA 1:500k） | ZIP 边界 |
+| TBL3 覆盖结果（254 / 269，15 个缺失） | 验收的预期值 |
+| Route-ZIP CSV 导出 | 保留，供以后 Tableau / 其他分析使用；Web 地图不依赖它 |
+
+## 2.1 已确认的决定（Product Owner 2026-10-02）
+
+| # | 决定 |
+|---|---|
+| W1 | **不加外部底图**：深色背景 + ZCTA polygon + 清晰边界 + Route 颜色。不接 OpenStreetMap 或其他 tile。以后需要街道参考时单独设计 |
+| W2 | **地图库 Leaflet，npm 依赖固定 `leaflet@1.9.4`**（`package.json` / `package-lock.json` 管理，不复制到 `web/vendor`）。所有 Leaflet 资源由本地 server 提供 |
+| W3 | 数据流：DMS → transform → route-profiles store + boundary store → server 端 route-map 组装（join / coverage / missing / 冲突校验）→ `GET /api/route-map?station=` → `/map` |
+| W4 | GeoJSON 由 store 模块读取和校验；前端不依赖 `geo/` 路径 |
+| W5 | 前端只消费组装好的数据，不做 Route-ZIP / GeoJSON join 或 coverage 计算 |
+| W6 | 独立页面 `/map`，地图逻辑不放进 `web/app.js` |
+| W7 | `routeColor(route_id)` 稳定、不依赖数组顺序、不写回数据；允许重复；Tooltip 和 click 面板必须显示 Route Name |
+| W8 | hover 临时显示 ZIP / Route / Station；click 固定选中并在侧边面板显示；触屏不依赖 hover |
+| W9 | 显示 `Mapped X / Total Y` 和 Missing Boundary ZIP 清单 |
+| W10 | 新增 boundary meta 文件，缺失分为 `no_zcta`（Census 确认没有）和 `not_checked`（边界还没覆盖到，需要重新生成）；新增 ZIP 不得误报为 `no_zcta` |
+| W11 | CSP 不放宽；第一版页面不允许任何外部网络请求；浏览器真实验证时检查 Network 和 console |
+
+## 3. 技术方案（已确认，以第 2.1 节为准）
+
+### 3.1 地图库：Leaflet 1.9.x
+
+| | Leaflet 1.9 | MapLibre GL | 手写 SVG（如 d3-geo） |
+|---|---|---|---|
+| 体积 | 约 150 KB（JS + CSS） | 约 800 KB+，WebGL | 小，但要自己写平移 / 缩放 / 命中测试 |
+| 适合的数据量 | 几百到几千个 polygon，SVG / Canvas 足够（我们约 254 个） | 大量矢量瓦片 | — |
+| GeoJSON | 内置 `L.geoJSON`，hover / click 事件现成 | 需要 style JSON 和 source / layer 配置 | 自己实现 |
+| 无底图运行 | 可以（只显示 polygon） | 可以，但仍要写 style | 可以 |
+| CSP（`default-src 'self'`） | 本地提供文件即可；内部只用 `element.style`（CSSOM），不需要 inline `<style>` | 默认用 blob worker，需要放宽 `worker-src blob:` | 无问题 |
+| 团队熟悉度 | 旧 dashboard 已在用（1.9.4） | 无 | 无 |
+
+**推荐 Leaflet 1.9.x。** MapLibre 对这个数据量是过度设计，还要放宽 CSP；手写地图引擎违背“不为零依赖自造轮子”的原则。
+
+### 3.2 依赖与加载方式
+
+- 新前端的 CSP 是 `default-src 'self'`，不能从 CDN 加载（旧 dashboard 用的 cdnjs 不可行）。
+- **推荐：新增 npm 依赖 `leaflet`（固定 1.9.x），server 用静态白名单从 `node_modules/leaflet/dist/` 提供 3 个文件**（`leaflet-src.esm.js`、`leaflet.css`，以及需要时的图片）。不加 bundler，前端用原生 ES module `import`。
+  - 这是新增永久依赖，按 `AGENTS.md` 需要 Product Owner 批准。
+  - 备选：把 `dist` 文件复制到 `web/vendor/leaflet/`（附 BSD-2 license）。不改 `package.json`，但仓库里会多一份第三方代码，升级要手动做。
+
+### 3.3 底图（需要 Product Owner 决定）
+
+- **推荐第一版不加外部底图**：深色背景上只画 ZIP polygon，再加 Station 区域的缩放定位。
+  - 原因：外部瓦片（例如 OpenStreetMap，旧 dashboard 在用）需要放宽 CSP 的 `img-src`，浏览器会向外部服务器发请求（暴露正在查看的区域），OSM 官方瓦片也有使用政策限制。
+- 如果需要街道参考，作为单独决定：允许某一个瓦片服务（写进 CSP 白名单 + 署名），或以后再做离线底图。
+
+### 3.4 数据流和分层
+
+```text
+DMS ──(T3 抓取)──> transform（postal_codes 校验）──> store: route-profiles.json
+                                                     store: geo/*.geojson（边界）
+                     ↓
+       route-map 组装（纯函数：join、coverage、missing、冲突校验）
+                     ↓
+       API: GET /api/route-map?station=SFO01
+                     ↓
+       frontend: map.html + map.js（只负责渲染和交互）
+```
+
+- **join 放在 server 端的纯函数里**（新的 read-model 模块），不放在前端，也不放进 DMS / transform。
+  - transform 只负责 DMS 原始数据 → normalized Route Profile。
+  - Route Profile 和边界的 join 是“给地图用的视图”，属于 store 之后、API 之前的一层。
+  - 校验（格式、Station 内 / 跨 Station 冲突）复用 `postal-codes.js`。
+- **边界通过 API 提供，不作为静态资源。** 边界文件由新的 store 模块读取（校验每个 feature 有唯一的 5 位 `postal_code`），handler 不直接读文件，和现有分层一致。前端只拿到组装好的结果，不需要知道 `geo/` 目录。
+- **一个接口返回一次渲染需要的全部内容**：
+
+```text
+GET /api/route-map?station=SFO01
+200 {
+  station, fetched_at,                       // Route Profile snapshot 的抓取时间
+  boundary_source: { dataset: "cb_2020_us_zcta520_500k", vintage: 2020 },
+  coverage: { total: 269, mapped: 254, missing: 15 },
+  routes: [ { route_id, route_name, zip_count, mapped_count } ],
+  missing: [ { postal_code, route_id, route_name } ],
+  features: GeoJSON FeatureCollection，每个 feature 的 properties = { postal_code, route_id, route_name, station }
+}
+400 invalid_station；404 station_not_found / snapshot_not_found；
+409 postal_codes_missing（旧 snapshot，提示重新运行 dms:scrape）；
+500 route_zip_conflict / boundary_invalid / snapshot_invalid
+```
+
+- Station 下拉选项：第一版来自 `route-profiles.json` 里已有的 Station（目前只有 SFO01），可由同一接口或一个很小的 `GET /api/route-map/stations` 提供（实现时二选一）。
+- 现有 `GET /api/route-profiles` 不改。
+
+### 3.5 Route 颜色
+
+- 由前端纯函数 `routeColor(route_id)` 决定：对 `String(route_id)` 做稳定 hash（例如 FNV-1a），再对一个固定的分类调色板（约 20 色，在深色背景上可辨识）取模。
+  - 只依赖 `route_id`，不依赖数组顺序；刷新数据后同一 Route 颜色不变。
+  - 颜色不写进任何数据文件或 API。
+  - Route 多时颜色会重复，相邻 Route 也可能同色（第一版接受）；用清楚的 polygon 边界线和 tooltip / 信息面板里的 Route Name 来区分。
+
+### 3.6 交互
+
+- **Hover（桌面）**：高亮当前 ZIP 的边界，显示 tooltip：ZIP / Route / Station。
+- **Click（桌面和触屏）**：选中 ZIP，侧边信息面板固定显示 ZIP / Route / Station，直到点别的 ZIP 或点空白处取消。保证不依赖 hover 也能看到信息。
+- 可选（实现时简单就做）：选中 ZIP 后，同一 Route 的其他 ZIP 也加粗边界，便于在颜色重复时看出 Route 范围。
+- 所有文字都通过 `textContent` / Leaflet tooltip 的文本内容设置，不把 API 字符串当 HTML 插入。
+
+### 3.7 Coverage 和 Missing Boundary ZIP
+
+- 页面侧边栏：`Mapped 254 / Total 269`（及百分比）；下面是 Missing Boundary ZIP 表（ZIP、Route），数据直接来自 API 的 `coverage` / `missing`，前端不重新计算。
+- 说明文字：ZCTA ≠ USPS 投递边界；缺失的 ZIP 没有 Census ZCTA，因此不画 polygon。
+- **区分两种“缺失”（W10）**：截取边界时同时写 `geo/zcta2020_sfo01.meta.json`：
+
+  ```json
+  {
+    "dataset": "cb_2020_us_zcta520_500k", "vintage": 2020,
+    "source_url": "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+    "generated_at": "…", "boundary_file": "zcta2020_sfo01.geojson",
+    "input": { "station": "SFO01", "snapshot_fetched_at": "…" },
+    "checked_postal_codes": [ "…269 个…" ],
+    "no_zcta": [ "…15 个…" ],
+    "feature_count": 254
+  }
+  ```
+
+  - `checked_postal_codes`：生成时拿去和全国 Census 数据比对过的 ZIP。
+  - `no_zcta`：其中在全国 Census 数据里找不到 ZCTA 的 ZIP。
+  - 组装时，地图上缺 polygon 的 ZIP 按以下规则分类：在 `no_zcta` 中 → `no_zcta`；不在 `checked_postal_codes` 中 → `not_checked`（需要重新截取边界）。
+  - 一致性：`checked_postal_codes` 减去 `no_zcta` 必须都在 GeoJSON 中、`feature_count` 等于 GeoJSON feature 数、GeoJSON 中没有 meta 之外的 ZIP；不一致时 `boundary_invalid`。
+  - API 的 `missing[]` 每项带 `reason`（`no_zcta` / `not_checked`）；`coverage` 增加 `missing_no_zcta`、`missing_not_checked` 两个计数。页面在有 `not_checked` 时提示“边界文件需要重新生成”。
+
+### 3.8 页面位置
+
+- 新增独立页面 `web/map.html`（`GET /map`），在现有 Route Profile 页面的页头放一个链接，地图页也能链接回去。
+- 不把地图塞进现有 `web/app.js`，避免一个页面脚本承担两种功能。
+
+## 4. 推荐文件结构（实现时）
+
+```text
+server/src/store/boundaries-file.js     读取并校验 geo/*.geojson（和 meta）
+server/src/route-map/route-map.js       纯函数：join、coverage、missing、冲突校验（复用 postal-codes.js）
+server/src/api/app.js                   新增 /api/route-map；静态白名单新增 /map、/map.js、Leaflet 文件
+web/map.html                            地图页面
+web/map.js                              Leaflet 渲染、hover / click、侧边栏
+web/route-colors.js（或放进 format.js）  routeColor 纯函数 + 调色板
+geo/zcta2020_sfo01.geojson              保留（已存在）
+geo/zcta2020_sfo01.meta.json            新增：生成时的输入 ZIP 和缺失 ZIP
+server/test/route-map.test.js           组装逻辑、API、颜色函数、静态白名单
+```
+
+代码健康：`server/src/api/app.js` 目前在一个函数里处理静态文件和 3 个 API，新增第 4 个时，建议顺带做一次局部整理（每个 endpoint 一个小函数 / 路由表），行为不变、现有测试保留。
+
+## 5. MVP 验收标准（草案）
+
+- **RM-AC1** `npm run server` 后打开 `/map`（或从首页链接进入），选择 SFO01，地图显示 254 个 ZCTA polygon，并自动缩放到该 Station 范围。
+- **RM-AC2** 同一 Route 的 ZIP 颜色相同；颜色由 `route_id` 决定，重新抓取后保持不变；颜色不出现在任何数据文件或 API 中。
+- **RM-AC3** Hover 显示 ZIP / Route / Station；click 选中 ZIP 并在信息面板显示同样内容；触屏可用。
+- **RM-AC4** 侧边栏显示 `Mapped 254 / Total 269`，Missing Boundary ZIP 清单 15 行（与 `geo/README.md` 一致）；没有任何伪造或猜测的 polygon。
+- **RM-AC5** join、coverage、missing、冲突校验在 server 端纯函数中完成并有测试；前端不做 join 或校验。
+- **RM-AC6** 页面只加载本地资源（CSP 不放宽），没有外部请求；API 字符串不经过 `innerHTML`。
+- **RM-AC7** 旧 snapshot 没有 `postal_codes`、存在 ZIP 冲突、边界文件损坏时，API 返回稳定错误码，页面显示简洁说明。
+- **RM-AC8** 现有页面和 API 行为不变；`npm test` 全部通过；新增依赖（如批准）只有 `leaflet`。
+- **RM-AC9** Product Owner 本机预览签字。
+
+## 6. 风险和未决问题
+
+1. ~~底图~~ → 已决定：第一版不加（W1）。
+2. ~~依赖~~ → 已决定：`leaflet@1.9.4` npm 依赖（W2）。
+3. **边界文件按 Station 命名**：`zcta2020_sfo01.geojson` 只适合单个 Station。新增 Station 时，建议改成一个服务区边界文件（例如 `zcta2020_service_area.geojson`），按 ZIP 查找。第一版继续用现有文件，不改名。
+4. **边界过期**：Route 新增 ZIP 后，如果没有重新截取边界，地图会把它误报为缺失 → 3.7 的元数据文件和 `not_checked` 分类。
+5. **CSP 兼容**：Leaflet 是否完全不需要放宽 CSP，要在实现时用浏览器实测（console 无 CSP 报错）。
+6. **颜色重复**：51 条 Route、约 20 色，相邻同色不可避免；第一版接受。
+7. **ZCTA 局限**：同 `geo/README.md`——只表示大致覆盖，不判断地址归属。
+
+## 实现记录（Implementation Notes）
+
+### RM1 — 2026-10-02（Codex）
+
+- 新增 boundary store（GeoJSON / meta 一致性、ZIP 唯一性及 polygon 坐标校验）、纯函数 `buildRouteMap`、`GET /api/route-map` 和 `/api/route-map/stations`。boundary store 不缓存，测试通过 `geoDir` / fileOps 注入；不读取真实 DMS 或真实 runtime 数据进行验证。
+- `app.js` 使用 endpoint 小函数和路由表；保留各现有 endpoint 独立的错误映射、方法限制、响应头和仅状态码日志。跨 Station ZIP 冲突检查集中在 `postal-codes.js`，导出器与地图共用；现有测试未修改。
+- 新增 `/map` 独立页面，Leaflet 从 npm 安装目录通过固定白名单提供；`webDir`、`leafletDir` 和 `geoDir` 可注入。不新增依赖、不改 geo 文件、不放宽 CSP、不加载 tile。首页仅添加地图链接。
+- 前端使用稳定 FNV-1a Route 颜色、DOM 元素 tooltip、click / touch 选中、同 Route 边界高亮、空白取消选择、Coverage / Missing 表、边界重生成提示、snapshot Last Updated 和错误 / 空状态。ZIP join 与计数均来自 server；前端仅格式化 API 计数的百分比。Station 快速切换时忽略旧响应。
+- 新增合成数据测试：boundary store、地图组装、API、静态白名单、颜色和注入 Leaflet 的 DOM doubles；公开 Census 文件合法性测试确认 254 features、269 checked ZIP、15 no_zcta。没有用真实运营 snapshot 核对 Route 与 ZIP 的关系。
+- 检查：`npm.cmd test`（231 项通过）；`git diff --check` 通过。项目没有配置 lint / build 命令。
+- 使用已安装的 Playwright / Chromium 进行临时本地浏览器检查（独立临时 mock runtime 和 mock 边界，结束后清理）：1440px / 390px 均无横向溢出；polygon 渲染、fitBounds、hover、click、Station 切换和移动触屏点击通过；Network 无外部请求，console / JavaScript / CSP 无报错。该检查没有添加永久工具或依赖。
+- RM-AC2 / AC3 / AC5 / AC6 / AC7 / AC8、RM1-AC-A / B 已通过上述验证；RM-AC1 / AC4 的真实 SFO01 254 / 269 / 15 结果留给 Claude 本机验证；RM-AC9 仍待 Product Owner 预览签字。
+
+### RM1 第 1 轮修复 — 2026-10-02（Codex）
+
+- 仅修复 RM-AC3 hover tooltip：tooltip 专用 CSS 使用内容自适应宽度、标签和值横向排列、禁止折行，并覆盖全局 `dd` 的逐字折行样式；`bindTooltip` 设置 `direction: 'auto'` 和 `sticky: true`，跟随鼠标并自动选择左右方向，避免停留在 polygon 中心导致下缘裁切。内容仍为 `textContent` 构造的 DOM 元素，点击面板和其他地图行为未修改。
+- DOM double 记录并断言 tooltip 选项。`npm.cmd test` 全部 231 项通过；项目没有 lint / build 命令。临时本地 HTTP mock 页面使用已安装的 Playwright / Chromium 检查：1440px / 390px 下三行 `ZIP 93901`、`Route SFO01-041`、`Station SFO01` 均完整且同一行显示，tooltip 宽约 124px；鼠标位于合成 polygon 下缘时 tooltip 位于地图容器内，无横向溢出、console / JavaScript / CSP 错误。未读取真实 runtime 数据或访问 DMS；真实数据复核与 Product Owner 预览签字仍由本机完成。
+
+### 本机真实验证（2026-10-02，Claude 在 Product Owner 本机运行）
+
+- `npm test` 231/231 通过；`git diff --check` 通过。依赖只新增 `leaflet` 1.9.4（Claude 安装，`package.json` / `package-lock.json`）。
+- `GET /api/route-map?station=SFO01`：coverage `{ total 269, mapped 254, missing 15, missing_no_zcta 15, missing_not_checked 0 }`；254 个 feature，properties 只有 `postal_code / route_id / route_name / station`；51 条 Route。
+- 无界面 Chromium（1440 宽、390 宽 + 触屏）打开 `/map`：
+  - 254 个 polygon，51 条 Route 共用 19 种颜色；没有任何 tile；Station 下拉只有 SFO01。
+  - 侧边栏 `Mapped 254 / Total 269 (94.42%)`；Missing Boundary ZIP 表 15 行，原因都是 “No Census ZCTA”，与 `geo/README.md` 一致。
+  - **页面只有 9 个请求，全部是 `http://127.0.0.1:3000/`，没有外部请求**；console 没有 error / warning，没有 CSP violation。
+  - hover：tooltip 显示 ZIP / Route / Station；click：侧边面板固定显示同样内容，并加粗同 Route 的边界；触屏 tap 同样可以选中。
+  - 1440 和 390 都没有页面横向滚动；390 时侧边栏在地图下方。
+- 第 1 轮修复后复核：tooltip 不再折行（约 124px 宽，`Route SFO01-041` 一行显示）；在最靠近地图底部的 polygon 上 hover，tooltip 完整位于地图容器内。
+- 待 Product Owner 预览签字（RM-AC9）。可留意：调色板中有一种灰色（`#b3b3b3`），可能被误读为“无数据”，是否移除由 Product Owner 决定。
+
+---
+
+### RM2 实现记录 — 2026-10-02（Codex）
+
+- 新增 `basemap-file.js`（固定 us / norcal / ops 白名单、PMTiles v3 文件头校验、打开文件句柄与范围 stream）和 `api/basemap.js`（200 / 206 / 416、单范围与 suffix、客户端断开后的 stream 清理）。API 通过现有 handler 表接入；底图独享 `private, max-age=3600`，其余资源仍为 `no-store`；CSP 未改变，错误码不含本地路径。`createApiServer` 支持注入 `basemapDir` / `protomapsDir`，默认底图目录是 `<runtime>/basemap/`。
+- `routes[]` 直接带出原 Route Profile 行的 `station / dsp_name / pickup_volume / pph`；不修改 join、coverage、missing、冲突校验、Route Profile API 或 stores。没有新增或读取真实业务数据。
+- 前端拆为 `map.js`（加载与事件编排）、`map-view.js`（Leaflet、三层 PMTiles、polygon 与 fit）、`map-panel.js`（搜索、列表、Summary、Selected ZIP、Coverage 与 Missing）、`map-state.js`（纯搜索、选择、样式函数）。本地 UMD Leaflet → Protomaps IIFE → 页面 module 按顺序加载；旧 Leaflet ESM 路径不再提供。三层使用同一 dark flavor，maxDataZoom 6 / 10 / 14，区域层设 bounds，无 map maxBounds，minZoom 3 / maxZoom 16。
+- 底图先用 Range 读取文件头；使用已安装 Protomaps 导出的 `PmtilesSource` 所提供的 PMTiles 实例包装 `getZxy`，把后续 archive 请求失败转换为提示与空底图 tile，正常 zoom 取消的 AbortError 仍交给 renderer。缺失底图不会阻止 polygon 或选择交互。底图署名与 Census attribution 保留。
+- 搜索 Enter 按 exact 优先 / 唯一包含结果选择；列表点击选择并 fit，无 polygon 的 Route 可选但不移动地图。ZIP 点击、Esc / Clear / 空白取消、Fit Station 保留选择；Summary 复用数字 / 时间格式，Pickup Volume 标签不附统计窗口。Coverage 使用 API 计数；Missing 默认折叠并保留两类原因。调色板删除灰色后冻结为 19 色。
+- 检查：`npm.cmd test` 240/240 通过；`git diff --check` 通过（Git 输出已有文件的 LF / CRLF 提示，无 whitespace 错误）。项目无 lint / build scripts。新增合成 archive store / HTTP Range、纯状态、Summary 原值与 DOM doubles 测试；RM1 测试只更新本轮有意改变的 UMD 路径、polygon 高亮、Coverage 展示与 Summary 字段预期。
+- 临时 Playwright / Chromium 检查使用独立 mock runtime、mock boundary 和有效但不含 tile 内容的合成 PMTiles v3 archive：1440 / 390 无横向滚动，390 侧边栏在地图下方，搜索 / Route 选择 / Fit Station / Esc / Clear / Station 切换 / 触屏 ZIP 点击通过。正常加载每页 20 个同源请求，无外部请求、console / JavaScript / CSP 错误；缺失合成 archive 时提示出现、polygon 保留。临时数据已清理，未访问真实 DMS 或真实 runtime / basemap。
+- RM2-AC2 / AC3 / AC4 / AC5 / AC7 / AC8 / AC10 / AC11 已通过上述验证；AC1 的真实道路 / 城市与缩小全景、AC6 的真实 254 / 269 / 15 数量、AC9 的真实底图运行复核留给 Claude 本机验证；AC12 待 Product Owner 预览签字。真实底图视觉与低配设备性能未在合成 archive 中验证。
+
+### RM3 实现记录 — 2026-10-02（Codex）
+
+- boundary store 改读唯一正式来源 `zcta2020_ca_nv_or.*`；沿用 Polygon / MultiPolygon 坐标与 ZIP 唯一性校验，新增 scope 正则、feature_count 一致性校验、`byZip` Map 和 `inScope`。按绝对 geoDir 缓存成功解析的 Promise，失败不缓存；注入 fileOps 的测试读取不缓存。边界文件更新后需重启进程。未修改 geo 文件、依赖、transform 或 route-profiles store。
+- `buildRouteMap` 与新增纯函数 `lookupZip` 共享全 Station postal_codes 校验、归属冲突检查及线路概览字段。缺失原因按支持范围分为 no_zcta / not_checked；ZIP 查询返回五种状态、所属 Station / Route、snapshot fetched_at、geometry 与边界来源。新增 GET `/api/route-map/zip?postal_code=`，校验唯一 5 位字符串，复用既有错误映射、响应头和仅状态码日志；map-text 加入固定静态白名单，CSP 未修改。
+- `/map` 的中文文案集中在 map-text（含缩放按钮提示）；保留 ZIP / DSP / PPH / Pickup Volume、编号、Source 小字和 attribution。地图使用 grayscale，容器浅色，其余页面深色；palette 保持 19 个与原有顺序、FNV-1a 算法，只调整四个浅色值（旧值 → 新值见 route-colors 注释）。
+- 选择状态为 `{ station, route, zip }`；线路与邮编高亮分别使用深色粗边和洋红粗边，无线路 ZIP 使用独立虚线高亮层并保留其他线路原样。高亮层置顶，有线路的高亮层保留 tooltip。无 geometry 不定位或绘制替代图形；跨 Station 查询先加载所属 Station，并避免该加载自动移动地图。
+- 面板按当前选择三行、当前邮编卡、线路概览、统一搜索 / 列表、覆盖率、默认折叠 Missing 顺序显示；线路名 26px、核心数字 24px，空值为 `—`。统一搜索保留 exact 优先 / 唯一包含匹配，1–4 位数字显示 5 位 ZIP 提示，5 位数字自动请求 ZIP API（Enter 也可触发）。独立请求序号防止旧 ZIP 响应覆盖新搜索、线路选择、清除或 Station 切换；网络 / API 错误独立显示错误样式和稳定错误码。
+- 测试预期仅更新本轮明确改变的边界文件名 / meta、缓存、样式、中文文案、状态结构、面板布局和四个 palette 值。保留原有搜索、归属、空状态、安全 DOM、API 与底图测试；新增 scope / ZIP 索引、五种查询状态、跨 Station、冲突、错误映射、方法限制、请求头、选择转换、高亮层与搜索竞态测试。
+- 最终 `npm.cmd test`：243/243 通过；项目无 lint / build scripts。公开 Census 库校验通过（2519 features、索引完整、成功读取复用缓存）。`git diff --check` 通过，仅有已有工作区 LF / CRLF 提示。
+- 临时 Playwright / Chromium 检查：真实 Leaflet + mock runtime + 底图 renderer double；1440 / 390 下统一搜索五种状态、线路搜索、概览数字、定位站点、Esc、触屏 ZIP 点击、中文 zoom title 和无横向滚动通过。首轮 console / JavaScript 错误为 0、外部请求为 0；补充轮使用公开 Census 几何和 mock 线路归属验证 95112 / 94604 / 95814 / 94104 / 95812 / 10001，无 pageerror 或外部请求。临时 mock 文件已清理，未访问真实 DMS、运营 runtime 或真实 PMTiles。
+- RM3-AC2 / AC3 / AC4 / AC5 / AC6 已在上述范围验证；AC1 / AC8 的真实底图观感、四个颜色可读性与完整底图运行复核，AC7 的真实 SFO01 254 / 269 / 15 结果留给 Claude 本机验证。AC9 的测试部分通过，Product Owner 预览签字仍待完成。
+
+## RM2 — 地图体验与交互升级（**Approved**，Product Owner 2026-10-02 确认并授权实现）
+
+### RM2 已确认的决定（Product Owner 2026-10-02）
+
+| # | 决定 |
+|---|---|
+| V1 | 底图选 **D：自托管 Protomaps / PMTiles**。不接 OSM 官方 tile，不接第三方商业 tile。以后公司有 Mapbox / Esri / Google Maps 等正式企业授权时再单独评估 |
+| V2 | 批准依赖 `protomaps-leaflet`、`pmtiles`，固定版本，由 Claude 安装；Codex 不改依赖。**实际只安装 `protomaps-leaflet@5.1.0`**：它的 `dist/protomaps-leaflet.js` 是自包含 IIFE（全局 `protomapsL`，已内置 pmtiles 3.2.1），单独再装 `pmtiles` 会产生第二个版本且前端用不到，因此未装（Claude 2026-10-02） |
+| V3 | 底图分三层，控制体积：美国低 zoom、北加中 zoom、运营区高 zoom；文件放仓库外，不进 Git；生成步骤见下方 “RM2 底图生成” |
+| V4 | 必须在地图可见位置保留 OpenStreetMap / Protomaps attribution，不能隐藏 |
+| V5 | 删除灰色 `#b3b3b3`，接受一次整体换色。**RM2 之后 palette 视为稳定版本**，不再随意修改 palette 长度 |
+| V6 | Route Summary 字段：Route Name、Station、ZIP Count、DSP、Pickup Volume、PPH、Last Updated。Pickup Volume **不得**命名为 Daily Volume / Today Volume 或其他统计窗口（D6 未确认）。底部统一一行 `Source: DMS snapshot · Updated: <timestamp>` |
+| V7 | 交互按 R2-3 ~ R2-8 执行（Fit Station、搜索 + 列表、exact 优先、单结果直接选中、选中 Route 自动 fit、其他 Route 约 12–15% opacity、Esc / Clear / 点空白取消、Selected ZIP、触屏 tap、Coverage 卡、Missing 默认折叠） |
+| V8 | 前端拆分：`map.js`（编排）、`map-view.js`（Leaflet / 图层 / fit / 地图事件）、`map-panel.js`（搜索 / 列表 / Summary / Coverage）、`map-state.js`（搜索 / 选择 / polygon 样式等纯函数） |
+| V9 | 数据层不变：join / coverage / 冲突校验仍在 server；不新增 DMS 抓取 |
+
+### RM2 底图生成（2026-10-02，Claude 在 Product Owner 本机执行）
+
+- 来源：Protomaps 公开每日构建 `https://build.protomaps.com/20261002.pmtiles`（全球，约 138.5 GB，basemap 版本 4.15.2；数据 © OpenStreetMap contributors，ODbL）。构建列表：`https://build-metadata.protomaps.dev/builds.json`。
+- 工具：官方 CLI `go-pmtiles` v1.31.2（Windows x86_64，临时工具，放在仓库外 `%LOCALAPPDATA%\nc-ops-console\tools\`，不进 Git，不加入 `package.json`）。`pmtiles extract` 通过 HTTP Range 只下载所需部分。
+- 命令（`--dry-run` 可先估算大小）：
+
+  ```text
+  pmtiles extract https://build.protomaps.com/20261002.pmtiles us.pmtiles     --bbox=-125.0,24.0,-66.5,49.5   --maxzoom=6
+  pmtiles extract https://build.protomaps.com/20261002.pmtiles norcal.pmtiles --bbox=-124.6,35.5,-119.0,42.5  --maxzoom=10
+  pmtiles extract https://build.protomaps.com/20261002.pmtiles ops.pmtiles    --bbox=-123.16,36.43,-121.06,39.01 --maxzoom=14
+  ```
+
+  `ops` 的 bbox = `geo/zcta2020_sfo01.geojson` 的范围外扩约 0.15°；`norcal` 包含 Reno（RNO01）和 Medford（MFR01）。
+- 结果（`<runtime>/basemap/`，即默认 `%LOCALAPPDATA%\nc-ops-console\runtime-data\basemap\`）：
+
+  | 文件 | 范围 | zoom | 大小 |
+  |---|---|---|---|
+  | `us.pmtiles` | 美国本土 | 0–6 | 4.7 MB |
+  | `norcal.pmtiles` | 北加 + Reno + Medford | 0–10 | 11.6 MB |
+  | `ops.pmtiles` | SFO01 运营区 | 0–14 | 125.2 MB |
+
+  合计约 141 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
+- 更新：需要更新底图（例如几个月一次，或新增运营区）时，换成新的构建日期重新执行上面的命令，并更新本表。新增 Station 时扩大或新增 `ops` 层的 bbox。
+
+目标：把 RM1 的“深色背景 + polygon”升级为带地理参照的运营地图。**不扩展数据层，不新增 DMS 抓取**；RM1 的 join / coverage / missing / 冲突校验保持在 server 端不变。
+
+### R2-1 底图方案
+
+| 方案 | 运行时外部请求 | CSP | 使用政策 / 成本 | 适合公司内部长期使用 |
+|---|---|---|---|---|
+| A. OSM 官方 `tile.openstreetmap.org` | 有（每次 pan / zoom 都请求 OSM 服务器） | 需放宽 `img-src` | OSM Tile Usage Policy：志愿者资源，**不适合作为应用的长期生产底图**，有流量限制；必须署名 | **否**（只能临时开发用） |
+| B. 免费层托管服务（CARTO basemaps、Stadia Maps） | 有 | 放宽 `img-src` 到一个域名 | CARTO 免费层仅限非商业用途，商业使用需企业授权；Stadia 免费层面向非商业 / 开发，商业用途需付费计划（以各家最新条款为准） | 需要确认授权，**公司运营用途通常属于商业使用** |
+| C. 商业托管服务 + API key（MapTiler、Mapbox、Esri 等） | 有 | 放宽 `img-src`（矢量方案还需 `connect-src`） | 付费或有额度的商业授权；key 会出现在浏览器中，需要按域名 / referrer 限制 | 可以，前提是公司有账号和授权 |
+| **D. 自托管 Protomaps（PMTiles 单文件矢量底图）** | **无**（底图文件由本地 server 提供） | **不放宽**（全部 `'self'`） | 数据来自 OpenStreetMap，ODbL 许可，**必须显示 “© OpenStreetMap contributors”**；无调用费用 | **可以**，并且不向第三方暴露查看位置 |
+
+**推荐：D（自托管 PMTiles）作为默认方案；如果公司已有地图服务授权（例如 Google Maps Platform、Mapbox、Esri），优先用公司授权的 C。** 理由：D 保留 RM1 的“零外部请求、CSP 不放宽”，也没有第三方使用政策风险；C 适合以后多人 / 部署场景。A、B 不作为长期方案。
+
+D 的实现要点：
+- 新增 npm 依赖 `protomaps-leaflet`（在 Leaflet 中渲染矢量底图）和 `pmtiles`（读取 PMTiles），版本固定；需要 Product Owner 批准。
+- 底图文件：从 Protomaps 公开构建中用 `pmtiles extract` 截取两部分——**全美低缩放层**（约 z0–z8，用于缩小到 California / USA）和**服务区高缩放层**（北加 + Reno 一带，约到 z14 / z15）。文件放在仓库外的 runtime 目录（预计几十到几百 MB，实际大小截取后确认），**不进 Git**；下载需要联网，由 Claude 在本机执行。
+- server 提供底图：`GET /basemap/<name>.pmtiles`，需要支持 HTTP Range 请求（PMTiles 按字节范围读取）；读取通过新的 store 模块，路径不暴露给前端。
+- 样式：使用 Protomaps 提供的浅色或深色主题。Route polygon 叠加在上面，降低底图饱和度，让当前 Station 仍是视觉焦点。
+- 署名：地图右下角显示 “© OpenStreetMap contributors · Protomaps · Boundaries: US Census 2020 ZCTA”。
+
+### R2-2 CSP / 署名 / 隐私
+
+- D：CSP 不变；没有任何外部请求；隐私影响为零。署名必须显示（ODbL）。
+- C：CSP 只为一个服务商域名放宽 `img-src`（矢量方案加 `connect-src`）；浏览器会把查看的地图范围和 IP 发给服务商（不包含业务数据）；API key 用 `.env` 配置，经 server 传给前端，并在服务商后台按 referrer 限制。
+- 两种方案都要更新 RM-AC6（“没有外部请求”只对 D 继续成立）。
+
+### R2-3 Station 自动定位 / Fit Station
+
+- 加载和切换 Station 时：`fitBounds(当前 Station 所有 polygon, padding)`。
+- 地图左上角加 “Fit Station” 按钮（Leaflet 自定义 control，键盘可操作）：一键回到当前 Station 全景，同时保留当前选择。
+- 允许自由 pan / zoom；`minZoom` 允许缩小到能看到美国全境（约 z3–z4），不设 `maxBounds`；不会默认显示整个世界。
+
+### R2-4 Route 选中高亮
+
+- 选择状态：`{ selectedRouteId, selectedZip }`。点 ZIP → 选中该 ZIP 和它所属的 Route；在 Route 搜索 / 列表中点 Route → 只选中 Route。
+- 样式由纯函数 `polygonStyle(feature, selection)` 计算（便于测试）：
+  - 无选择：所有 Route 正常（填充约 0.6–0.7，细边界）。
+  - 有选择：当前 Route 正常颜色、填充不变、边界明显加粗（例如 3px 白色或高对比描边）；其他 Route 填充降到约 0.12–0.15、边界变淡。
+  - 选中的 ZIP 在当前 Route 之上再加一层强调描边。
+- 取消选择：点地图空白处、按 Esc，或点 “Clear selection”。
+- `routeColor` 不变（除下面 R2-9 移除灰色）。
+
+### R2-5 Route 搜索 + 定位（与 Route 列表合并为一个组件）
+
+- 侧边栏顶部一个搜索框，下面是可滚动的 Route 列表；输入时**过滤列表**（不区分大小写的包含匹配）。
+- 按 Enter：完全匹配（不区分大小写）优先；否则只剩一条包含匹配时选中它；多条时保持列表让用户点；0 条显示 “No matching route”。
+- 选中 Route：高亮整条 Route、`fitBounds` 到该 Route 的 polygon、面板显示 Route Summary。
+- 某条 Route 的 ZIP 全部没有 polygon（`mapped_count = 0`）时：仍可选中，面板说明 “No mapped boundary for this route”，不移动地图。
+- 不引入模糊搜索库。
+
+### R2-6 Route / ZIP 面板数据
+
+`GET /api/route-map?station=` 的 `routes[]` 扩展（由 server 组装时从 Route Profile 行直接带出，不新增 DMS 抓取、不新增 API 调用）：
+
+```text
+routes: [ { route_id, route_name, station, zip_count, mapped_count,
+            dsp_name, pickup_volume, pph } ]          // 已有字段直接复用
+fetched_at                                            // 已有，作为 Last Updated
+```
+
+- 面板分两块：
+  - **Route Summary**：Route Name、Station、ZIP Count（含 “mapped X”）、DSP、Pickup Volume、PPH、Last Updated。空值显示 `—`。数字格式复用 `web/format.js`（Pickup Volume 整数千分位，PPH 两位小数）。
+  - **Selected ZIP**：ZIP、Route、Station（只在点了 ZIP 时显示）。
+- 不显示 Difficulty（本轮不做），不加颜色含义。
+
+### R2-7 Coverage 状态卡
+
+```text
+Coverage
+94.42%
+254 / 269 ZIP mapped
+15 without Census ZCTA · 0 need boundary regeneration
+```
+
+- `not_checked > 0` 时第二行用警示样式。
+- Missing Boundary ZIP 清单默认折叠（`<details>`，标题带数量），展开后表格同 RM1，仍区分 `no_zcta` / `not_checked`。不伪造 polygon。
+
+### R2-8 Route 列表是否第一版一起做
+
+**建议一起做**，而且和搜索合并成一个组件（R2-5）：每行一个颜色块（与地图同色）+ Route Name + ZIP 数；点击 → 高亮 + fit；当前选中行有明显状态；51 行可滚动，不做排序 / 分组。成本低，并且解决“颜色重复时靠什么认 Route”的问题。
+
+### R2-9 颜色
+
+- 从调色板移除中性灰 `#b3b3b3`（变成 19 色）。`routeColor` 仍是 FNV-1a hash 取模、只依赖 `route_id`、不写入数据。
+- 注意：调色板长度变了，**所有 Route 的颜色会整体变化一次**；之后刷新数据仍保持稳定。
+- 有底图后，调色板需要在所选底图主题上检查可辨识度（必要时只调整颜色值，不改 hash 规则）。
+
+### R2-10 需要修改的文件（建议）
+
+- server：
+  - `server/src/route-map/route-map.js`：`routes[]` 增加 `station / dsp_name / pickup_volume / pph`（行为其余不变）。
+  - D 方案：新增 `server/src/store/basemap-file.js`（定位、校验底图文件）、静态 / Range 响应支持 `GET /basemap/*.pmtiles`、白名单新增 `protomaps-leaflet` / `pmtiles` 的 ESM 文件。
+  - 测试：`route-map.test.js`（新字段）、API、Range 请求、静态白名单。
+- web（代码健康：`web/map.js` 已有 134 行，这轮功能会让它翻倍，建议拆分）：
+  - `web/map.js`：页面编排（加载、Station 切换、事件分发）。
+  - `web/map-view.js`：Leaflet 地图、底图、polygon 图层、fit、高亮样式应用。
+  - `web/map-panel.js`：Route 搜索 / 列表、Route Summary、Selected ZIP、Coverage 卡、Missing 折叠清单。
+  - `web/map-state.js`：纯函数——`polygonStyle`、`searchRoutes`、选择状态更新。
+  - `web/route-colors.js`：移除灰色。
+  - `web/styles.css`、`web/map.html`：布局调整。
+- 不改：transform、route-profiles store、boundary store、`/api/route-profiles`、Route Profile 页面。
+
+### R2-11 验收标准（草案）
+
+- **RM2-AC1** `/map` 显示底图（道路 / 城市 / 区域可见），Route polygon 覆盖在上面；可以自由 pan / zoom，缩小时能看到 California / USA。
+- **RM2-AC2** 打开页面和切换 Station 时自动 fit 到当前 Station；“Fit Station” 按钮一键回到当前 Station 全景。
+- **RM2-AC3** 选中 ZIP 或 Route 后：当前 Route 保持原色、边界明显加粗，其他 Route 明显变淡；取消选择后全部恢复。
+- **RM2-AC4** 搜索 `SFO01-023`：定位并高亮该 Route，面板显示其信息；包含匹配可用；无结果显示 “No matching route”。
+- **RM2-AC5** Route Summary 显示 Route Name / Station / ZIP Count / DSP / Pickup Volume / PPH / Last Updated，数据来自一次 `/api/route-map` 响应，空值 `—`；Selected ZIP 显示 ZIP / Route / Station。
+- **RM2-AC6** Coverage 卡显示百分比、`254 / 269 ZIP mapped`、`no_zcta` / `not_checked` 计数；Missing 清单默认折叠，展开后 15 行。
+- **RM2-AC7** Route 列表：颜色与地图一致；点击高亮 + fit；选中状态明显。
+- **RM2-AC8** 调色板没有中性灰；`routeColor` 稳定、与顺序无关、不写入数据。
+- **RM2-AC9** 底图满足所选方案的约束：D 方案下没有任何外部请求、CSP 不变、署名完整；C 方案下只请求批准的一个服务商域名。console 无错误 / CSP 报错。
+- **RM2-AC10** join / coverage / missing / 冲突校验仍在 server 端；前端只请求 `/api/route-map/stations` 和 `/api/route-map`（加底图文件）。现有页面和 API 行为不变，`npm test` 全部通过。
+- **RM2-AC11** 1440 / 390 均可用（390 时侧边栏在地图下方、搜索和列表可用），触屏不依赖 hover。
+- **RM2-AC12** Product Owner 本机预览签字。
+
+### R2-12 风险 / 未决问题
+
+1. **底图方案选择**：D（自托管，推荐）还是 C（公司已有授权的服务商）？公司是否已有地图服务授权？
+2. **D 方案的新依赖**：`protomaps-leaflet`、`pmtiles` 需要批准；底图文件大小和更新方式（多久重新截取一次）需要在截取后确认。
+3. **D 方案的渲染性能**：Leaflet 中渲染矢量底图（canvas）在低配电脑上可能比栅格底图慢，需要实测。
+4. **颜色整体变化一次**（移除灰色导致）。
+5. **底图上的颜色可辨识度**：叠加在底图上后部分浅色可能不清楚，需要实测调整。
+6. **Route Summary 的字段口径**：Pickup Volume、PPH 是 T3 snapshot 中的 Route 级原值（Pickup Volume 统计窗口仍是 D6 未决问题），面板上需要标明数据来自 DMS snapshot。
+
+### RM2 本机真实验证（2026-10-02，Claude 在 Product Owner 本机运行）
+
+- `npm test` 240/240 通过；`git diff --check` 通过。依赖：`leaflet@1.9.4`、`protomaps-leaflet@5.1.0`（Claude 安装，固定版本）。
+- 底图接口：`/basemap/ops.pmtiles` Range `bytes=0-7` → 206（8 字节）、`bytes=-16` → 206、越界 → 416；`us.pmtiles` 全文件 → 200；`world.pmtiles` → 404。下载中途断开 20 次后 server 仍正常（`/api/health` 200，日志无错误）。
+- 无界面 Chromium，真实底图 + 真实 SFO01 数据：
+  - **首次加载（1440）**：polygon 出现约 0.44 s，网络空闲约 1.2 s；首屏底图 23 次 Range 请求、约 0.72 MB。整轮操作（搜索、缩放到最小、Fit Station）累计 77 次底图请求、约 3.6 MB。390 宽首屏约 1.0 s、0.33 MB。
+  - **没有任何外部请求**（全部是 `http://127.0.0.1:3000/`）；console 无 error / warning，无 CSP violation。
+  - 底图显示城市 / 道路 / 水系；Route polygon 覆盖在上面；254 个 polygon；缩小到最小 zoom 可见北美全境（`noWrap`，-180° 以西为空白）。
+  - Attribution 可见：`Leaflet | Boundaries: US Census 2020 ZCTA, Protomaps © OpenStreetMap`。
+  - 打开即自动 fit 到 SFO01；缩小后点 “Fit Station” 回到 Station 全景。
+  - 搜索 `sfo01-023` + Enter：定位到该 Route（6 个 ZIP），6 个 polygon 原色 + 加粗描边，其余 248 个 fill 降到约 0.14；Route Summary：`SFO01-023 / SFO01 / 6 (6 mapped) / SFO-WZS / Pickup Volume 1,605 / PPH 28.79 / Last Updated 2026-10-02 12:12 PDT`，底部 `Source: DMS snapshot · Updated: …`。输入 `zzz` 显示 “No matching route”。Esc 清除后没有淡化的 polygon。
+  - hover tooltip 与 click / 触屏 tap 的 Selected ZIP 面板正常。
+  - Coverage 卡：`94.42%`、`254 / 269 ZIP mapped`、`15 without Census ZCTA · 0 need boundary regeneration`；Missing 清单默认折叠。
+  - 1440 / 390 均无页面横向滚动。
+- 待 Product Owner 预览签字（RM2-AC12）。
+
+---
+
+## RM3 — 浅色地图、中文 UI、线路概览、线路 / 邮编统一搜索（**Approved**，Product Owner 2026-10-02 确认并授权实现）
+
+### RM3 已确认的决定（Product Owner 2026-10-02）
+
+| # | 决定 |
+|---|---|
+| X1 | 底图主题先用 **`grayscale`**；实际观感不好再单独调整 |
+| X2 | 采用 **CA + NV + OR 服务区边界库**（2,519 个 ZCTA，12.5 MB），**放进 Git**。已由 Claude 生成：`geo/zcta2020_ca_nv_or.geojson` + `.meta.json`，SFO01 的 254 个 polygon 与旧文件逐个一致 |
+| X3 | 删除旧的 `zcta2020_sfo01.geojson` / `.meta.json`（已由 Claude 删除）及只服务于单站点边界方案的相关内容；边界库是唯一正式来源 |
+| X4 | 允许调深在 grayscale 底图上过淡的颜色（浅黄、浅绿、浅粉等）。**palette 长度保持 19，`routeColor` 算法不变**，不增删颜色；调整后截图检查可读性 |
+| X5 | `/map` 全部中文化；ZIP、DSP、PPH、Pickup Volume、Route / Station 编号、attribution 保持原样 |
+| X6 | 线路概览按 R3-3 新布局 |
+| X7 | 统一搜索“搜索线路或邮编”，规则按 R3-4；邮编搜索支持五种状态 |
+| X8 | 新增 `GET /api/route-map/zip?postal_code=`，状态判断、归属、线路概览、geometry、`no_zcta` / `not_checked` 都在 server 端 |
+| X9 | 选中邮编用明显粗边；有线路 / 无线路视觉可区分；无线路不得表现成搜索失败 |
+| X10 | 选择状态 `{ station, route \| null, zip \| null }`，规则按 R3-7；“当前选择”区域分别显示站点 / 线路 / 邮编 |
+| X11 | RM1 / RM2 功能全部保留（R3-9 RM3-AC8） |
+
+范围：UI 和搜索体验。Route-ZIP 数据层（DMS → transform → route-profiles store）不变；边界数据为了支持“无线路 ZIP”需要扩大（R3-5）。RM1 / RM2 的功能全部保留。
+
+### R3-1 浅色底图
+
+- protomaps-leaflet 内置 flavor：`light`、`white`、`grayscale`、`dark`、`black`。**推荐 `grayscale`（浅灰、低饱和）**：道路 / 城市仍清楚，Route 颜色最突出；备选 `light`（带淡彩色）。只改 `BASEMAP_FLAVOR` 常量和 polygon 样式，PMTiles 文件不用重新生成。
+- 页面其余部分保持深色；地图容器背景改为浅色，与底图一致。
+- polygon 样式在浅底图上重新定（纯函数 `polygonStyle`）：
+
+  | 状态 | 填充 | 描边 |
+  |---|---|---|
+  | 无选择 | Route 色，fill ≈ 0.5 | 深灰 `#334155`，1px |
+  | 选中线路（当前线路） | Route 色，fill ≈ 0.65 | 近黑 `#0f172a`，3px |
+  | 选中线路时的其他线路 | Route 色，fill ≈ 0.12 | 灰，opacity ≈ 0.35 |
+  | 选中邮编（有线路） | 保持线路样式 | **强调色（例如洋红 `#db2777`）5px**，置于最上层 |
+  | 选中邮编（无线路） | 无 Route 色，浅强调色填充 ≈ 0.15 | 同上强调色 5px，**虚线**（区分“无线路”） |
+  | hover | 不改填充 | 白色内描边 / 加粗 2px |
+
+- palette 按 V5 冻结，不改长度。浅色调色板中有几种很淡的颜色（例如 `#ffffb3`、`#ffed6f`、`#ccebc5`、`#fccde5`），在浅灰底图上靠深色描边区分；如果实测仍不清楚，可以只**调深这几个颜色的值**（长度不变，只有用到这几个颜色的 Route 会换色）——这需要 Product Owner 另行同意（R3-12）。
+- tooltip 保持深色背景、浅色文字，对比度不受底图影响。
+
+### R3-2 中文 UI 范围
+
+- 只改 `/map` 页面面向用户的文字（`<html lang="zh-CN">`），Route Profile 页面不在本轮。
+- 文字集中在一个小的字符串表（例如 `web/map-text.js`），不引入 i18n 框架。
+- 保持原样：Route ID、ZIP、DSP、PPH、Pickup Volume（D6 未确认，不翻译成具体统计口径）、线路编号（SFO01-023）、站点代码、数据集名称、attribution。
+- 对照（节选）：Routes → 线路；Search → 搜索线路或邮编；Fit Station → 定位站点；Clear selection → 清除选择；Route Summary → 线路概览；Selected ZIP → 当前邮编；Coverage → 地图覆盖率；Missing Boundary ZIP → 缺少边界的邮编；Last Updated → 更新时间；No matching route → 未找到匹配线路；`no_zcta` → 无 Census ZCTA；`not_checked` → 边界数据未覆盖（需重新生成）；Loading → 加载中；错误提示同步中文。
+
+### R3-3 线路概览（Route Summary）新布局
+
+```text
+┌ 线路概览 ─────────────────────────┐
+│ SFO01-023                    （大字，约 24–28px） │
+│ 站点 SFO01 · DSP SFO-WZS                         │
+│ ┌ ZIP 数 ┐ ┌ Pickup Volume ┐ ┌ PPH ┐            │
+│ │ 6      │ │ 1,605         │ │ 28.79 │（大数字）│
+│ │已上图 6│ └───────────────┘ └───────┘          │
+│ 更新时间 2026-10-02 12:12 PDT                     │
+│ Source: DMS snapshot（小字）                      │
+└──────────────────────────────────┘
+```
+
+- 数据仍来自一次 `/api/route-map` 响应（RM2 已带出字段），空值 `—`，Pickup Volume 只叫 “Pickup Volume”。
+
+### R3-4 统一搜索：“搜索线路或邮编”
+
+- 输入规则（`map-state.js` 纯函数 `classifyQuery`）：
+  - 恰好 5 位数字 → **邮编搜索**（按 Enter，或输满 5 位时触发）。
+  - 其他 → **线路搜索**（RM2 规则不变：完全匹配优先、包含匹配、多结果列表、无结果“未找到匹配线路”）。输入时实时过滤线路列表。
+  - 1–4 位纯数字：按线路包含匹配过滤列表（线路名含数字，例如 `023`），同时提示“输入完整 5 位邮编可搜索邮编”。
+- 邮编搜索结果分 5 种状态（由 server 判定，见 R3-6）：
+
+  | 状态 | 条件 | 地图 | 右侧 |
+  |---|---|---|---|
+  | `covered` 有线路覆盖 | ZIP 在某个 Station 的某条 Route 中，且有 polygon | fit 到该 ZIP，强调色描边；同时选中所属线路（其他线路淡化） | 当前邮编卡（徽标“有线路覆盖”）+ 线路概览 |
+  | `covered_no_boundary` 有线路但无边界 | 在某条 Route 中，但没有 ZCTA | 不移动地图；选中所属线路 | “有线路覆盖 · 该 ZIP 暂无可用边界数据” + 线路概览 |
+  | `uncovered` 当前无线路覆盖 | 不在任何 Route 中，但有 ZCTA | fit 到该 ZIP，虚线强调色 + 浅填充；其他线路保持正常显示 | 当前邮编卡（徽标“当前无线路覆盖”），不显示线路概览 |
+  | `no_boundary` 暂无边界数据 | 不在任何 Route 中，且边界库里没有 | 不移动地图，不画任何 polygon | “该 ZIP 暂无可用边界数据（可能是 PO Box / 机构 ZIP，或不是有效 ZIP）” |
+  | `out_of_range` 超出支持范围 | ZIP 不在边界库覆盖的前缀范围内（R3-5） | 不移动地图 | “该 ZIP 不在当前支持的地图范围内（CA / NV / OR）” |
+
+- 不运行时访问任何第三方服务（不做地理编码 API）。
+- “暂无边界数据”与“系统出错”分开显示：网络 / API 错误用错误样式和错误码，不会显示成 `no_boundary`。
+
+### R3-5 无线路 ZIP 的数据来源和 ZCTA 范围
+
+- 现有 `geo/zcta2020_sfo01.geojson` 只有 SFO01 的 254 个 ZCTA，无法搜索无线路的 ZIP。
+- **推荐：建立一个“服务区边界库”**，按 ZIP 前缀从同一份 Census 2020 ZCTA 1:500k 截取：
+  - 范围：**CA（90–96）+ NV（889–898）+ OR（97）**。规则简单、可重复；覆盖全部现有和 legacy Station（含 Reno、Medford）。
+  - 实测：**2,519 个 ZCTA，GeoJSON 12.5 MB**（gzip 约 3.9 MB）。对比：只做北加 + NV 为 1,282 个、6.8 MB，但会漏掉 Medford（OR）。
+  - 文件：`geo/zcta2020_ca_nv_or.geojson` + `.meta.json`（记录 dataset、vintage、前缀规则、feature 数、生成时间）。
+  - 不进前端：边界库只在 server 端读取（boundary store），前端只拿当前 Station 的 polygon（与现在相同，约 0.86 MB）和单个搜索结果的 geometry。
+- **边界库取代 `zcta2020_sfo01.geojson`**：Route Map 的 Station polygon 也从边界库里取，解决“按 Station 命名的边界文件”问题（RM1 风险 3），新增 Station 时不用重新截取。
+  - 缺失分类随之简化：ZIP 在支持前缀内但边界库没有 → `no_zcta`（边界库对这些前缀是完整的，所以就是 Census 确认没有）；ZIP 不在支持前缀内 → `not_checked`（需要扩大边界库范围）。API 字段不变。
+  - 旧文件 `zcta2020_sfo01.*` 改为删除还是保留作历史，见 R3-12。
+- 不做 ZIP 点位 / 地理编码；`no_boundary` 只显示说明。
+
+### R3-6 API 扩展
+
+- 新增 `GET /api/route-map/zip?postal_code=95112`：
+  - 400 `invalid_postal_code`（不是 5 位数字）。
+  - 200 `{ postal_code, status, station, route_id, route_name, route: <与 routes[] 相同的线路概览字段> | null, geometry: <GeoJSON geometry> | null, boundary_source }`，`status` 为 R3-4 的五种之一。
+  - 判定在 server 端纯函数 `lookupZip({ profiles, boundaries, postalCode })` 中完成，复用 `postal-codes.js` 的校验；跨所有 Station 查找归属（目前只有 SFO01）。
+- `GET /api/route-map?station=` 不变，但 polygon 改从边界库取。
+- 前端不做 join：有线路时用已加载的 Station polygon 高亮；无线路时把返回的 `geometry` 画成单独的高亮图层。
+
+### R3-7 选择状态和层级
+
+- 状态模型（`map-state.js`）：`{ station, route: { route_id } | null, zip: { postal_code, status, geometry? } | null }`。
+  - 点线路（列表 / 线路搜索）→ 设置 route，清除 zip。
+  - 点地图上的 ZIP 或邮编搜索 `covered` → 设置 zip 和它所属的 route。
+  - 邮编搜索 `uncovered` / `no_boundary` / `out_of_range` → 设置 zip，route 为 null（不淡化其他线路）。
+  - 清除选择 / Esc / 点空白 → 全部清除；切换站点 → 全部清除并定位站点。
+- 右侧顶部固定一个“当前选择”块，三行分开显示：**站点** SFO01 / **线路** SFO01-023 或 — / **邮编** 95112 或 —（邮编后带状态徽标）。下面依次是：当前邮编卡（有邮编时）、线路概览（有线路时）、线路搜索与列表、地图覆盖率、缺少边界的邮编（折叠）。
+- 邮编高亮（强调色）与线路高亮（深色加粗）视觉上可区分；两者可以同时存在。
+
+### R3-8 文件改动（建议）
+
+- 数据：新增 `geo/zcta2020_ca_nv_or.geojson`、`geo/zcta2020_ca_nv_or.meta.json`；更新 `geo/README.md`（生成步骤、前缀规则）。生成由 Claude 在本机用 mapshaper 执行（与 TBL3 相同方法）。
+- server：`store/boundaries-file.js`（读边界库 + 新 meta 校验）、`route-map/route-map.js`（从边界库 join；缺失分类调整；新增 `lookupZip`）、`api/app.js`（新增 `/api/route-map/zip`）、`api/server.js`。
+- web：`map-text.js`（新增，中文字符串）、`map-state.js`（`classifyQuery`、新状态模型、`polygonStyle` 浅色版本、邮编高亮样式）、`map-view.js`（flavor、搜索结果高亮图层、fit 到 ZIP）、`map-panel.js`（当前选择块、当前邮编卡、线路概览新布局、中文）、`map.js`（统一搜索编排）、`map.html`、`styles.css`。
+- 测试：boundary 库校验、`lookupZip` 五种状态、新 API、`classifyQuery`、选择状态转换、`polygonStyle`、面板 DOM doubles（中文文字、状态徽标、无线路 ZIP 的高亮图层）。
+
+### R3-9 验收标准（草案）
+
+- **RM3-AC1** 地图区域为浅色 / 浅灰底图，页面其余保持深色；浅色线路在底图上可辨认（有深色描边）；tooltip 对比度正常。
+- **RM3-AC2** `/map` 面向用户的文字为中文；ZIP / DSP / PPH / Pickup Volume / 线路编号等保持原样。
+- **RM3-AC3** 线路概览：线路名和核心数字明显放大；字段齐全；Source 小字保留；Pickup Volume 未改名。
+- **RM3-AC4** 搜索框“搜索线路或邮编”：输入 `SFO01-023` 定位线路（RM2 行为保留）；输入 5 位 ZIP 触发邮编搜索。
+- **RM3-AC5** 邮编搜索五种状态都正确显示（例子已用 2026-10-02 的 SFO01 数据和候选边界库核实）：
+  - `covered`：`95112`（SFO01-013）定位并高亮，显示“有线路覆盖”和线路概览；
+  - `covered_no_boundary`：`94604`（SFO01-001，无 ZCTA）显示“有线路覆盖 · 该 ZIP 暂无可用边界数据”；
+  - `uncovered`：`95814`（Sacramento）、`94104`（San Francisco 市中心，不在 SFO01 线路中）仍定位并以虚线高亮，显示“当前无线路覆盖”；
+  - `no_boundary`：`95812`（无线路、无 ZCTA）显示“暂无可用边界数据”；
+  - `out_of_range`：`10001` 显示“不在当前支持的地图范围内”。
+  - 没有伪造 polygon。
+- **RM3-AC6** 邮编高亮与线路高亮可区分；“当前选择”块分别显示站点 / 线路 / 邮编。
+- **RM3-AC7** 边界库只在 server 端读取；`/api/route-map` 的 Station 结果仍为 254 polygon / 269 total / 15 missing（`no_zcta`）。
+- **RM3-AC8** RM1 / RM2 功能保留：定位站点、线路列表、线路选中淡化、hover / click / tap、地图覆盖率、缺少边界的邮编、本地 PMTiles、0 第三方请求、CSP 不变、1440 / 390 布局。
+- **RM3-AC9** `npm test` 全部通过；Product Owner 预览签字。
+
+### R3-10 风险 / 未决问题
+
+1. **边界库放哪里**：放进仓库（12.5 MB，Census 十年才更新一次，克隆后即可使用）还是放 runtime 目录（不进 Git，但新环境要多一步生成）？推荐进仓库。
+2. **旧的 `zcta2020_sfo01.*` 文件**：边界库取代它之后，删除（Git 历史可找回）还是保留？推荐删除，避免两份边界不一致。删除文件需要 Product Owner 同意。
+3. **浅色调色板**：部分浅色在浅灰底图上偏淡；先用深色描边解决，若仍不清楚，是否允许调深个别颜色值（会让少数 Route 换色）？
+4. **`no_boundary` 无法区分“不存在的 ZIP”和“PO Box ZIP”**：没有 USPS 官方 ZIP 列表时只能统一提示。
+5. **底图主题**：`grayscale` 还是 `light`，建议实现后两种各截一张图给 Product Owner 选（只改一个常量）。
+6. **server 内存**：边界库 12.5 MB 解析后常驻内存，本机单用户场景可接受。
+
+### RM3 本机真实验证（2026-10-02，Claude 在 Product Owner 本机运行）
+
+- `npm test` 243/243 通过；`git diff --check` 通过；依赖和 `geo/` 未被 Codex 修改；`web/` 无 `innerHTML`。palette 仍为 19 色，4 个浅色调深（`#ffffb3→#c4a62a`、`#fccde5→#d875a8`、`#ccebc5→#71ad68`、`#ffed6f→#d9b52c`），`routeColor` 算法不变。
+- API：`/api/route-map?station=SFO01` 仍为 `total 269 / mapped 254 / missing 15（全部 no_zcta）`，254 个 feature（来自 CA+NV+OR 边界库）。`/api/route-map/zip`：`95112 → covered（SFO01-013，Polygon）`、`94604 → covered_no_boundary（SFO01-001，geometry null）`、`95814 / 94104 → uncovered（Polygon）`、`95812 → no_boundary`、`10001 → out_of_range`、`abc → 400 invalid_postal_code`。
+- 无界面 Chromium（1440 / 390 + 触屏），真实底图 + 真实数据：
+  - `lang="zh-CN"`，面向用户的文字为中文；ZIP / DSP / PPH / Pickup Volume / 线路编号 / attribution 保持原样。
+  - grayscale 底图明亮，城市 / 道路清楚；254 个 polygon；调深后的颜色在浅灰底图上可辨认（深色描边）。
+  - 线路搜索 `SFO01-023`：定位并高亮；线路概览大字：`SFO01-023`、`站点 SFO01 · DSP SFO-WZS`、`ZIP 数 6（已上图 6）/ Pickup Volume 1,605 / PPH 28.79`、`更新时间 …`、`Source: DMS snapshot`。输入 `023` 显示提示“输入完整 5 位邮编可搜索邮编”。
+  - 邮编五种状态：`95112` 有线路覆盖（洋红实线粗边 + 所属线路深色粗边 + 线路概览）；`94604` “有线路覆盖 · 该 ZIP 暂无可用边界数据”；`94104` “当前无线路覆盖”（洋红虚线 + 浅粉填充，其他线路不淡化）；`95812` “暂无可用边界数据（可能是 PO Box / 机构 ZIP，或不是有效 ZIP）”；`10001` “不在当前支持的地图范围内（CA / NV / OR）”。“当前选择”三行（站点 / 线路 / 邮编 + 状态徽标）随状态正确变化。
+  - 首次加载约 1.2–1.3 s；**没有任何外部请求**；console 无 error / warning，无 CSP violation；1440 / 390 无页面横向滚动。
+- 发现的布局问题（设计层面，未修改）：搜索框位于“当前选择 / 当前邮编 / 线路概览”之后，选中后这些卡片展开会把搜索框推到首屏以下（390 宽时需要来回滚动）。建议把搜索框移到侧边栏顶部，待 Product Owner 决定。
+- 待 Product Owner 预览签字（RM3-AC9）。
+
+---
+
+## RM4 — 收口：彩色底图（**Approved**，Product Owner 2026-10-02）
+
+- 底图 flavor 由 `grayscale` 改为 protomaps-leaflet 的 **`light`**（自然、柔和的彩色道路地图）。只改 `BASEMAP_FLAVOR` 常量和必要的 polygon / 高亮样式微调；PMTiles 文件不变。
+- 保留 RM1–RM3 全部功能；不改数据层，不新增地图功能。
+- 已知未处理：搜索框位于侧边栏卡片之后，选中后会被推到首屏以下（RM3 验证记录）。按 Product Owner “收口、不再扩功能” 的要求本轮不改。
+
+### RM4 实现记录（Implementation Notes，2026-10-02）
+
+- `BASEMAP_FLAVOR` 改为 `light`，地图容器使用浅色背景。保留既有 polygon / 无线路 ZIP 样式数值、19 色 palette、选择状态、搜索、tooltip 和 RM1–RM3 行为；未改数据层或 PMTiles。
+- route-map-web 更新底图 flavor 断言为 `light`，map-state 直接验证常量及既有选中线路、ZIP、淡化和虚线样式；`npm.cmd test` 244/244 通过，`git diff --check` 通过。
+- 未读取真实 runtime 或底图文件；彩色底图上的实际观感复核及 Product Owner 预览签字待 Claude / Product Owner 完成。
+
+### RM4 本机验证（2026-10-02，Claude）
+
+- `npm test` 244/244；`git diff --check` 通过。`/map` 使用 `light` 彩色底图（海洋蓝、绿地、浅色道路），Route polygon 仍是视觉重点；选中线路、选中 ZIP（洋红实线）、无线路 ZIP（`94104` 洋红虚线 + 浅粉填充）均清楚；1440 / 390 正常；**无外部请求**，console 无 error，无 CSP violation。

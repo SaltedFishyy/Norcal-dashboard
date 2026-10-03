@@ -158,3 +158,33 @@ T5 多 Station、Refresh from DMS 按钮、点击时访问 DMS、批量抓取多
 - modal 渲染前复制 `data.zips`，按非空字符串 `postal_code` 升序稳定排序；非法 / 空值置后并保留相对顺序，相同 ZIP 保留相对顺序。ZIP 不转为数字，不修改输入数组或对象，不写回缓存；表格无障碍 caption 同步说明升序。
 - RD1 DOM doubles 新增乱序、前导零、字符串比较、重复值、null / undefined / 空字符串 / 非字符串和冻结输入验证；既有空值断言按新的显示位置调整。未修改数据层、格式或交互。
 - `npm.cmd test`：138/138 通过；`git diff --check` 通过。项目未配置 lint / build 命令。仅使用合成数据和 doubles / 测试内本地 HTTP server，未访问 DMS、真实 session 或 runtime 数据；未运行真实浏览器，视觉预览待 Product Owner 确认。未 commit / push / 部署。
+
+---
+
+## RD2 — 收口：Route Profile 页面中文化 + Route Detail 信息补全（**Approved**，Product Owner 2026-10-02）
+
+范围：只展示已有数据并中文化；不新增 DMS 抓取、不改 API 架构、不改 cache。
+
+- **Route Profile 页面（`/`）中文化**：轻量字符串表（不引入 i18n 框架），`lang="zh-CN"`。标题 “北加州线路画像”；列名：线路名称、DSP、Pickup Volume、PPH、首公里距离 (mi)、线路难度、人工难度；状态 / 错误 / 重试 / 链接等文字改中文。ZIP、DSP、PPH、Pickup Volume、线路 / 站点编号保持原样；不改数据含义。
+- **Route Detail modal 补全**（数据：基础信息来自已加载的 Route Profile 行，ZIP 表来自现有 `/api/route-details`）：
+  - 基础信息：线路名称、Route ID、站点、DSP、Pickup Volume、PPH、首公里距离、线路难度、人工难度、ZIP 数、线路数据更新时间（Route Profile snapshot 的 `fetched_at`）、ZIP 详情更新时间（Route Detail 的 `fetched_at`，有详情时显示）。
+  - ZIP 表：ZIP、ZIP 难度、首公里距离 (mi)、熟手 PPH、派送异常率、DNR 率、安全等级；百分比沿用现有 ×100 两位小数；缺失值 `—`；按 `postal_code` 升序（只在展示时排序，不改 cache）；不解释 `postalCodeTag`。
+  - 没有 Route Detail cache 时：基础信息照常显示，ZIP 区域显示 “该线路暂无详细数据”，并提示可运行 `npm run dms:scrape-route-detail -- --route <线路>` 获取。不报错、不空白。
+  - modal 标题和字段中文化；保留 Esc / 关闭按钮 / 点击遮罩关闭、关闭后焦点回到线路名；390 宽时 modal 本身无横向溢出（ZIP 表在 modal 内横向滚动）。
+- 验收：SFO01 51 条线路正常；SFO01-001（有详情）显示完整基础信息 + 21 行 ZIP 表；其他线路显示中文 “该线路暂无详细数据”；1440 / 390；`npm test` 通过。
+
+### RD2 实现记录（Implementation Notes，2026-10-02）
+
+- Route Profile 页面、状态及 modal 中文化；轻量 `profileText` 字符串表放在已提供的 `web/format.js`，避免增加 server 静态资源白名单。数字、时间及难度格式化规则保持不变。
+- `app.js` 将 snapshot `fetched_at` 传给 modal。基础信息的 12 个字段取自主表行和 snapshot，详情仅提供 ZIP 表、`zip_count` 和详情更新时间；加载、无详情及错误状态保留基础信息。ZIP 数无详情时回退到 `postal_codes.length`，缺失显示 `—`。
+- ZIP 表继续排序副本；关闭、Esc、遮罩、焦点恢复及 `sequence` 隔离保持不变。窄屏基础信息为单列，ZIP 表内部横向滚动。
+- `npm.cmd test` 244/244 通过；T7 更新中文页面及状态断言，RD1 更新中文 ZIP 表和状态断言并验证完整字段，新增 ZIP 数回退和两种更新时间回归测试。静态检查无 HTML 注入或外部资源 URL，未新增依赖、API 或抓取。
+- 临时注入合成数据的本地 server + Playwright Chromium 检查 1440 / 390：modal 无横向溢出（390 时左右边界 12 / 378 px，内部 ZIP 表 980 px / 可视 336 px）；三种关闭方式和焦点恢复、无详情状态及 ZIP 升序通过，无 JavaScript 错误或外部请求。初始临时脚本曾因 PowerShell 编码及按钮名称匹配失败，修正脚本后通过。
+- 未读取真实 runtime / session 或访问 DMS；真实 SFO01 数据验证及 Product Owner 预览签字仍由 Claude / Product Owner 完成。
+
+### RD2 本机验证（2026-10-02，Claude）
+
+- Route Profile（`/`）：`lang="zh-CN"`，标题 “北加州线路画像”，表头 `线路名称 / DSP / Pickup Volume / PPH / 首公里距离 (mi) / 线路难度 / 人工难度`，51 行，1440 / 390 无页面横向滚动。
+- `SFO01-001`（有详情）：基础信息 12 项（线路名称、Route ID 831、站点、DSP SFO-AAS、Pickup Volume 950、PPH 21.50、首公里距离 24.53、线路难度 A级 难、人工难度 —、ZIP 数 21、线路数据更新时间、ZIP 详情更新时间）；中文 ZIP 表 21 行，按 ZIP 升序（94604 起）。
+- `SFO01-002`（无详情）：基础信息照常显示，ZIP 区域显示 “该线路暂无详细数据”；console 中唯一记录是该请求预期的 404 资源日志。
+- modal：标题为线路名、关闭按钮 “关闭”；Esc 关闭后焦点回到线路名；390 宽时 modal 宽 366px，无横向溢出。没有外部请求。
