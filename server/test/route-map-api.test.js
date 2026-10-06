@@ -197,3 +197,30 @@ test('Leaflet source directory can be injected independently of web root', async
   assert.equal(await (await fetch(url + '/vendor/leaflet/leaflet.css')).text(), '/* mock local Leaflet */');
   await json(url, '/vendor/leaflet/leaflet.js', 500, { error: 'internal_error' });
 });
+
+
+test('RM5 map and ZIP APIs tolerate missing, malformed and structurally invalid details, preserving originals', async t => {
+  const { url, root } = await fixture(t);
+  const { details } = await import('./route-map-fixtures.js');
+  const filename = path.join(root, 'mock-runtime', 'route-details.json');
+  const original = buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
+  for (const [contents, status] of [[null, 'none'], ['{', 'invalid'], ['{}', 'invalid'],
+    [JSON.stringify({ schema_version: 1, routes: details().routes }), 'ok']]) {
+    if (contents !== null) await fs.writeFile(filename, contents);
+    const response = await fetch(url + '/api/route-map?station=MOCKA');
+    assert.equal(response.status, 200);
+    const data = await response.json(); assert.equal(data.details_status, status);
+    for (const key of ['station', 'fetched_at', 'boundary_source', 'coverage', 'missing']) assert.deepEqual(data[key], original[key]);
+    for (const [index, route] of data.routes.entries()) {
+      for (const key of ['route_id', 'route_name', 'station', 'dsp_name', 'pickup_volume', 'pph', 'zip_count', 'mapped_count']) assert.equal(route[key], original.routes[index][key]);
+    }
+    assert.deepEqual(data.features.features.map(f => f.geometry), original.features.features.map(f => f.geometry));
+    const zipResponse = await fetch(url + '/api/route-map/zip?postal_code=00002');
+    assert.equal(zipResponse.status, 200);
+    const zip = await zipResponse.json();
+    assert.equal(zip.zip_detail_status, status === 'ok' ? 'available' : 'missing');
+    assert.equal(zip.zip_difficulty, status === 'ok' ? 'A级 难' : null);
+    assert.equal(zip.route_difficulty, null);
+    if (contents !== null) assert.equal(await fs.readFile(filename, 'utf8'), contents);
+  }
+});

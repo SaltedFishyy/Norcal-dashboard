@@ -36,10 +36,10 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
     assert.equal(e['map-summary-panel'].hidden, !status.startsWith('covered'));
     assert.equal(map.fits.length, beforeFits + (result.geometry ? 1 : 0));
     if (result.geometry) {
-      const highlighted = groups.at(-2); // Last group is the geometry used solely to compute fit bounds.
+      const highlighted = groups.filter(group => !group.options.pane).at(-2); // Last group is the geometry used solely to compute fit bounds.
       assert.equal(highlighted.front, true);
       assert.equal(highlighted.layers[0].styles[0].weight, 5);
-      assert.equal(highlighted.layers[0].styles[0].color, '#db2777');
+      assert.equal(highlighted.layers[0].styles[0].color, '#334155');
       if (status === 'uncovered') {
         assert.equal(highlighted.layers[0].styles[0].dashArray, '8 6');
         assert.equal(groups[0].layers[0].styles.at(-1).fillOpacity, 0.5);
@@ -113,7 +113,7 @@ async function fixture(search = '', basemapStatus = 206) {
     'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'snapshot-source', 'basemap-message', 'current', 'search-hint', 'search-message', 'summary-panel'].map(id => `map-${id}`)];
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag) };
-  const map = { listeners: {}, fits: [], removed: [], attributionControl: {
+  const map = { panes: {}, createPane(name) { return this.panes[name] = { style: {} }; }, listeners: {}, fits: [], removed: [], attributionControl: {
     setPrefix(value) { this.prefix = value; }, addAttribution(value) { this.text = value; },
   }, setView() {}, on(name, fn) { this.listeners[name] = fn; }, removeLayer(layer) { this.removed.push(layer); },
   fitBounds(bounds, options) { this.fits.push({ bounds, options }); } };
@@ -124,10 +124,10 @@ async function fixture(search = '', basemapStatus = 206) {
     map: (element, options) => { map.options = options; return map; }, DomEvent: { disableClickPropagation() {}, stopPropagation(event) { event.stopped = true; } },
     geoJSON(features, options = {}) {
       if (features.type === 'Feature') features = { type: 'FeatureCollection', features: [features] };
-      const group = { layers: [], addTo() { return this; },
+      const group = { options, layers: [], addTo() { return this; },
         bringToFront() { this.front = true; }, getBounds: () => ({ isValid: () => features.features.length > 0 }) };
       for (const feature of features.features) {
-        const layer = { feature, options: {}, styles: [options.style?.(feature)],
+        const layer = { feature, options: { ...options }, styles: [options.style?.(feature)],
           setStyle(value) { this.styles.push(value); },
           bindTooltip(value, options) { this.tooltip = value; this.tooltipOptions = options; },
           on(listeners) { this.listeners = listeners; } };
@@ -196,7 +196,7 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   replies.push(reply(200, { ...payload(), station: 'MOCKB' })); e['map-station'].value = 'MOCKB';
   await e['map-station'].listeners.change();
   assert.equal(requests.at(-1).url, '/api/route-map?station=MOCKB');
-  assert.equal(map.removed.length, 2);
+  assert.equal(map.removed.length, 6);
 });
 
 test('map page loading, no data, known errors, retries and network failures clear stale data', async () => {
@@ -347,4 +347,148 @@ test('RM2 Enter prefers exact matches over multiple results, then accepts a uniq
   search.value = 'ock-b'; search.listeners.input();
   search.listeners.keydown({ key: 'Enter', preventDefault() {} });
   assert.equal(e['map-summary'].children[0].textContent, 'Mock-B');
+});
+
+const allNodes = node => [node, ...node.children.flatMap(allNodes)];
+const allText = node => allNodes(node).map(node => node.textContent).join(' ');
+
+test('RM5b outlines stack dark/white route and ZIP strokes, pass events through and leave no stale layers', async () => {
+  const { page, controls, elements: e, groups, map, requests, replies, reply, doc } = await fixture();
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload())); await page.start();
+  const active = () => groups.filter(group => group.options.pane === 'selection-outline' && !map.removed.includes(group));
+  const check = (group, color, weight, dashArray = null) => {
+    assert.equal(group.options.pane, 'selection-outline');
+    for (const layer of group.layers) {
+      assert.deepEqual(layer.styles[0], { fill: false, interactive: false, bubblingMouseEvents: false,
+        opacity: 1, color, weight, dashArray });
+      assert.equal(layer.options.interactive, false); assert.equal(layer.options.bubblingMouseEvents, false);
+      assert.equal(layer.listeners, undefined);
+    }
+  };
+  assert.deepEqual(map.panes['selection-outline'].style, { zIndex: '450', pointerEvents: 'none' });
+  assert.equal(active().length, 0);
+  e['map-routes'].children[0].listeners.click();
+  assert.equal(active().length, 2);
+  assert.deepEqual(active()[0].layers.map(layer => layer.feature.properties.postal_code), ['00002', '00123']);
+  check(active()[0], '#0b1220', 3.5); check(active()[1], '#ffffff', 1.5);
+  groups[0].layers[0].listeners.click({});
+  assert.equal(active().length, 4);
+  assert.deepEqual(active()[0].layers.map(layer => layer.feature.properties.postal_code), ['00123']);
+  check(active()[0], '#0b1220', 3.5); check(active()[1], '#ffffff', 1.5);
+  check(active()[2], '#0b1220', 5); check(active()[3], '#ffffff', 3);
+  assert.deepEqual(active()[2].layers[0].feature.geometry, groups[0].layers[0].feature.geometry);
+  const before = active(), fits = map.fits.length, calls = requests.length;
+  for (const mode of [1, 0, 1]) controls[1].children[mode].listeners.click();
+  assert.deepEqual(active(), before); assert.equal(map.fits.length, fits); assert.equal(requests.length, calls);
+  const polygon = groups[0].layers[0]; polygon.listeners.mouseover();
+  assert.deepEqual(polygon.styles.at(-1), { weight: 7, color: '#ffffff', opacity: 1 });
+  polygon.listeners.mouseout(); assert.equal(polygon.styles.at(-1).color, '#334155');
+  doc.listeners.keydown({ key: 'Escape' }); assert.equal(active().length, 0);
+  e['map-routes'].children[0].listeners.click();
+  e['map-station'].value = 'MOCKB'; replies.push(reply(200, { ...payload(), station: 'MOCKB' }));
+  await e['map-station'].listeners.change(); assert.equal(active().length, 0);
+  const uncoveredProfiles = profiles(); uncoveredProfiles.stations.MOCKA.rows.find(row => row.route_id === 1).postal_codes = ['00002'];
+  replies.push(reply(200, lookupZip({ profiles: uncoveredProfiles, boundaries: boundaries(), postalCode: '00123' })));
+  await page.searchQuery('00123', true);
+  assert.equal(active().length, 2); check(active()[0], '#0b1220', 5); check(active()[1], '#ffffff', 3, '8 6');
+  const fill = groups.filter(group => !group.options.pane && group.layers[0]?.styles[0]).at(-1).layers[0].styles[0];
+  assert.equal(fill.fillColor, '#db2777'); assert.equal(fill.fillOpacity, 0.15);
+  controls[1].children[0].listeners.click(); assert.equal(active().length, 2);
+  e['map-clear'].listeners.click(); assert.equal(active().length, 0);
+});
+
+test('RM5 mode controls and legend preserve selection, bounds, layer identity and requests', async () => {
+  const { page, controls, elements: e, groups, map, requests, replies, reply, doc } = await fixture();
+  const { details } = await import('./route-map-fixtures.js');
+  const { difficultyColor } = await import('../../web/difficulty.js');
+  const source = profiles(); source.stations.MOCKA.rows.find(row => row.route_id === 1).route_difficulty = 'B级 中';
+  source.stations.MOCKA.rows.find(row => row.route_id === 2).route_difficulty = 'D级 极易';
+  const data = buildRouteMap({ profiles: source, boundaries: boundaries(), station: 'MOCKA', details: details() });
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
+  const mode = controls[1], legend = controls[2];
+  assert.equal(mode.attributes.role, 'group'); assert.equal(mode.attributes['aria-label'], '地图颜色模式');
+  assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按难易度']);
+  assert.ok(mode.children.every(button => button.type === 'button')); // Native buttons support Enter and Space.
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['true', 'false']);
+  assert.equal(legend.hidden, true);
+  const fits = map.fits.length, calls = requests.length, count = groups.length;
+  mode.children[1].listeners.click();
+  assert.equal(legend.hidden, false); assert.equal(legend.children[0].textContent, '颜色：线路难度');
+  assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据']);
+  assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
+  assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('B'));
+  assert.match(allText(groups[0].layers[0].tooltip), /线路难度 B级 中/);
+  assert.deepEqual(e['map-routes'].children.map(row => row.children[2].textContent), ['B', 'D']);
+  assert.deepEqual(e['map-routes'].children.map(row => row.children[0].style.backgroundColor), [difficultyColor('B'), difficultyColor('D')]);
+  assert.equal(map.fits.length, fits); assert.equal(requests.length, calls); assert.equal(groups.length, count);
+  groups[0].layers[0].listeners.click({});
+  const selected = allText(e['map-current']), selectedFits = map.fits.length, selectedGroups = groups.length;
+  assert.equal(legend.children[0].textContent, '颜色：Mock-A 的 ZIP 难度');
+  assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('A'));
+  assert.equal(groups[0].layers[1].styles.at(-1).fillColor, difficultyColor(null));
+  assert.match(allText(groups[0].layers[1].tooltip), /该 ZIP 不在线路详情中，详情更新于/);
+  assert.match(allText(e['map-summary']), /已有 1 个 ZIP/); // Cache row count, not profile ZIP count.
+  assert.match(allText(e['map-selection']), /ZIP 难度 A级 难/);
+  const highlight = groups.filter(group => !group.options.pane).at(-1).layers[0];
+  assert.equal(highlight.styles[0].fillColor, difficultyColor('A')); assert.equal(highlight.styles[0].color, '#334155');
+  mode.children[0].listeners.click();
+  assert.equal(legend.hidden, true);
+  assert.equal(highlight.styles.at(-1).fillColor, routeColor(1));
+  assert.equal(highlight.tooltip.children.length, 3);
+  mode.children[1].listeners.click();
+  assert.equal(allText(e['map-current']), selected); assert.equal(map.fits.length, selectedFits);
+  assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'true']);
+  groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, '#ffffff');
+  groups[0].layers[0].listeners.mouseout(); assert.equal(groups[0].layers[0].styles.at(-1).color, '#334155');
+  doc.listeners.keydown({ key: 'Escape' }); assert.equal(legend.children[0].textContent, '颜色：线路难度');
+});
+
+test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit route difficulty', async () => {
+  const { page, controls, elements: e, groups, replies, reply } = await fixture();
+  const data = payload(); data.details_status = 'invalid';
+  data.routes[0].route_difficulty = 'S级 极难';
+  data.features.features.forEach(f => f.properties.route_difficulty = 'S级 极难');
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
+  assert.match(e['map-message'].textContent, /线路详情文件无效，ZIP 难度不可用/);
+  assert.equal(e['map-message'].className, 'map-warning');
+  controls[1].children[1].listeners.click(); e['map-routes'].children[0].listeners.click();
+  assert.match(allText(e['map-summary']), /暂无 ZIP 难度数据/);
+  assert.match(allText(e['map-summary']), /npm run dms:scrape-route-details -- --station MOCKA/);
+  assert.ok(groups[0].layers.every(layer => layer.styles.at(-1).fillColor === '#9ca3af'));
+  assert.match(allText(groups[0].layers[0].tooltip), /暂无 ZIP 难度数据/);
+  const { details } = await import('./route-map-fixtures.js');
+  const cache = details(); cache.routes['1'].zips[0].postal_code_difficulty = null;
+  const updated = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
+  replies.push(reply(200, updated)); await page.loadStation();
+  assert.doesNotMatch(e['map-message'].textContent, /文件无效/);
+  const current = groups.at(-1).layers;
+  current[0].listeners.click({});
+  assert.match(allText(current[0].tooltip), /ZIP 难度 —（DMS 无数据）/);
+  assert.match(allText(e['map-selection']), /DMS 无数据/);
+  current[1].listeners.click({});
+  assert.match(allText(e['map-selection']), /该 ZIP 不在线路详情中，详情更新于/);
+});
+
+test('RM5 ZIP search highlight uses the same difficulty fields as polygon clicks and preserves uncovered styles', async () => {
+  const { page, controls, elements: e, groups, replies, reply } = await fixture();
+  const { details } = await import('./route-map-fixtures.js');
+  const cache = details(), data = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
+  const highlightLayer = () => groups.filter(group => !group.options.pane && group.layers[0]?.styles[0]).at(-1).layers[0];
+  controls[1].children[1].listeners.click();
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002', details: cache })));
+  await page.searchQuery('00002', true);
+  assert.equal(highlightLayer().styles[0].fillColor, '#dc2626');
+  assert.equal(highlightLayer().styles[0].color, '#334155');
+  assert.match(allText(e['map-selection']), /ZIP 难度 A级 难/);
+  // Covered polygon click and the lookup API must agree.
+  groups[0].layers[0].listeners.click({});
+  assert.equal(highlightLayer().styles[0].fillColor, '#dc2626');
+  const uncoveredProfiles = profiles(); uncoveredProfiles.stations.MOCKA.rows.find(row => row.route_id === 1).postal_codes = ['00002'];
+  replies.push(reply(200, lookupZip({ profiles: uncoveredProfiles, boundaries: boundaries(), postalCode: '00123', details: cache })));
+  await page.searchQuery('00123', true);
+  assert.equal(highlightLayer().styles[0].dashArray, '8 6');
+  const highlight = highlightLayer(); controls[1].children[0].listeners.click();
+  assert.deepEqual(highlight.styles.at(-1), highlight.styles[0]);
 });

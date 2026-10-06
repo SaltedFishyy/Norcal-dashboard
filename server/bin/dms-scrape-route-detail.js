@@ -50,7 +50,8 @@ export async function runRouteDetailScrape({ args = process.argv.slice(2), env =
     const { route } = transformRouteDetail(result, { station, routeId: result.routeId, fetchedAt: new Date().toISOString() });
     step = 'store';
     const filename = await save({ runtimeDir, route });
-    log(`station：${station}；route：${routeName}；route_id：${route.route_id}；ZIP 数：${route.zips.length}；list 请求数：${result.listRequestCount}；detail 请求数：${result.detailRequestCount}；输出：${filename}`);
+    log(`station：${station}；route：${routeName}；route_id：${route.route_id}；ZIP 数：${route.zips.length}；list 请求数：${result.listRequestCount}；detail 请求数：${result.detailRequestCount}；locate_method：${result.locateMethod ?? '—'}；输出：${filename}`);
+    if (result.restorationError) { step = 'capture'; throw result.restorationError; }
     return 0;
   } catch (error) {
     const allowed = ['NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError'];

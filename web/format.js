@@ -1,3 +1,5 @@
+import { difficultyLevel } from './difficulty.js';
+
 // Lightweight user-facing text shared by the profile page and detail modal.
 export const profileText = {
   loading: '加载中…', networkError: '无法连接本地服务器。',
@@ -7,12 +9,12 @@ export const profileText = {
   volume: 'Pickup Volume', pph: 'PPH', firstMile: '首公里距离 (mi)',
   difficulty: '线路难度', manualDifficulty: '人工难度', zipCount: 'ZIP 数',
   profileUpdated: '线路数据更新时间', detailUpdated: 'ZIP 详情更新时间',
-  zipDifficulty: 'ZIP 难度', experiencedPph: '熟手 PPH', exceptionRate: '派送异常率',
-  dnrRate: 'DNR 率', safety: '安全等级', zipTable: 'ZIP 画像表',
+  zipDifficulty: 'ZIP 难度', experiencedPph: '熟手 PPH', pickupDaily: '领件量（日均）',
+  zipTable: 'ZIP 画像表',
   zipCaption: '按 ZIP 升序显示的 ZIP 画像',
   firstMileNote: '首公里距离为线路级数值，在每个 ZIP 行重复显示。',
   noDetail: '该线路暂无详细数据',
-  scrapeHint: route => `可运行 npm run dms:scrape-route-detail -- --route ${route} 获取。`,
+  scrapeHint: station => `可运行 npm run dms:scrape-route-details -- --station ${station || 'SFO01'} 获取。`,
   detailError: code => `无法加载线路详情 (${code})。`,
   detailNetworkError: '无法连接本地服务器 (server_unreachable)。',
 };
@@ -26,9 +28,7 @@ export function formatPercent(value) {
 }
 
 export function difficultyTone(text) {
-  const tones = { 'D级 极易': 'easy', 'C级 易': 'easy', 'B级 中': 'medium', 'A级 难': 'hard', 'S级 极难': 'hard' };
-  const key = typeof text === 'string' ? text.trim() : '';
-  return Object.hasOwn(tones, key) ? tones[key] : 'unknown';
+  return { D: 'easy', C: 'easy', B: 'medium', A: 'hard', S: 'hard' }[difficultyLevel(text)] ?? 'unknown';
 }
 
 export function formatNumber(value, maximumFractionDigits = 2, minimumFractionDigits = 0) {

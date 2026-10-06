@@ -33,10 +33,19 @@ export function parseMaxListRequests(value) {
 }
 
 export function parseMaxRouteDetailRequests(value) {
-  const count = value?.trim() ? Number(value) : 20;
+  const count = value?.trim() ? Number(value) : 30;
   if (!Number.isSafeInteger(count) || count < 1) throw new Error('MAX_ROUTE_DETAIL_REQUESTS 必须是正整数。');
   return count;
 }
+
+const batchInteger = (value, fallback, minimum, name) => {
+  const count = value === undefined ? fallback : /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(count) || count < minimum) throw new Error(`${name} 配置无效。`);
+  return count;
+};
+export const parseRouteDetailBatchDelay = value => batchInteger(value, 4000, 2000, 'ROUTE_DETAIL_BATCH_DELAY_MS');
+export const parseMaxRouteDetailBatchRequests = value => batchInteger(value, 800, 1, 'MAX_ROUTE_DETAIL_BATCH_REQUESTS');
+export const parseMaxRouteDetailBatchProdApiRequests = value => batchInteger(value, 1000, 1, 'MAX_ROUTE_DETAIL_BATCH_PROD_API_REQUESTS');
 
 export function resolveStatePath({ env, platform, homedir, repoRoot }) {
   const p = pathApi(platform);

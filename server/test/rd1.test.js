@@ -1,3 +1,4 @@
+import { difficultyColor, difficultyLevel } from '../../web/difficulty.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -12,6 +13,7 @@ import { saveRouteDetail, getRouteDetail, RouteDetailNotFoundError, RouteDetailI
 import { captureRouteDetail } from '../src/dms/route-detail-page.js';
 import { captureRoutePortrait, NeedsLoginError, CaptureError, SelectorError, LoadLimitError, CircuitBreakerError } from '../src/dms/route-profile-page.js';
 import { runRouteDetailScrape } from '../bin/dms-scrape-route-detail.js';
+import { runRouteDetailsBatch } from '../bin/dms-scrape-route-details.js';
 import { parseMaxRouteDetailRequests } from '../src/config.js';
 import { createRequestHandler } from '../src/api/app.js';
 import { startApiServer } from '../src/api/server.js';
@@ -134,17 +136,27 @@ class Tree {
     children.forEach((child) => { child.parentElement = this; });
   }
   get textContent() { return this.value + this.children.map((child) => child.textContent).join(''); }
-  querySelectorAll(selector) { return this.children.flatMap((child) => [...(selector === '*' || child.tag === selector ? [child] : []), ...child.querySelectorAll(selector)]); }
+  querySelectorAll(selector) { return this.children.flatMap((child) => [...(selector === '*' || child.tag === selector || selector === 'tr[rowid]' && child.tag === 'tr' || selector.includes('.') && child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
+  matches(selector) {
+    const [tag, className] = selector.split('.');
+    return (!tag || this.tag === tag) && (!className || (this.className || '').split(/\s+/).includes(className));
+  }
   getClientRects() { return this.visible ? [{}] : []; }
   contains(other) { return this === other || this.children.some((child) => child.contains(other)); }
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; }
   getAttribute(name) { return this.attributes[name] ?? null; }
+  get classList() { return { contains: value => (this.className || '').split(/\s+/).includes(value) }; }
+  scrollIntoView() { this.scrolled = true; }
+  closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector); }
+  getBoundingClientRect() { return this.rect ?? { left: 0, top: 0, right: 100, bottom: 100 }; }
 }
-function evaluate(fn, nodes, argument) {
+function evaluate(fn, nodes, argument, hitBlocked = false) {
   const oldDocument = globalThis.document, oldStyle = globalThis.getComputedStyle;
-  globalThis.document = { querySelectorAll: () => nodes.flatMap((node) => [node, ...node.querySelectorAll('*')]).filter((node) => node.attributes['data-rd1-target']) };
-  globalThis.getComputedStyle = () => ({ visibility: 'visible' });
+  globalThis.document = { querySelectorAll: () => nodes.flatMap((node) => [node, ...node.querySelectorAll('*')]).filter((node) => Object.keys(node.attributes).some(key => key.startsWith('data-rd'))),
+    elementFromPoint: () => hitBlocked ? null : nodes.flatMap(node => node.querySelectorAll('*')).find(node => node.value === '画像详情') };
+  globalThis.getComputedStyle = node => ({ visibility: node.hidden ? 'hidden' : 'visible', overflowY: node.overflowY || 'visible' });
   try { return fn(nodes, argument); }
   finally {
     if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
@@ -154,10 +166,27 @@ function evaluate(fn, nodes, argument) {
 
 function pageHarness({ records, login = false, password = false, status, listRequests = 1, detailRequests = 2,
   wrongId, wrongHeaderId, wrongHeader, virtual = false, missingRow = false, ambiguousAction = false, ambiguousDetail = false, mixedSection = false,
-  modalDelay = 0, detailDelay = 0, missingDetail = false, actionError,
-  missingModal = false, pendingNavigation = false, navigationStatus, navigationPaths = [] } = {}) {
+  modalDelay = 0, detailDelay = 0, missingDetail = false, actionError, actionDelay = 0, missingAction = false,
+  missingModal = false, pendingNavigation = false, navigationStatus, navigationPaths = [],
+  changedRowId = false, occludedFor = 0, hitBlockedFor = 0, wrongCapacityId, wrongPostalId, wrongCapacityName = false,
+  capacityTitle = '业务属性（产能）- 详情', capacityName = 'MOCK-001', capacityLinks = 1, postalLinks = 1,
+  postalSelected = false, autoPostal = false, unknownTabs = false, stalePostal = false, postalTimeout = false,
+  countCapacityRequests = false, tabsDelay = 0, bothTabs = false, clickDelay = 0, postalStuck = false, dateStuck = false,
+  separateGroups = false, missingLabel = false, inputOnly = false, classOnly = false,
+  loadingMs = 0, resetScroll = false, ineffectiveMain = false, actualScroller = false, wheelWorks = false,
+  routeFilter = false, filterLabel = '路区名称', filteredRecords, duplicateRow = false } = {}) {
   const page = new EventEmitter(), clicks = [], logs = [], waits = [];
-  let closes = 0, scrolled = false, modalEvaluations = 0;
+  const listeners = new Set();
+  const capacityListeners = new Map();
+  const emitCapacity = (endpoint, id = 900101) => {
+    const req = { ...detailRequest(endpoint), postDataJSON: () => ({ roadAreaId: id }) };
+    if (countCapacityRequests) page.emit('request', req);
+    const reply = response(req, endpoint.endsWith('/header')
+      ? { data: { roadAreaName: wrongCapacityName ? 'OTHER' : 'MOCK-001' } } : { data: [] });
+    const waiting = capacityListeners.get(endpoint);
+    if (waiting?.predicate(reply)) waiting.resolve(reply);
+  };
+  let closes = 0, scrolled = false, modalEvaluations = 0, detailEvaluations = 0;
   const list = { data: { records: records ?? [{ roadAreaId: 900101, roadAreaName: 'MOCK-001-extra', transitStationName: 'SFO01' }, { roadAreaId: 900101, roadAreaName: 'MOCK-001', transitStationName: 'SFO01' }] } };
   const request = (suffix, body) => ({ url: () => `https://example.invalid/prod-api/dlvs-dataApi/roadAreaPortrait/home/${suffix}`, method: () => 'POST', postDataJSON: () => body });
   const listRequest = () => request('frontPage/queryList/pagination', { transitStationCodeList: ['SFO01'], pageSize: 100 });
@@ -165,6 +194,27 @@ function pageHarness({ records, login = false, password = false, status, listReq
   const response = (req, body) => ({ url: req.url, request: () => req, status: () => 200, json: async () => body });
   const row = new Tree('tr', '', [new Tree('td', 'MOCK-001')]); row.setAttribute('rowid', 'mock-row');
   const bodyNode = new Tree('div'); bodyNode.clientHeight = 100; bodyNode.scrollTop = 0;
+  bodyNode.className = 'vxe-table--body-wrapper'; row.parentElement = bodyNode;
+  bodyNode.children = [row];
+  const mainWrapper = new Tree('div', '', [bodyNode]); mainWrapper.className = 'vxe-table--main-wrapper';
+  const scrollBar = new Tree('div'); scrollBar.className = 'vxe-table--scroll-y'; scrollBar.overflowY = 'auto';
+  scrollBar.clientHeight = 100; scrollBar.scrollHeight = 1000;
+  const table = new Tree('div', '', [mainWrapper, scrollBar]); table.className = 'vxe-table is--virtual-y';
+  let position = 0, reset = false, filtered = false;
+  Object.defineProperty(bodyNode, 'scrollTop', { get: () => position, set: value => {
+    if (ineffectiveMain) return;
+    if (resetScroll && !reset) { reset = true; return; }
+    position = value; row.scrolled = true;
+  } });
+  Object.defineProperty(scrollBar, 'scrollTop', { get: () => position, set: value => { if (actualScroller) { position = value; row.scrolled = true; } } });
+  row.getBoundingClientRect = () => ({ left: 0, top: (filtered ? 10 : 320) - position, right: 100, bottom: (filtered ? 90 : 400) - position });
+  const action = new Tree('button', '画像详情'), hiddenAction = new Tree('button', '画像详情'); hiddenAction.hidden = true;
+  row.children.push(hiddenAction);
+  const fixedRow = new Tree('tr', '', [action, ...(ambiguousAction ? [new Tree('button', '画像详情')] : [])]);
+  fixedRow.setAttribute('rowid', 'mock-row');
+  const fixedBody = new Tree('div', '', [fixedRow]); fixedBody.className = 'vxe-table--body-wrapper';
+  const fixedWrapper = new Tree('div', '', [fixedBody]); fixedWrapper.className = 'vxe-table--fixed-right-wrapper';
+  table.children.push(fixedWrapper); fixedWrapper.parentElement = table;
   const label = new Tree('span', '路区难易度'), link = new Tree('span', '详情 >');
   const section = new Tree('section', '', [label, link, ...(ambiguousDetail ? [new Tree('span', '详情 >')] : []), ...(mixedSection ? [new Tree('span', '基础属性')] : [])]);
   // Match the real ancestor chain and sibling sections without using real DMS data.
@@ -176,30 +226,111 @@ function pageHarness({ records, login = false, password = false, status, listReq
     ...Array.from({ length: 4 }, () => new Tree('div', '', [new Tree('span', '详情 >')]))]);
   const delayedDetail = detailDelay > 0 || missingDetail;
   if (!delayedDetail) label.parentElement = section;
-  const modal = new Tree('div', '', [new Tree('h2', '路区画像详情'), delayedDetail ? modalBody : section]);
+  const modal = new Tree('div', '', [new Tree('h2', '路区画像详情'), new Tree('span', '路区名称：MOCK-001'), delayedDetail ? modalBody : section]);
+  modal.className = 'dbuMicroSysApp-modal-content'; modal.children[0].className = 'dbuMicroSysApp-modal-title';
+  const portraitClose = new Tree('button'); portraitClose.className = 'dbuMicroSysApp-modal-close';
+  portraitClose.parentElement = modal; modal.children.push(portraitClose);
+  const capacitySection = new Tree('section', '', [new Tree('span', '业务属性-产能（日均）'), ...Array.from({length: capacityLinks}, () => new Tree('span', '详情>'))]);
+  modal.children.push(capacitySection); capacitySection.parentElement = modal;
+  const makeModal = (title, children = []) => {
+    const heading = new Tree('h2', title); heading.className = 'dbuMicroSysApp-modal-title';
+    const close = new Tree('button'); close.className = 'dbuMicroSysApp-modal-close';
+    const node = new Tree('div', '', [heading, close, ...children]); node.className = 'dbuMicroSysApp-modal-content';
+    return node;
+  };
+  const labelModal = makeModal('标签详情');
+  const dateTab = new Tree('label', '', [new Tree('input'), new Tree('span', '按日期')]);
+  const postalTabs = Array.from({length: postalLinks}, () => new Tree('label', '', [new Tree('input'), new Tree('span', '按邮编')]));
+  const setTabs = selected => {
+    [dateTab, ...postalTabs].forEach((tab, index) => {
+      const checked = !unknownTabs && (bothTabs || (index ? selected : !selected));
+      tab.className = 'dbuMicroSysApp-radio-button-wrapper' + (!inputOnly && checked ? ' dbuMicroSysApp-radio-button-wrapper-checked' : '');
+      tab.querySelector('input').checked = !classOnly && checked;
+    });
+  };
+  setTabs(postalSelected);
+  if (missingLabel) postalTabs.forEach(tab => { tab.tag = 'div'; });
+  const radioGroup = new Tree('div', '', [dateTab, ...(!separateGroups ? postalTabs : [])]);
+  radioGroup.className = 'dbuMicroSysApp-radio-group dbuMicroSysApp-radio-group-solid dbuMicroSysApp-radio-group-default';
+  const otherGroup = new Tree('div', '', separateGroups ? postalTabs : []); otherGroup.className = 'dbuMicroSysApp-radio-group';
+  const capacityModal = makeModal(capacityTitle, [new Tree('span', `路区名称：${capacityName}`), radioGroup, ...(separateGroups ? [otherGroup] : [])]);
+  let tabElapsed = 0, pendingSelection;
   const outer = new Tree('div', '', [modal]);
+  const filterHeading = new Tree('label', filterLabel); filterHeading.className = 'dbuMicroSysApp-form-item-label';
+  const filterItem = new Tree('div', '', [filterHeading, new Tree('input')]); filterItem.className = 'dbuMicroSysApp-form-item';
   const locator = (selector, index = 0) => ({
-    count: async () => selector === 'input[type=password]' ? Number(password) : selector === 'actions' ? 3 : 1,
+    count: async () => selector === 'input[type=password]' ? Number(password) : selector === 'actions' ? 3
+      : selector === '.dbuMicroSysApp-form-item' && routeFilter ? 2 : 1,
     nth: (i) => locator(selector, selector === 'portrait-action' ? index : i), first: () => locator(selector),
     filter: () => locator(selector === 'tr[rowid]' ? 'actions' : selector),
-    locator: (value) => locator(value), getByText: (text) => locator(text === '画像详情' ? 'portrait-action' : 'station-option', index),
-    innerText: async () => '转运站点', getAttribute: async () => 'mock-row',
-    isVisible: async () => selector === 'portrait-action' ? index === 1 || ambiguousAction && index === 0 : true,
+    locator: (value) => locator(value, index), getByText: (text) => locator(text === '画像详情' ? 'portrait-action' : 'station-option', index),
+    innerText: async () => index === 1 && routeFilter ? filterLabel : '转运站点', getAttribute: async () => 'mock-row',
+    fill: async value => { filtered = Boolean(value); position = 0; row.scrolled = true; },
+    isVisible: async () => selector === 'portrait-action' ? !missingAction && waits.length >= actionDelay && (index === 1 || ambiguousAction && index === 0) : true,
     evaluateAll: async (fn, arg) => {
-      if (selector.endsWith('tr[rowid]')) return evaluate(fn, missingRow || virtual && !scrolled ? [] : [row], arg);
-      if (selector.endsWith('.vxe-table--body-wrapper')) { const value = evaluate(fn, [bodyNode], arg); scrolled = true; return value; }
-      if (delayedDetail && !missingDetail && modalEvaluations >= detailDelay && !difficultyRow.children.includes(link)) {
+      if (selector === '.dbuMicroSysApp-form-item') return evaluate(fn, routeFilter ? [filterItem] : [], arg);
+      if (selector.endsWith('tr[rowid]')) {
+        const value = evaluate(fn, missingRow || virtual && !scrolled ? [] : duplicateRow ? [row, row] : [row], arg);
+        if (bodyNode.scrollTop > 0) { row.scrolled = true; if (changedRowId) { row.setAttribute('rowid', 'new-row'); fixedRow.setAttribute('rowid', 'new-row'); } }
+        return value;
+      }
+      if (selector.includes('fixed-right-wrapper')) {
+        action.visible = !missingAction && waits.length >= actionDelay;
+        action.rect = {left: 0, right: 20, top: waits.length < occludedFor ? 110 : (filtered ? 30 : 340) - position, bottom: waits.length < occludedFor ? 130 : (filtered ? 50 : 360) - position};
+        return evaluate(fn, [fixedBody], arg, waits.length < hitBlockedFor);
+      }
+      if (selector.endsWith('.vxe-table--body-wrapper')) {
+        table.className = 'vxe-table is--virtual-y' + (tabElapsed < loadingMs ? ' is--loading' : '');
+        const value = evaluate(fn, [bodyNode], arg); scrolled = true; return value;
+      }
+      if (selector.includes('closing')) return evaluate(fn, [labelModal, capacityModal, modal].filter(node => node.getAttribute('data-rd3-modal')), arg);
+      if (selector === '.dbuMicroSysApp-modal-content') {
+        radioGroup.querySelectorAll('*').forEach(node => { node.visible = tabElapsed >= tabsDelay; });
+        return evaluate(fn, [labelModal, capacityModal, ...(routeFilter ? [modal] : [])], arg);
+      }
+      if (delayedDetail && !missingDetail && arg?.section === '路区难易度' && detailEvaluations++ >= detailDelay && !difficultyRow.children.includes(link)) {
         difficultyRow.children.push(link); link.parentElement = difficultyRow;
       }
-      return evaluate(fn, missingModal || modalEvaluations++ < modalDelay ? [] : [outer, modal], arg);
+      return evaluate(fn, missingModal || modalEvaluations++ < modalDelay ? [] : [outer, modal, capacityModal], arg);
     },
     click: async () => {
       if (selector === '[data-rd1-target="difficulty"]') {
         assert.equal(link.getAttribute('data-rd1-target'), 'difficulty');
         assert.ok(modalBody.querySelectorAll('*').filter((node) => node !== link).every((node) => !node.getAttribute('data-rd1-target')));
       }
-      clicks.push(selector);
-      if (selector === 'portrait-action') {
+      if (selector === '[data-rd3-close="close"]') {
+        for (const node of [labelModal, capacityModal, modal]) {
+          if (node.querySelectorAll('*').some(child => child.getAttribute('data-rd3-close') === 'close')) node.visible = false;
+        }
+      }
+      if (selector === 'query' && routeFilter) page.emit('request', listRequest());
+      if (selector === '[data-rd1-target="capacity"]') {
+        assert.ok(listeners.has('businessPropertiesProductionCapacity/header'));
+        assert.ok(listeners.has('businessPropertiesProductionCapacity/details/postalCodeDimension'));
+        emitCapacity('businessPropertiesProductionCapacity/header', wrongCapacityId ?? 900101);
+        if (wrongCapacityId) capacityListeners.get('businessPropertiesProductionCapacity/header').reject(new Error('synthetic header timeout'));
+        if (stalePostal) emitCapacity('businessPropertiesProductionCapacity/details/postalCodeDimension', 2);
+        if (autoPostal) emitCapacity('businessPropertiesProductionCapacity/details/postalCodeDimension');
+      }
+      if (selector === '[data-rd1-target="postal"]') {
+        assert.ok(listeners.has('businessPropertiesProductionCapacity/details/postalCodeDimension'));
+        assert.equal(postalTabs[0].getAttribute('data-rd1-target'), 'postal');
+        if (!postalStuck) { if (clickDelay) pendingSelection = { selected: true, at: tabElapsed + clickDelay }; else setTabs(true); }
+        if (!postalTimeout) emitCapacity('businessPropertiesProductionCapacity/details/postalCodeDimension', wrongPostalId ?? 900101);
+        if (wrongPostalId || postalTimeout) capacityListeners.get('businessPropertiesProductionCapacity/details/postalCodeDimension').reject(new Error('page.waitForResponse: Timeout 30000ms exceeded'));
+      }
+      if (selector === '[data-rd1-target="date"]') {
+        assert.equal(dateTab.getAttribute('data-rd1-target'), 'date');
+        if (!dateStuck) { if (clickDelay) pendingSelection = { selected: false, at: tabElapsed + clickDelay }; else setTabs(false); }
+        if (countCapacityRequests) page.emit('request', detailRequest('businessPropertiesProductionCapacity/details/dayDimension'));
+      }
+      clicks.push(selector === '[data-rd1-row-action="portrait"]' ? 'portrait-action' : selector);
+      if (selector === '[data-rd1-row-action="portrait"]') {
+        assert.equal(row.scrolled, true);
+        assert.equal(fixedRow.getAttribute('rowid'), row.getAttribute('rowid'));
+        if (changedRowId) assert.equal(row.getAttribute('rowid'), 'new-row');
+        assert.equal(action.getAttribute('data-rd1-row-action'), 'portrait');
+        assert.equal(hiddenAction.getAttribute('data-rd1-row-action'), null);
         if (actionError) throw actionError;
         for (let i = 0; i < detailRequests; i++) page.emit('request', detailRequest('getRoadAreaContent'));
         if (status) page.emit('response', { url: () => 'https://example.invalid/prod-api/mock', status: () => status });
@@ -208,7 +339,11 @@ function pageHarness({ records, login = false, password = false, status, listReq
   });
   page.locator = locator; page.getByText = (text) => locator(text); page.getByRole = () => locator('query');
   page.keyboard = { press: async (key) => clicks.push(key) };
-  page.waitForTimeout = async (milliseconds) => { waits.push({ milliseconds, clicks: [...clicks] }); };
+  page.mouse = { move: async () => {}, wheel: async (_x, y) => { if (wheelWorks) { position += y; row.scrolled = true; } } };
+  page.waitForTimeout = async (milliseconds) => {
+    waits.push({ milliseconds, clicks: [...clicks] }); tabElapsed += milliseconds;
+    if (pendingSelection && tabElapsed >= pendingSelection.at) { setTabs(pendingSelection.selected); pendingSelection = undefined; }
+  };
   page.goto = async () => {
     for (let i = 0; i < listRequests; i++) page.emit('request', listRequest());
     for (const suffix of navigationPaths) page.emit('request', suffix.startsWith('https://')
@@ -220,12 +355,28 @@ function pageHarness({ records, login = false, password = false, status, listReq
     }
   };
   page.url = () => `https://example.invalid/${login ? 'login' : 'areaDepiction'}`;
-  page.waitForResponse = async (predicate) => {
+  page.waitForResponse = async (predicate, options) => {
     const header = structuredClone(headerBody); if (wrongHeader) header.data.roadAreaName = 'OTHER-MOCK';
-    const replies = [response(listRequest(), list), response(detailRequest('getRoadAreaContent'), contentBody), response(detailRequest('getRoadAreaHeader'), header)];
+    const capacityReply = (endpoint, id, body) => response({ ...detailRequest(endpoint), postDataJSON: () => ({ roadAreaId: id ?? 900101 }) }, body);
+    const filteredList = filteredRecords ?? [{ roadAreaId: 900101, roadAreaName: 'MOCK-001', transitStationName: 'SFO01' }];
+    const replies = [response(listRequest(), filtered ? { data: { records: filteredList, total: filteredList.length } } : list), response(detailRequest('getRoadAreaContent'), contentBody), response(detailRequest('getRoadAreaHeader'), header),
+      capacityReply('businessPropertiesProductionCapacity/header', wrongCapacityId, {data: {roadAreaName: wrongCapacityName ? 'OTHER' : 'MOCK-001'}}),
+      capacityReply('businessPropertiesProductionCapacity/details/postalCodeDimension', wrongPostalId, {data: []})];
     for (const reply of replies) {
       assert.equal(predicate({ ...reply, request: () => ({ ...reply.request(), method: () => 'GET' }) }), false);
-      if (predicate(reply)) return reply;
+      const endpoint = new URL(reply.url()).pathname.split('/roadAreaPortraitDetails/details/')[1];
+      if (endpoint?.startsWith('businessPropertiesProductionCapacity/')) {
+        const current = { ...reply, request: () => ({ ...reply.request(), postDataJSON: () => ({ roadAreaId: 900101 }) }) };
+        if (!predicate(current)) continue;
+        assert.equal(predicate({ ...current, request: () => ({ ...current.request(), postDataJSON: () => ({ roadAreaId: 2 }) }) }), false);
+        assert.equal(options.timeout, 30000);
+        listeners.add(endpoint);
+        return new Promise((resolve, reject) => capacityListeners.set(endpoint, { predicate, resolve, reject }));
+      }
+      if (predicate(reply)) {
+        listeners.add(endpoint);
+        return reply;
+      }
     }
     throw new Error('No synthetic response matched');
   };
@@ -235,6 +386,285 @@ function pageHarness({ records, login = false, password = false, status, listReq
     run: (overrides = {}) => captureRouteDetail({ ...options, routeName: 'MOCK-001', ...overrides }),
     runPortrait: () => captureRoutePortrait(options) };
 }
+
+test('RD3-14 L0 waits for loading to disappear and fails after ten seconds without clicking', async () => {
+  const ready = pageHarness({ loadingMs: 2000 });
+  assert.equal((await ready.run()).locateMethod, 'L1');
+  assert.equal(ready.waits.reduce((sum, wait) => sum + wait.milliseconds, 0), 2000);
+  const busy = pageHarness({ loadingMs: Infinity });
+  await assert.rejects(busy.run(), { name: 'SelectorError', message: '页面控件不可用：表格未就绪', attempts: [] });
+  assert.equal(busy.waits.reduce((sum, wait) => sum + wait.milliseconds, 0), 10000);
+  assert.ok(!busy.clicks.includes('portrait-action'));
+});
+
+test('RD3-14 L1 repositions after layout reset, L2 uses the actual scrollbar, L3 uses mouse wheel', async () => {
+  for (const [options, method, attempts] of [
+    [{ resetScroll: true, changedRowId: true }, 'L1', []],
+    [{ ineffectiveMain: true, actualScroller: true, changedRowId: true }, 'L2', ['L1']],
+    [{ ineffectiveMain: true, wheelWorks: true, changedRowId: true }, 'L3', ['L1', 'L2']],
+  ]) {
+    const records = Array.from({ length: 5 }, (_, index) => ({ roadAreaId: index === 4 ? 900101 : 900102 + index,
+      roadAreaName: index === 4 ? 'MOCK-001' : `OTHER-${index}`, transitStationName: 'SFO01' }));
+    const h = pageHarness({ ...options, records }), result = await h.run();
+    assert.equal(result.locateMethod, method); assert.deepEqual(result.attempts, attempts);
+    assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+    assert.ok(h.waits.reduce((sum, wait) => sum + wait.milliseconds, 0) <= 30000);
+  }
+});
+
+test('RD3-14 duplicates and failed clicks stop immediately without fallback clicks', async () => {
+  for (const [options, message] of [[{ duplicateRow: true }, 'Route 行不唯一'], [{ ambiguousAction: true }, '画像详情按钮不唯一']]) {
+    const h = pageHarness(options);
+    await assert.rejects(h.run(), error => error.message.endsWith(message) && JSON.stringify(error.attempts) === '["L1"]');
+    assert.equal(h.waits.length, 0); assert.ok(!h.clicks.includes('portrait-action'));
+  }
+  const h = pageHarness({ actionError: new SelectorError('synthetic click failure') });
+  await assert.rejects(h.run(), error => error.portraitClickAttempted && error.attempts.length === 1);
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+});
+
+test('RD3-14 total location deadline bounds a long list with delayed readiness', async () => {
+  const h = pageHarness({ ineffectiveMain: true, loadingMs: 9000,
+    records: Array.from({ length: 100 }, (_, index) => ({ roadAreaId: index === 99 ? 900101 : index + 1,
+      roadAreaName: index === 99 ? 'MOCK-001' : `OTHER-${index}`, transitStationName: 'SFO01' })) });
+  const originalNow = Date.now;
+  Date.now = () => h.waits.reduce((sum, wait) => sum + wait.milliseconds, 0);
+  try {
+    await assert.rejects(h.run(), error => error.message.endsWith('画像详情定位失败') && error.attempts.at(-1) === 'L5:unavailable');
+    assert.ok(Date.now() <= 30000);
+  } finally { Date.now = originalNow; }
+});
+
+test('RD3-14 L5 requires the exact label, validates a single ID/name, counts and restores queries', async () => {
+  const h = pageHarness({ ineffectiveMain: true, routeFilter: true });
+  const result = await h.run({ maxListRequests: 2 });
+  assert.equal(result.locateMethod, 'L5'); assert.deepEqual(result.attempts, ['L1', 'L2', 'L3']);
+  assert.equal(result.listRequestCount, 4); // Startup + initial query + filter + restoration; budget is 2 + 2.
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+  assert.equal(h.clicks.filter(click => click === 'query').length, 3);
+  assert.equal(h.clicks.at(-1), 'query');
+  for (const filteredRecords of [[], [{ roadAreaId: 900101, roadAreaName: 'MOCK-001' }, { roadAreaId: 2, roadAreaName: 'OTHER' }],
+    [{ roadAreaId: 2, roadAreaName: 'MOCK-001' }], [{ roadAreaId: 900101, roadAreaName: 'OTHER' }]]) {
+    const bad = pageHarness({ ineffectiveMain: true, routeFilter: true, filteredRecords });
+    await assert.rejects(bad.run(), error => error instanceof CaptureError || error.cause instanceof CaptureError);
+    assert.ok(!bad.clicks.includes('portrait-action'));
+  }
+  const other = pageHarness({ ineffectiveMain: true, routeFilter: true, filterLabel: '快递员工作区域名称' });
+  await assert.rejects(other.run(), error => error.attempts.at(-1) === 'L5:unavailable');
+  assert.equal(other.clicks.filter(click => click === 'query').length, 1);
+});
+
+test('RD3 shared row selector waits only for rendering, scrolls first and distinguishes missing from duplicate buttons', async () => {
+  const immediate = pageHarness(); await immediate.run(); assert.equal(immediate.waits.length, 0);
+  const delayed = pageHarness({ actionDelay: 3 }); await delayed.run();
+  assert.equal(delayed.waits.length, 3);
+  assert.ok(delayed.waits.every(wait => wait.milliseconds === 200 && !wait.clicks.includes('portrait-action')));
+  const missing = pageHarness({ missingAction: true });
+  await assert.rejects(missing.run(), { name: 'SelectorError', message: '页面控件不可用：画像详情定位失败', attempts: ['L1', 'L2', 'L3', 'L5:unavailable'] });
+  assert.ok(missing.waits.reduce((sum, wait) => sum + wait.milliseconds, 0) <= 30000);
+  assert.equal(missing.clicks.includes('portrait-action'), false);
+  const duplicate = pageHarness({ ambiguousAction: true });
+  await assert.rejects(duplicate.run(), { name: 'SelectorError', message: '页面控件不可用：画像详情按钮不唯一' });
+  assert.equal(duplicate.waits.length, 0); assert.equal(duplicate.clicks.includes('portrait-action'), false);
+});
+
+test('RD4 first opening switches date to postal and restores date before returning', async () => {
+  const h = pageHarness(); await h.run();
+  assert.deepEqual(h.clicks.filter(click => /target="(?:postal|date)"/.test(click)),
+    ['[data-rd1-target="postal"]', '[data-rd1-target="date"]']);
+  assert.equal(h.waits.length, 0);
+});
+
+test('RD4 real radio-group structure isolates each label for both initial states and class/input signals', async () => {
+  for (const postalSelected of [false, true]) {
+    for (const signals of [{}, { inputOnly: true }, { classOnly: true }]) {
+      const h = pageHarness({ postalSelected, autoPostal: postalSelected, ...signals });
+      assert.deepEqual((await h.run()).capacityBody, { data: [] });
+      assert.equal(h.clicks.filter(click => click === '[data-rd1-target="postal"]').length, postalSelected ? 0 : 1);
+      assert.equal(h.waits.length, 0);
+    }
+  }
+});
+
+test('RD4 labels appearing after two seconds are awaited before clicking', async () => {
+  const h = pageHarness({ tabsDelay: 2000 }); await h.run();
+  assert.equal(h.waits.length, 10);
+  assert.ok(h.waits.every(wait => wait.milliseconds === 200 && !wait.clicks.includes('[data-rd1-target="postal"]')));
+});
+
+test('RD4 missing, equally selected or structurally invalid labels time out after ten seconds without clicking', async () => {
+  for (const options of [{ tabsDelay: Infinity }, { bothTabs: true }, { unknownTabs: true },
+    { separateGroups: true }, { missingLabel: true }]) {
+    const h = pageHarness(options);
+    await assert.rejects(h.run(), { name: 'SelectorError', message: '页面控件不可用：按邮编标签状态' });
+    assert.equal(h.waits.reduce((sum, wait) => sum + wait.milliseconds, 0), 10000);
+    assert.ok(h.waits.every(wait => wait.milliseconds === 200));
+    assert.ok(!h.clicks.some(click => /target="(?:postal|date)"/.test(click)));
+  }
+});
+
+test('RD4 confirms asynchronous selection after clicks even when the response has already arrived', async () => {
+  const h = pageHarness({ clickDelay: 600 }); await h.run();
+  assert.equal(h.waits.length, 6);
+  assert.ok(h.waits.slice(0, 3).every(wait => wait.clicks.at(-1) === '[data-rd1-target="postal"]'));
+  assert.ok(h.waits.slice(3).every(wait => wait.clicks.at(-1) === '[data-rd1-target="date"]'));
+  const stuck = pageHarness({ postalStuck: true });
+  await assert.rejects(stuck.run(), { name: 'SelectorError', message: '页面控件不可用：按邮编标签状态' });
+  assert.equal(stuck.waits.length, 50);
+  assert.equal(stuck.clicks.filter(click => click === '[data-rd1-target="postal"]').length, 1);
+  assert.ok(!stuck.clicks.includes('[data-rd1-target="date"]'));
+});
+
+test('RD4 date restoration failure preserves validated data, writes once and stops before the next Route', async () => {
+  const h = pageHarness({ dateStuck: true });
+  const result = await h.run();
+  assert.deepEqual(result.capacityBody, { data: [] });
+  assert.equal(result.restorationError.message, '页面控件不可用：按日期标签状态');
+  assert.equal(h.waits.length, 50);
+  let captures = 0, writes = 0, closes = 0, record;
+  const code = await runRouteDetailsBatch({ args: ['--station', 'SFO01'],
+    env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction' }, sessionExists: async () => {},
+    cachedIds: async () => new Set(), signals: new EventEmitter(),
+    session: async (_options, callback) => callback({
+      body: { data: { records: [1, 2].map(i => ({ roadAreaId: 900100 + i, roadAreaName: `MOCK-00${i}`, transitStationName: 'SFO01' })), total: 2 } },
+      guarded: action => action(), beginRoute: () => {}, counts: () => ({ routeDetailRequestCount: 0 }),
+    }), capture: async () => { captures++; return result; }, save: async () => { writes++; },
+    closeModals: async () => { closes++; }, writeRun: async ({ record: value }) => { record = value; },
+    failure: async () => {}, log: () => {}, errorLog: () => {} });
+  assert.equal(code, 1); assert.equal(captures, 1); assert.equal(writes, 1); assert.equal(closes, 0);
+  assert.equal(record.routes[0].result, 'written'); assert.equal(record.routes[1].result, 'not_run');
+  assert.equal(record.stop_reason, 'close_modals:SelectorError');
+  writes = 0;
+  assert.equal(await runRouteDetailScrape({ args: ['--route', 'MOCK-001'],
+    env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction' }, sessionExists: async () => {},
+    capture: async () => result, save: async () => { writes++; },
+    failure: async () => {}, log: () => {}, errorLog: () => {} }), 1);
+  assert.equal(writes, 1);
+});
+
+test('RD4 remembered postal tab uses the automatic opening response without clicking postal', async () => {
+  const h = pageHarness({ postalSelected: true, autoPostal: true });
+  assert.deepEqual((await h.run()).capacityBody, { data: [] });
+  assert.deepEqual(h.clicks.filter(click => /target="(?:postal|date)"/.test(click)), ['[data-rd1-target="date"]']);
+  assert.equal(h.waits.length, 0);
+});
+
+test('RD4 remembered postal tab without a response waits five seconds then switches date and postal once', async () => {
+  const h = pageHarness({ postalSelected: true }); await h.run();
+  assert.deepEqual(h.clicks.filter(click => /target="(?:postal|date)"/.test(click)),
+    ['[data-rd1-target="date"]', '[data-rd1-target="postal"]', '[data-rd1-target="date"]']);
+  assert.equal(h.waits.reduce((sum, wait) => sum + wait.milliseconds, 0), 5000);
+});
+
+test('RD4 ignores a previous Route postal response while waiting for the current Route', async () => {
+  const h = pageHarness({ postalSelected: true, stalePostal: true });
+  assert.equal((await h.run()).routeId, 900101);
+  assert.equal(h.waits.length, 25);
+  assert.equal(h.clicks.filter(click => click === '[data-rd1-target="postal"]').length, 1);
+});
+
+test('RD4 unknown tab state stops with SelectorError and postal timeout retains the diagnostic cause', async () => {
+  const unknown = pageHarness({ unknownTabs: true });
+  await assert.rejects(unknown.run(), { name: 'SelectorError', message: '页面控件不可用：按邮编标签状态' });
+  assert.equal(unknown.waits.length, 50);
+  assert.ok(!unknown.clicks.some(click => /target="(?:postal|date)"/.test(click)));
+  const timedOut = pageHarness({ postalTimeout: true });
+  await assert.rejects(timedOut.run(), error => error instanceof SelectorError
+    && error.message === '页面控件不可用：按邮编'
+    && error.cause.message === 'page.waitForResponse: Timeout 30000ms exceeded');
+});
+
+test('RD4 date restoration requests are counted and every tab path stays below the Route ceiling', async () => {
+  for (const options of [{}, { postalSelected: true, autoPostal: true }, { postalSelected: true }]) {
+    const h = pageHarness({ ...options, detailRequests: 14, countCapacityRequests: true });
+    const result = await h.run();
+    assert.equal(result.detailRequestCount, options.postalSelected && !options.autoPostal ? 18 : 17);
+    assert.ok(result.detailRequestCount <= 30);
+    assert.equal(h.clicks.at(-1), '[data-rd1-target="date"]');
+  }
+  await assert.rejects(pageHarness({ detailRequests: 28, countCapacityRequests: true }).run(), LoadLimitError);
+});
+
+test('RD4 row five re-resolves changed IDs and clicks only the hit-tested fixed-right button', async () => {
+  const changed = pageHarness({ changedRowId: true }); await changed.run();
+  assert.equal(changed.clicks.filter(click => click === 'portrait-action').length, 1);
+  for (const option of ['occludedFor', 'hitBlockedFor']) {
+    const delayed = pageHarness({ [option]: 3 }); await delayed.run();
+    assert.equal(delayed.waits.length, 3);
+    const hidden = pageHarness({ [option]: Infinity });
+    await assert.rejects(hidden.run(), error => error.message.endsWith('画像详情定位失败'));
+    assert.ok(hidden.waits.length >= 25); assert.ok(!hidden.clicks.includes('portrait-action'));
+  }
+});
+
+test('RD4 capacity controls, title, route name and both request IDs fail closed', async () => {
+  const good = pageHarness(); const result = await good.run();
+  assert.deepEqual(result.capacityBody, { data: [] });
+  assert.ok(good.clicks.indexOf('[data-rd3-close="close"]') < good.clicks.indexOf('[data-rd1-target="capacity"]'));
+  for (const options of [{ capacityLinks: 0 }, { capacityLinks: 2 }, { postalLinks: 0 }, { postalLinks: 2 },
+    { capacityTitle: 'OTHER' }, { capacityName: 'MOCK-0010' }, { wrongCapacityId: 2 }, { wrongPostalId: 2 }, { wrongCapacityName: true }]) {
+    const h = pageHarness(options);
+    await assert.rejects(h.run(), error => ['SelectorError', 'CaptureError'].includes(error.name), JSON.stringify(options));
+    assert.ok(h.closes);
+    assert.ok(h.clicks.filter(click => click === '[data-rd1-target="capacity"]').length <= 1);
+    assert.ok(h.clicks.filter(click => click === '[data-rd1-target="postal"]').length <= 1);
+    let writes = 0;
+    assert.equal(await runRouteDetailScrape({ args: ['--route', 'MOCK-001'],
+      env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction' }, sessionExists: async () => {},
+      capture: () => pageHarness(options).run(), save: async () => { writes++; },
+      failure: async () => {}, log: () => {}, errorLog: () => {} }), 1);
+    assert.equal(writes, 0);
+    assert.equal(await runRouteDetailsBatch({ args: ['--station', 'SFO01'],
+      env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction' }, sessionExists: async () => {},
+      cachedIds: async () => new Set(), signals: new EventEmitter(),
+      session: async (_options, callback) => callback({
+        body: { data: { records: [{ roadAreaId: 900101, roadAreaName: 'MOCK-001', transitStationName: 'SFO01' }], total: 1 } },
+        guarded: action => action(), beginRoute: () => {}, counts: () => ({ routeDetailRequestCount: 0 }),
+      }), capture: () => pageHarness(options).run(), save: async () => { writes++; },
+      writeRun: async () => {}, failure: async () => {}, log: () => {}, errorLog: () => {} }), 1);
+    assert.equal(writes, 0);
+  }
+});
+
+test('RD4 transform merges exact ZIP strings, preserves fractions and flags missing and extra ZIPs', () => {
+  const body = input();
+  body.capacityBody = { data: [{ postalCode: '00123', receiptQty: 12.345 }, { postalCode: 'EXTRA', receiptQty: 1 }] };
+  const original = structuredClone(body), { route, warnings } = transform(body);
+  assert.deepEqual(body, original); assert.equal(route.zips.length, 3);
+  assert.equal(route.zips[0].pickup_volume_daily, 12.345);
+  assert.deepEqual(route.capacity_raw, body.capacityBody.data);
+  for (const zip of route.zips.slice(1)) {
+    assert.equal(zip.pickup_volume_daily, null);
+    assert.ok(zip.parse_errors.some(error => error.field === 'pickup_volume_daily'));
+  }
+  assert.ok(warnings.some(error => error.field === 'capacity_postal_code_extra' && error.value === 'EXTRA'));
+  for (const value of ['12', true, {}, Infinity]) {
+    body.capacityBody.data[0].receiptQty = value;
+    const zip = transform(body).route.zips[0];
+    assert.equal(zip.pickup_volume_daily, null); assert.ok(zip.parse_errors.some(error => error.field === 'pickup_volume_daily'));
+  }
+  for (const data of [{}, [null], [{ postalCode: 123 }], [{ postalCode: '00123' }, { postalCode: '00123' }]]) {
+    assert.throws(() => transform({ ...input(), capacityBody: { data } }), SchemaError);
+  }
+});
+
+test('RD4 store reads legacy records and API exposes pickup only, never capacity raw', async t => {
+  const runtimeDir = await temporary(t);
+  const legacy = transform().route;
+  await saveRouteDetail({ runtimeDir, route: legacy });
+  assert.ok((await getRouteDetail({ runtimeDir, routeId: legacy.route_id })).zips.every(zip => zip.pickup_volume_daily === null));
+  const body = input(); body.capacityBody = { data: [{ postalCode: '00123', receiptQty: 12.25 }] };
+  const route = transform(body).route;
+  await saveRouteDetail({ runtimeDir, route });
+  const api = await getRouteDetail({ runtimeDir, routeId: route.route_id });
+  assert.equal(api.zips[0].pickup_volume_daily, 12.25); assert.ok(!Object.hasOwn(api, 'capacity_raw'));
+  assert.equal(api.zips[0].delivery_fail_rate, legacy.zips[0].delivery_fail_rate);
+  const stored = JSON.parse(await fs.readFile(path.join(runtimeDir, 'route-details.json'), 'utf8'));
+  assert.equal(stored.schema_version, 1); assert.deepEqual(stored.routes[route.route_id].capacity_raw, body.capacityBody.data);
+  for (const pickup_volume_daily of ['bad', {}, true]) {
+    await assert.rejects(saveRouteDetail({ runtimeDir, route: { ...route, zips: [{ ...route.zips[0], pickup_volume_daily }] } }), StoreError);
+  }
+});
 
 test('RD1 shared portrait session preserves T3 counting, 401 behavior and listener cleanup', async () => {
   const navigationPaths = ['https://example.invalid/unrelated', 'another/roadAreaPortrait/extra', 'roadAreaPortraitDetails/details/mock'];
@@ -313,7 +743,7 @@ test('RD1 page selects exact route, visible fixed-column action and innermost di
     const harness = pageHarness({ virtual, modalDelay: 2 }); const result = await harness.run();
     assert.equal(result.routeId, 900101); assert.equal(result.contentBody, contentBody);
     assert.equal(result.listRequestCount, 1); assert.equal(result.detailRequestCount, 2);
-    assert.deepEqual(harness.clicks, ['展开', '.dbuMicroSysApp-select-selector', 'station-option', 'Escape', '.vxe-pager--sizes', '.vxe-select-option:visible', 'query', 'portrait-action', '[data-rd1-target="difficulty"]']);
+    assert.deepEqual(harness.clicks, ['展开', '.dbuMicroSysApp-select-selector', 'station-option', 'Escape', '.vxe-pager--sizes', '.vxe-select-option:visible', 'query', 'portrait-action', '[data-rd1-target="difficulty"]', '[data-rd3-close="close"]', '[data-rd1-target="capacity"]', '[data-rd1-target="postal"]', '[data-rd1-target="date"]']);
     assert.ok(harness.closes); assert.doesNotMatch(harness.logs.join(''), /example.invalid|mock-row/);
   }
 });
@@ -325,7 +755,7 @@ for (const [label, options, type] of [
   ['missing rendered row', { missingRow: true }, SelectorError], ['ambiguous action', { ambiguousAction: true }, SelectorError],
   ['ambiguous difficulty link', { ambiguousDetail: true }, SelectorError], ['mixed base section', { mixedSection: true }, SelectorError],
   ['modal never rendered', { missingModal: true }, SelectorError],
-  ['detail ceiling', { detailRequests: 21 }, LoadLimitError], ['list ceiling', { listRequests: 4 }, LoadLimitError],
+  ['detail ceiling', { detailRequests: 31 }, LoadLimitError], ['list ceiling', { listRequests: 4 }, LoadLimitError],
   ['expired session', { login: true }, NeedsLoginError], ['password form', { password: true }, NeedsLoginError],
   ['session expires during detail', { status: 401 }, NeedsLoginError],
   ...[429, 500, 503, 599].map((status) => [`circuit ${status}`, { status }, CircuitBreakerError]),
@@ -353,7 +783,7 @@ test('RD1 CLI validates route, station and ceilings before session access', asyn
     assert.equal(await runRouteDetailScrape({ args, env: cliEnv, errorLog: () => {}, sessionExists: async () => { touched = true; }, capture: async () => { touched = true; } }), 1);
     assert.equal(touched, false);
   }
-  assert.equal(parseMaxRouteDetailRequests(''), 20); assert.equal(parseMaxRouteDetailRequests('8'), 8);
+  assert.equal(parseMaxRouteDetailRequests(''), 30); assert.equal(parseMaxRouteDetailRequests('8'), 8);
   for (const value of ['0', '-1', '1.5', 'bad', 'Infinity']) assert.throws(() => parseMaxRouteDetailRequests(value));
 });
 
@@ -374,7 +804,7 @@ test('RD1 CLI saves detail and reports one summary using default SFO01', async (
   const code = await runRouteDetailScrape({ args: ['--route', 'MOCK-001', '--headless'], env: { ...cliEnv, RUNTIME_DATA_DIR: runtimeDir }, log: (line) => logs.push(line), errorLog: assert.fail,
     sessionExists: async () => {}, capture: async (options) => {
       assert.equal(options.station, 'SFO01'); assert.equal(options.routeName, 'MOCK-001'); assert.equal(options.headless, true);
-      assert.equal(options.maxDetailRequests, 20);
+      assert.equal(options.maxDetailRequests, 30);
       return { ...input(), routeId: 900101, listRequestCount: 2, detailRequestCount: 11 };
     } });
   assert.equal(code, 0); assert.deepEqual(await fs.readdir(runtimeDir), ['route-details.json']);
@@ -454,7 +884,7 @@ test('RD1 shared formatters implement five exact difficulty tones and decimal pe
 });
 
 class Element {
-  constructor(tag = 'div') { this.tag = tag; this.children = []; this.textContent = ''; this.listeners = {}; this.attributes = {}; this.open = false; this.focused = false; }
+  constructor(tag = 'div') { this.tag = tag; this.style = {}; this.children = []; this.textContent = ''; this.listeners = {}; this.attributes = {}; this.open = false; this.focused = false; }
   append(...children) { for (const child of children) this.children.push(...(child.fragment ? child.children : [child])); }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(name, value) { this.attributes[name] = value; }
@@ -519,6 +949,8 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
     pickup_volume: 12345, pph: 30, first_mile_distance: 3.9,
     route_difficulty: 'A级 难', route_difficulty_manual: null, postal_codes: ['00001'] };
   const detail = transform().route;
+  detail.zips[0].pickup_volume_daily = 1200;
+  detail.zips[1].pickup_volume_daily = 12.345;
   detail.route_name = malicious; detail.zips[0].safety_level = malicious;
   globalThis.fetch = async (url) => {
     requests.push(url);
@@ -527,7 +959,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
   await import('../../web/app.js?rd1'); await new Promise((resolve) => setImmediate(resolve));
   const button = elements.rows.children[0].children[0].children[0];
   assert.equal(button.tag, 'button'); assert.equal(button.type, 'button'); assert.equal(button.textContent, 'MOCK-001');
-  assert.equal(elements.rows.children[0].children[5].children[0].className, 'difficulty tone-hard');
+  assert.equal(elements.rows.children[0].children[5].children[0].className, 'difficulty system-difficulty');
   const pending = button.listeners.click();
   assert.equal(elements['route-detail'].open, true);
   assert.equal(elements['detail-content'].children[1].textContent, '加载中…');
@@ -543,17 +975,19 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
     '首公里距离 (mi)': '3.90', 'ZIP 数': '3', '线路数据更新时间': formatUpdated(metadata.fetchedAt),
     'ZIP 详情更新时间': formatUpdated(metadata.fetchedAt) })) assert.equal(values[label].textContent, expected, label);
   assert.equal(values['线路数据更新时间'].title, metadata.fetchedAt);
-  assert.equal(values['线路难度'].children[0].className, 'difficulty tone-hard');
+  assert.equal(values['线路难度'].children[0].className, 'difficulty system-difficulty');
   assert.equal(values['人工难度'].children[0].textContent, '—');
   assert.equal(values['人工难度'].children[0].className, undefined);
   assert.deepEqual(nodes.filter(node => node.tag === 'th').map(node => node.textContent),
-    ['ZIP', 'ZIP 难度', '首公里距离 (mi)', '熟手 PPH', '派送异常率', 'DNR 率', '安全等级']);
-  assert.equal(nodes.filter((node) => node.tag === 'th').length, 7);
+    ['ZIP', '领件量（日均）', '熟手 PPH', 'ZIP 难度', '首公里距离 (mi)']);
+  assert.equal(nodes.filter((node) => node.tag === 'th').length, 5);
   assert.ok(nodes.some((node) => node.textContent === malicious)); assert.ok(nodes.every((node) => node.tag !== 'img'));
-  for (const text of ['0.47%', '50.00%', '0.00%', '12.34', '23.45', '00123', formatUpdated(metadata.fetchedAt)]) assert.ok(nodes.some((node) => node.textContent === text), text);
+  for (const text of ['12.34', '23.45', '00123', formatUpdated(metadata.fetchedAt)]) assert.ok(nodes.some((node) => node.textContent === text), text);
   const rows = nodes.filter((node) => node.tag === 'tbody')[0].children;
-  assert.equal(rows[2].children[1].textContent, '—'); assert.equal(rows[2].children[1].children.length, 0);
-  assert.equal(rows[0].children[1].children[0].className, 'difficulty tone-hard');
+  assert.deepEqual(rows.map(row => row.children[1].textContent), ['1,200', '—', '12.35']);
+  assert.ok(nodes.every(node => !['派送异常率', 'DNR 率', '安全等级'].includes(node.textContent)));
+  assert.equal(rows[2].children[3].textContent, '—'); assert.equal(rows[2].children[3].children.length, 0);
+  assert.equal(rows[0].children[3].children[0].className, 'difficulty system-difficulty');
   assert.ok(!nodes.some((node) => node.textContent === 'postal_code_tag'));
   elements['detail-close'].listeners.click(); assert.equal(elements['route-detail'].open, false); assert.equal(button.focused, true);
   assert.equal(requests.length, 2);
@@ -562,7 +996,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
 test('RD1b modal stably sorts ZIP strings, puts invalid values last and preserves frozen input', async (t) => {
   const elements = documentDouble(t);
   const zips = Object.freeze(['94005', null, '00987', '', '00123', undefined, '94005', 123, false, '10', '2']
-    .map((postal_code, index) => Object.freeze({ postal_code, safety_level: `mock-${index}` })));
+    .map((postal_code, index) => Object.freeze({ postal_code, experienced_pph: index })));
   const detail = Object.freeze({ route_name: 'MOCK-001', zip_count: zips.length, zips });
   const original = structuredClone(detail);
   globalThis.fetch = async () => ({ status: 200, json: async () => detail });
@@ -572,8 +1006,8 @@ test('RD1b modal stably sorts ZIP strings, puts invalid values last and preserve
   assert.equal(rows.length, zips.length);
   assert.deepEqual(rows.slice(0, 6).map((row) => row.children[0].textContent),
     ['00123', '00987', '10', '2', '94005', '94005']);
-  assert.deepEqual(rows.map((row) => row.children[6].textContent),
-    [4, 2, 9, 10, 0, 6, 1, 3, 5, 7, 8].map((index) => `mock-${index}`));
+  assert.deepEqual(rows.map((row) => row.children[2].textContent),
+    [4, 2, 9, 10, 0, 6, 1, 3, 5, 7, 8].map((index) => index.toFixed(2)));
   assert.deepEqual(detail, original);
   assert.equal(detail.zips, zips);
   assert.equal(nodes.find((node) => node.tag === 'caption').textContent, '按 ZIP 升序显示的 ZIP 画像');
@@ -585,7 +1019,7 @@ test('RD1 modal handles missing detail, sanitized errors, backdrop, Esc and stal
   globalThis.fetch = async () => { if (reply instanceof Error) throw reply; return reply; };
   await openRouteDetail(row, source);
   assert.equal(elements['detail-content'].children[1].textContent, '该线路暂无详细数据');
-  assert.equal(elements['detail-content'].children[2].textContent, '可运行 npm run dms:scrape-route-detail -- --route MOCK-001 获取。');
+  assert.equal(elements['detail-content'].children[2].textContent, '可运行 npm run dms:scrape-route-details -- --station SFO01 获取。');
   assert.equal(elements['detail-content'].children[0].children[0].children[1].textContent, 'MOCK-001');
   const dialog = elements['route-detail'];
   dialog.listeners.click({ target: dialog, clientX: 20, clientY: 20 }); assert.equal(dialog.open, true);
@@ -615,4 +1049,25 @@ test('RD1 frontend contains no HTML injection or external resources; modal scrol
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.match(css, /max-height: 85vh/); assert.match(css, /\.detail-table-scroll \{ overflow: auto/);
   assert.match(css, /max-width: calc\(100% - 24px\)/); assert.match(css, /position: sticky/);
+});
+
+test('RM5 modal uses shared five colors for system route and ZIP difficulties and preserves manual tones', async t => {
+  const e = documentDouble(t), time = '2026-10-05T00:00:00Z';
+  const words = ['S级 极难', 'A级 难', 'B级 中', 'C级 易', 'D级 极易', 'unknown'];
+  for (const word of words) {
+    const row = { route_id: 1, route_name: 'Mock', route_difficulty: word, route_difficulty_manual: 'C级 易' };
+    const data = { zip_count: words.length, fetched_at: time, zips: words.map(postal_code_difficulty => ({ postal_code: '00123', postal_code_difficulty })) };
+    globalThis.fetch = async () => ({ status: 200, json: async () => data });
+    await openRouteDetail(row, new Element('button'), time);
+    const info = Object.fromEntries(e['detail-content'].children[0].children.map(item => [item.children[0].textContent, item.children[1]]));
+    assert.equal(info['线路难度'].children[0].textContent, word);
+    assert.equal(info['线路难度'].children[0].style.backgroundColor, difficultyColor(difficultyLevel(word)));
+    assert.equal(info['人工难度'].children[0].className, 'difficulty tone-easy');
+    assert.deepEqual(info['人工难度'].children[0].style, {});
+    const rows = descendants(e['detail-content']).find(node => node.tag === 'tbody').children;
+    rows.forEach((row, i) => {
+      assert.equal(row.children[3].children[0].textContent, words[i]);
+      assert.equal(row.children[3].children[0].style.backgroundColor, difficultyColor(difficultyLevel(words[i])));
+    });
+  }
 });

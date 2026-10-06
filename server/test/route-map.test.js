@@ -58,8 +58,8 @@ test('route map joins, classifies missing ZIPs, sorts and preserves inputs with 
   assert.deepEqual(result.coverage, { total: 4, mapped: 2, missing: 2, missing_no_zcta: 1, missing_not_checked: 1 });
   assert.equal(result.coverage.mapped + result.coverage.missing, result.coverage.total);
   assert.deepEqual(result.routes, [
-    { route_id: 1, route_name: 'Mock-A', zip_count: 2, mapped_count: 2, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null },
-    { route_id: 2, route_name: 'Mock-B', zip_count: 2, mapped_count: 0, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null },
+    { route_id: 1, route_name: 'Mock-A', zip_count: 2, mapped_count: 2, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
+    { route_id: 2, route_name: 'Mock-B', zip_count: 2, mapped_count: 0, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
   ]);
   assert.deepEqual(result.missing, [
     { postal_code: '00004', route_id: 2, route_name: 'Mock-B', reason: 'no_zcta' },
@@ -67,9 +67,9 @@ test('route map joins, classifies missing ZIPs, sorts and preserves inputs with 
   ]);
   assert.equal(result.features.type, 'FeatureCollection');
   assert.deepEqual(result.features.features.map(f => f.properties), ['00002', '00123'].map(postal_code =>
-    ({ postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA' })));
+    ({ postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA', route_difficulty: null, zip_difficulty: null, zip_detail_status: 'missing' })));
   assert.deepEqual(result.features.features[0].geometry, boundary.geojson.features[1].geometry);
-  assert.doesNotMatch(JSON.stringify(result), /color|difficulty|raw|source_url/);
+  assert.doesNotMatch(JSON.stringify(result), /color|raw|source_url/);
 });
 
 test('route map handles empty Routes and Station and absent Station', () => {
@@ -103,5 +103,42 @@ test('route map rejects intra-Station and cross-Station conflicts with ownership
       assert.ok(error.conflicts[0].routes.some(row => row.route_name === 'Mock-A'));
       return true;
     });
+  }
+});
+
+
+test('RM5 detail join is exact by route, Station and ZIP, without inference or input mutation', async () => {
+  const { details } = await import('./route-map-fixtures.js');
+  const cache = details(), data = profiles();
+  data.stations.MOCKA.rows.find(row => row.route_id === 1).route_difficulty = 'B级 中';
+  const before = structuredClone({ cache, data });
+  const buildWith = details => buildRouteMap({ profiles: data, station: 'MOCKA', boundaries: boundaries(), details });
+  const result = buildWith(cache);
+  const route = result.routes[0];
+  assert.equal(result.details_status, 'ok');
+  assert.equal(route.route_difficulty, 'B级 中');
+  assert.deepEqual(route.zip_detail, { status: 'available', fetched_at: cache.routes['1'].fetched_at, zip_count: 1 });
+  assert.deepEqual(result.features.features.map(f => f.properties.zip_detail_status), ['available', 'not_in_detail']);
+  assert.deepEqual(result.features.features.map(f => f.properties.zip_difficulty), ['A级 难', null]);
+  assert.ok(result.features.features.every(f => f.properties.route_difficulty === 'B级 中'));
+  assert.equal(result.routes[1].zip_detail.status, 'missing');
+  const lookup = lookupZip({ profiles: data, boundaries: boundaries(), postalCode: '00002', details: cache });
+  for (const key of ['route_difficulty', 'zip_difficulty', 'zip_detail_status']) assert.equal(lookup[key], result.features.features[0].properties[key]);
+  assert.deepEqual(lookup.route, route);
+  assert.deepEqual({ cache, data }, before);
+  assert.doesNotMatch(JSON.stringify(result), /raw|private|difficulty_code/);
+  cache.routes['1'].zips[0].postal_code_difficulty = null;
+  assert.equal(buildWith(cache).features.features[0].properties.zip_detail_status, 'available');
+  assert.equal(buildWith(cache).features.features[0].properties.zip_difficulty, null);
+  for (const mismatch of ['station', 'route_id', 'postal_code']) {
+    const other = details();
+    if (mismatch === 'postal_code') other.routes['1'].zips[0].postal_code = ' 00002';
+    else other.routes['1'][mismatch] = mismatch === 'station' ? 'MOCKB' : 2;
+    assert.equal(buildWith(other).features.features[0].properties.zip_detail_status, mismatch === 'postal_code' ? 'not_in_detail' : 'missing');
+  }
+  for (const cache of [undefined, { status: 'none', routes: {} }, { status: 'invalid', routes: {} }]) {
+    const fallback = buildWith(cache);
+    assert.equal(fallback.details_status, cache?.status ?? 'none');
+    assert.ok(fallback.features.features.every(f => f.properties.zip_difficulty === null && f.properties.zip_detail_status === 'missing'));
   }
 });

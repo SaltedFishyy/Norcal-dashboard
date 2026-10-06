@@ -1,3 +1,4 @@
+import { difficultyColor, difficultyLevel } from '../../web/difficulty.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -12,7 +13,7 @@ import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } f
 const webDir = fileURLToPath(new URL('../../web/', import.meta.url));
 const assets = [['/', 'index.html', 'text/html'], ['/styles.css', 'styles.css', 'text/css'],
   ['/app.js', 'app.js', 'text/javascript'], ['/format.js', 'format.js', 'text/javascript'],
-  ['/route-detail.js', 'route-detail.js', 'text/javascript']];
+  ['/route-detail.js', 'route-detail.js', 'text/javascript'], ['/difficulty.js', 'difficulty.js', 'text/javascript']];
 
 async function fixture(t, options = {}) {
   // A temporary directory ensures these tests never read the real runtime snapshot.
@@ -191,7 +192,7 @@ test('T7 frontend structure and safe rendering use no external resources', async
 test('T7 app renders API order and text safely, and handles retries and failures', async (t) => {
   // Minimal DOM doubles exercise the actual app module without a browser or DOM dependency.
   class Element {
-    constructor() { this.children = []; this.textContent = ''; this.attributes = {}; this.listeners = {}; }
+    constructor() { this.style = {}; this.children = []; this.textContent = ''; this.attributes = {}; this.listeners = {}; }
     append(...children) {
       for (const child of children) {
         if (child.fragment) this.children.push(...child.children);
@@ -276,7 +277,8 @@ test('T7 app renders API order and text safely, and handles retries and failures
   assert.deepEqual(cells.slice(2, 5).map((cell) => cell.textContent), ['—', '—', '—']);
   for (const [index, expected] of [[5, 'A级 难'], [6, 'B级 中']]) {
     assert.equal(cells[index].children.length, 1);
-    assert.equal(cells[index].children[0].className, `difficulty tone-${difficultyTone(expected)}`);
+    assert.equal(cells[index].children[0].className, index === 6 ? `difficulty tone-${difficultyTone(expected)}` : 'difficulty system-difficulty');
+    if (index === 5) assert.equal(cells[index].children[0].style.backgroundColor, difficultyColor(difficultyLevel(expected)));
     assert.equal(cells[index].children[0].textContent, expected);
   }
   for (const [value, tone] of [['D级 极易', 'easy'], ['C级 易', 'easy'], ['B级 中', 'medium'],
@@ -285,9 +287,10 @@ test('T7 app renders API order and text safely, and handles retries and failures
       route_difficulty: value, route_difficulty_manual: value,
     }] }) };
     await elements.retry.listeners.click();
-    for (const cell of elements.rows.children[0].children.slice(5)) {
+    for (const [index, cell] of elements.rows.children[0].children.slice(5).entries()) {
       assert.equal(cell.children.length, 1);
-      assert.equal(cell.children[0].className, `difficulty tone-${tone}`);
+      assert.equal(cell.children[0].className, index === 1 ? `difficulty tone-${tone}` : 'difficulty system-difficulty');
+      if (index === 0) assert.equal(cell.children[0].style.backgroundColor, difficultyColor(difficultyLevel(value)));
       assert.equal(cell.children[0].textContent, value);
     }
   }

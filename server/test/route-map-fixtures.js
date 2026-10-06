@@ -15,3 +15,14 @@ export const rawBoundaries = () => ({
 });
 
 export const boundaries = () => { const data = rawBoundaries(); return validateBoundaries(data.geojson, data.meta); };
+
+// Synthetic cache only; includes private fields to test the map's explicit projection.
+export const details = () => ({ status: 'ok', routes: { '1': {
+  route_id: 1, station: 'MOCKA', route_name: 'Detail name', route_difficulty: 'S级 极难',
+  route_difficulty_code: '4', fetched_at: '2026-10-05T00:00:00Z', source: 'dms-playwright',
+  zip_count: 99, parse_errors: [], zips: [
+    { postal_code: '00002', postal_code_tag: null, postal_code_difficulty: 'A级 难',
+      safety_level: null, first_mile_distance: null, experienced_pph: null,
+      delivery_fail_rate: null, dnr_rate: null, raw: { private: 'mock' }, parse_errors: [] },
+  ],
+} } });

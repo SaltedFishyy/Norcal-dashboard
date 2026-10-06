@@ -93,3 +93,16 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .map-sidebar .map-summary-metrics dd { font-size: 24px; line-height: 1.25; }
 .map-summary-metrics dt { font-size: 11px; }
 .map-summary-metrics small { font-size: 11px; color: #a0adc5; }
+
+.system-difficulty { border-color: transparent; }
+.map-mode { display: flex; background: #101828; border-radius: 4px; }
+.map-mode button { margin: 0; padding: 7px 10px; font-size: 13px; border-radius: 0; }
+.map-mode button[aria-pressed="true"] { background: #244044; border-color: #2dd9c6; }
+.map-legend { width: 140px; padding: 8px; border-radius: 4px; background: #101828; color: #e9eef9; }
+.map-legend strong { display: block; margin-bottom: 6px; overflow-wrap: anywhere; }
+.map-legend > div { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.map-level { flex-shrink: 0; }
+.map-sidebar .snapshot { overflow-wrap: anywhere; }
+.map-page .leaflet-tooltip dl.map-difficulty-details > div { white-space: normal; }
+.map-page .leaflet-tooltip dl.map-difficulty-details dd { max-width: 240px; white-space: normal; overflow-wrap: anywhere; }
+.map-page #map-message.map-warning { color: #ffe396; }

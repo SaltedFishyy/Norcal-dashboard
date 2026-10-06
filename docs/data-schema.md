@@ -160,7 +160,7 @@ Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Statio
 ## 9. Route Detail / ZIP Profile（路区 ZIP 画像，按 Route 抓取）
 
 - 规格：`docs/features/route-detail.md`（Approved 2026-10-02）
-- 来源类型：Scraper / browser automation（Playwright，Product Owner 本人的 DMS 登录态），只在手动运行 `npm run dms:scrape-route-detail -- --route <route_name>` 时访问 DMS
+- 来源类型：Scraper / browser automation（Playwright，Product Owner 本人的 DMS 登录态），只在手动运行 `npm run dms:scrape-route-detail -- --route <route_name>`（单条）或 `npm run dms:scrape-route-details -- --station SFO01`（RD3 批量，串行）时访问 DMS；两者写入同一文件、同一结构
 - DMS 接口：`POST …/roadAreaPortraitDetails/details/getRoadAreaContent`（请求体 `{roadAreaId}`），校验用 `…/details/getRoadAreaHeader`
 - 粒度：一行 = 某条 Route 下的一个 ZIP（最新一次成功抓取）。逻辑唯一标识 `route_id + postal_code`
 - 新鲜度：每条 Route 单独记录 `fetched_at`，与 `route-profiles.json` 中 Station 的 `fetched_at` 互相独立
@@ -210,6 +210,9 @@ ZIP 级字段（`getRoadAreaContent.data[]`）：
 | `delivery_fail_rate` | number \| null | `deliveryFailRate` | 派送异常率，**小数**（0.0206 = 2.06%）；前端 ×100 显示 |
 | `dnr_rate` | number \| null | `dnrRate` | DNR 率，**小数**；前端 ×100 显示 |
 | `safety_level` | string \| null | `safetyLevel` | DMS 原值（样本：安全 / 一般 / 风险 / 高危），接口没有 code |
+| `pickup_volume_daily` | number \| null | 产能详情「按邮编」接口 `…/businessPropertiesProductionCapacity/details/postalCodeDimension` 的 `receiptQty`（页面“领件量日均”），按 `postalCode` 合并 | RD4（2026-10-05）新增；旧记录中缺失时视为 null。统计窗口见 RD-Q4。Route 级另存 `capacity_raw`（API 不返回） |
+
+RD4 起 Route Detail 页面只展示 ZIP、领件量（日均）、熟手 PPH、ZIP 难度、首公里距离；`delivery_fail_rate` / `dnr_rate` / `safety_level` 仍保存在 cache 中，但不展示。
 | `raw` | object | 整条原始记录 | 调试用；API 不返回 |
 | `parse_errors` | array | — | 类型不符时记录字段名，值存为 null |
 

@@ -37,7 +37,8 @@
 
 - [ ] RD-Q1 `postalCodeTag` 的含义：样本中 `"1"` 对应页面 `94617NEW`，其余为 `"0"`。确认前只保存原值，不解释（2026-10-02）
 - [ ] RD-Q2 ZIP 难易度接口只有文字没有 code，颜色按五级文字匹配；DMS 若改文字会落到灰色。是否需要找到带 code 的来源（2026-10-02）
-- [ ] RD-Q3 第一版只按单条 Route 手动抓取。以后是否需要多条 / 全部 Route，以及可接受的 DMS 请求量（全部 51 条约 560 个请求）（2026-10-02）
+- [ ] RD-Q3 第一版只按单条 Route 手动抓取。以后是否需要多条 / 全部 Route，以及可接受的 DMS 请求量（全部 51 条约 560 个请求）（2026-10-02）→ **部分回答（2026-10-05）**：Product Owner 要求 SFO01 全部 Route 一次性受控批量抓取（RD3，Draft）。已确认 4 秒间隔、先 `--max-routes 3` 试跑（已授权）；全量等试跑结果后再授权。仍待定：以后多久刷新一次
+- [x] RD-Q5 批量抓取中任意一条 Route 失败 → **停止整个批次**，不记录后继续；依靠 cache 断点续抓（Product Owner 2026-10-05）
 - [ ] RD-Q4 ZIP 指标的统计窗口（「路区画像由近 30 天的数据生成」是否同样适用于标签详情）
 
 ## Tableau Route Map
@@ -50,6 +51,13 @@
 - [ ] TBL-Q4 边界截取的州范围（至少 CA + NV）和服务区 Station 清单（2026-10-02）
 - [ ] TBL-Q5 `.twbx` 和导出数据以后的存放位置（Tableau Server / Cloud 或其他内部位置）（2026-10-02）
 - [ ] TBL-Q6 SMF01 等非 SFO01 Station 的数据依赖 D8（切换页头全局站点）的受控测试授权（2026-10-02）
+
+## Web Route Map
+
+见 `docs/features/route-map.md`。
+
+- [x] RM-Q1 Route Profile 页面和 modal 的难度颜色 → **本轮统一为地图同一套五色**，只改显示颜色（Product Owner 2026-10-05）
+- [x] RM-Q2 难易度模式选中线路时 → 其他线路**保持各自的 Route 难度颜色并淡化**，不变灰（Product Owner 2026-10-05）
 
 ## Route Difficulty
 

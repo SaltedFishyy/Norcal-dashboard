@@ -11,10 +11,11 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   const element = id => doc.getElementById(`map-${id}`);
   localizeMap(doc);
   const stationSelect = element('station'), message = element('message'), retry = element('retry');
-  let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData;
+  let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData, colorMode = 'route';
   const updateSelection = next => { selection = next; view.applySelection(selection); panel.applySelection(selection); };
   const deselect = () => { zipSequence++; panel.searchStatus('success'); updateSelection(clearSelection(stationSelect.value)); };
   const view = createMapView({ leaflet, protomaps, document: doc, fetch: request,
+    onColorMode: mode => { colorMode = mode; view.setColorMode(colorMode); panel.setColorMode(colorMode); },
     onZip: properties => {
       zipSequence++; panel.searchStatus('success');
       const route = stationData?.routes.find(row => row.route_id === properties.route_id);
@@ -90,6 +91,9 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       stationData = data; panel.render(data); view.render(data, { fitToStation: !preserveSearch }); updateSelection(clearSelection(station));
       status('success', data.coverage.total === 0 ? t.noRoutes
         : data.coverage.mapped === 0 ? t.noBoundaries : t.loaded(data.station));
+      if (data.details_status === 'invalid') {
+        message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
+      }
       return true;
     } catch {
       if (current === sequence) { clear(); status('error', t.networkError); }

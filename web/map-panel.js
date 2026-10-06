@@ -1,7 +1,8 @@
+import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatNumber, formatUpdated, formatValue } from './format.js';
 import { routeColor } from './route-colors.js';
 import { searchRoutes, classifyQuery, clearSelection } from './map-state.js';
-import { mapText as t } from './map-text.js';
+import { routeDifficultyText, zipDifficultyText, mapText as t } from './map-text.js';
 
 export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   const element = id => doc.getElementById(`map-${id}`);
@@ -11,7 +12,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     return node;
   };
   const entry = (label, value) => { const node = text('div', ''); node.append(text('dt', label), text('dd', formatValue(value))); return node; };
-  let data, selection = clearSelection();
+  let data, selection = clearSelection(), colorMode = 'route';
   const search = element('search');
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
@@ -22,8 +23,10 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     for (const route of matches) {
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
-      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = routeColor(route.route_id);
-      button.append(swatch, text('span', route.route_name), text('span', `${route.zip_count} ZIP`));
+      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : routeColor(route.route_id);
+      button.append(swatch, text('span', route.route_name));
+      if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
+      button.append(text('span', `${route.zip_count} ZIP`));
       button.addEventListener('click', () => onRoute(route.route_id)); element('routes').append(button);
     }
   }
@@ -53,6 +56,13 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       metrics.append(count, entry('Pickup Volume', formatNumber(route.pickup_volume, 0)), entry('PPH', formatNumber(route.pph, 2, 2)));
       element('summary').append(name, owner, metrics, text('p', `${t.updated} ${formatUpdated(next.zip?.fetched_at || data?.fetched_at)}`));
       if (route.mapped_count === 0) element('summary').append(text('p', t.noMapped));
+      const difficulty = text('dl', ''); difficulty.append(entry(t.routeDifficulty, routeDifficultyText(route.route_difficulty)));
+      element('summary').append(difficulty);
+      if (colorMode === 'difficulty') {
+        element('summary').append(text('p', route.zip_detail?.status === 'available'
+          ? t.detailAvailable(route.zip_detail.zip_count, route.zip_detail.fetched_at) : t.missingDetail));
+        if (route.zip_detail?.status !== 'available') element('summary').append(text('p', t.detailCommand(next.station), 'snapshot'));
+      }
       element('snapshot-source').textContent = t.source;
     } else element('snapshot-source').textContent = '';
     element('selection').replaceChildren();
@@ -60,7 +70,10 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     if (next.zip) {
       const dl = text('dl', ''); dl.append(entry('ZIP', next.zip.postal_code));
       dl.append(text('span', t.statuses[next.zip.status], 'map-badge'));
-      if (next.route) dl.append(entry(t.station, next.station), entry(t.route, next.route.route_name));
+      if (next.route) {
+        dl.append(entry(t.station, next.station), entry(t.route, next.route.route_name));
+        if (next.zip.status === 'covered' && (colorMode === 'difficulty' || next.zip.zip_detail_status === 'available')) dl.append(entry(t.zipDifficulty, zipDifficultyText(next.zip, route?.zip_detail)));
+      }
       element('selection').append(dl, text('p', t.zipNotes[next.zip.status]));
     }
   }
@@ -98,5 +111,6 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     }
     element('missing-empty').hidden = data.missing.length !== 0; renderRoutes();
   }
-  return { render, clear, applySelection, searchStatus };
+  function setColorMode(mode) { colorMode = mode; applySelection(selection); }
+  return { render, clear, applySelection, searchStatus, setColorMode };
 }

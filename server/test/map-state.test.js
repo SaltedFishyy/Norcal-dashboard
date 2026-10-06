@@ -38,7 +38,7 @@ test('unified query classification and station/route/ZIP transitions', () => {
   assert.deepEqual(switchStation('MOCKB'), { station: 'MOCKB', route: null, zip: null });
   assert.equal(uncoveredZipStyle().dashArray, '8 6'); assert.equal(uncoveredZipStyle().weight, 5);
   assert.equal(uncoveredZipStyle().fillOpacity, 0.15);
-  assert.equal(polygonStyle({ route_id: 1, postal_code: '00002' }, selectZip({ route_id: 1, postal_code: '00002' })).color, '#db2777');
+  assert.equal(polygonStyle({ route_id: 1, postal_code: '00002' }, selectZip({ route_id: 1, postal_code: '00002' })).color, '#334155');
   assert.deepEqual([palette[8], palette[14], palette[16], palette[17]], ['#c4a62a', '#d875a8', '#71ad68', '#d9b52c']);
 });
 
@@ -50,4 +50,26 @@ test('RM2 route search trims, ignores case, sorts matches and identifies exact m
   assert.deepEqual(searchRoutes(routes, 'nope'), { exact: undefined, matches: [] });
   assert.deepEqual(searchRoutes(routes, ' ').matches, [routes[2], routes[1], routes[0]]);
   assert.equal(searchRoutes(routes, ' ').exact, undefined);
+});
+
+
+test('RM5 difficulty style table preserves every route-mode border, opacity and selection rule', async () => {
+  const { difficultyColor } = await import('../../web/difficulty.js');
+  const properties = { route_id: 1, postal_code: '00002', route_difficulty: 'S级 极难',
+    route_difficulty_manual: 'D级 极易', zip_difficulty: 'A级 难', zip_detail_status: 'available' };
+  for (const selection of [clearSelection(), selectRoute(1), selectRoute(2), selectZip(properties)]) {
+    const route = polygonStyle(properties, selection);
+    assert.deepEqual(polygonStyle(properties, selection, 'route'), route);
+    const difficult = polygonStyle(properties, selection, 'difficulty');
+    const level = selection.route?.route_id === 1 ? 'A' : 'S';
+    assert.deepEqual(difficult, { ...route, fillColor: difficultyColor(level) });
+  }
+  for (const status of ['available', 'missing', 'not_in_detail']) {
+    for (const zip_difficulty of ['B级 中', null, 'unknown']) {
+      const style = polygonStyle({ ...properties, zip_difficulty, zip_detail_status: status }, selectRoute(1), 'difficulty');
+      assert.equal(style.fillColor, difficultyColor(status === 'available' && zip_difficulty === 'B级 中' ? 'B' : null));
+    }
+  }
+  for (const route_difficulty of [null, 'unknown']) assert.equal(polygonStyle({ ...properties, route_difficulty }, clearSelection(), 'difficulty').fillColor, difficultyColor(null));
+  assert.equal(polygonStyle(properties, selectRoute(2), 'difficulty').fillOpacity, 0.12);
 });

@@ -6,6 +6,7 @@ const files = new Map([
   ['/styles.css', ['styles.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/format.js', ['format.js', 'text/javascript']],
+  ['/difficulty.js', ['difficulty.js', 'text/javascript']],
   ['/route-detail.js', ['route-detail.js', 'text/javascript']],
   ['/map', ['map.html', 'text/html']],
   ['/map.js', ['map.js', 'text/javascript']],

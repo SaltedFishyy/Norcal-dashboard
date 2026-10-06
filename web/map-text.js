@@ -1,4 +1,17 @@
+import { difficultyLevel } from './difficulty.js';
+import { formatUpdated } from './format.js';
+
 export const mapText = {
+  byRoute: '按线路', byDifficulty: '按难易度', colorMode: '地图颜色模式',
+  routeDifficulty: '线路难度', zipDifficulty: 'ZIP 难度',
+  legendRoute: '颜色：线路难度', legendZip: name => `颜色：${name} 的 ZIP 难度`,
+  legendItems: ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据'],
+  missingDetail: '暂无 ZIP 难度数据',
+  detailCommand: station => `npm run dms:scrape-route-details -- --station ${station}`,
+  detailAvailable: (count, time) => `ZIP 难度：已有 ${count} 个 ZIP · 更新于 ${formatUpdated(time)}`,
+  invalidDetail: '线路详情文件无效，ZIP 难度不可用',
+  noZipDifficulty: '—（DMS 无数据）',
+  zipNotInDetail: time => `—（该 ZIP 不在线路详情中，详情更新于 ${formatUpdated(time)}）`,
   title: '线路地图', station: '站点', route: '线路', zip: '邮编', current: '当前选择',
   profiles: '线路档案', snapshot: 'DMS 快照，非实时数据', updated: '更新时间',
   search: '搜索线路或邮编', zipHint: '输入完整 5 位邮编可搜索邮编', noMatch: '未找到匹配线路',
@@ -45,4 +58,11 @@ export function localizeMap(doc) {
   doc.getElementById('route-map').setAttribute('aria-label', mapText.mapLabel);
   doc.getElementById('map-station').setAttribute('aria-label', mapText.station);
   doc.getElementById('map-routes').setAttribute('aria-label', mapText.route);
+}
+
+export const routeDifficultyText = value => difficultyLevel(value) ? value : '—';
+export function zipDifficultyText(properties, detail) {
+  if (properties.zip_detail_status === 'missing' || !properties.zip_detail_status) return mapText.missingDetail;
+  if (properties.zip_detail_status === 'not_in_detail') return mapText.zipNotInDetail(detail?.fetched_at);
+  return difficultyLevel(properties.zip_difficulty) ? properties.zip_difficulty : mapText.noZipDifficulty;
 }

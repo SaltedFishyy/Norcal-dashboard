@@ -1,3 +1,4 @@
+import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from './format.js';
 import { openRouteDetail } from './route-detail.js';
 
@@ -42,7 +43,13 @@ function render(result, data) {
         content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at)); td.append(content);
       }
       if (hasDifficulty) {
-        content.className = `difficulty tone-${difficultyTone(value)}`; td.append(content);
+        content.className = field === 'route_difficulty_manual' ? `difficulty tone-${difficultyTone(value)}` : 'difficulty system-difficulty';
+        if (field === 'route_difficulty') {
+          const level = difficultyLevel(value);
+          content.style.backgroundColor = difficultyColor(level);
+          content.style.color = ['B', 'D', null].includes(level) ? '#0f172a' : '#ffffff';
+        }
+        td.append(content);
       }
       content.textContent = style === 'numeric' ? formatNumber(value, digits, digits) : formatValue(value);
       tr.append(td);

@@ -1,4 +1,5 @@
 import { routeColor } from './route-colors.js';
+import { difficultyColor, difficultyLevel } from './difficulty.js';
 
 export const clearSelection = (station = null) => ({ station, route: null, zip: null });
 export const selectRoute = (route, station = route?.station ?? null) => ({ station,
@@ -17,14 +18,30 @@ export function classifyQuery(input) {
 }
 
 export const uncoveredZipStyle = () => ({ fillColor: '#db2777', fillOpacity: 0.15,
-  color: '#db2777', weight: 5, opacity: 1, dashArray: '8 6' });
+  color: '#334155', weight: 5, opacity: 1, dashArray: SELECTION_OUTLINE.uncoveredDashArray });
 
-export function polygonStyle(properties, selection = clearSelection()) {
+export const SELECTION_OUTLINE = Object.freeze({ outerColor: '#0b1220', innerColor: '#ffffff',
+  zipOuterWeight: 5, zipInnerWeight: 3, routeOuterWeight: 3.5, routeInnerWeight: 1.5,
+  uncoveredDashArray: '8 6' });
+
+export function selectionOutlineStyles({ zip = false, uncovered = false } = {}) {
+  const c = SELECTION_OUTLINE;
+  const common = { fill: false, interactive: false, bubblingMouseEvents: false, opacity: 1 };
+  return [
+    { ...common, color: c.outerColor, weight: zip ? c.zipOuterWeight : c.routeOuterWeight, dashArray: null },
+    { ...common, color: c.innerColor, weight: zip ? c.zipInnerWeight : c.routeInnerWeight,
+      dashArray: uncovered ? c.uncoveredDashArray : null },
+  ];
+}
+
+export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route') {
   const active = selection.route !== null;
   const selected = active && selection.route.route_id === properties.route_id;
   const zip = selected && selection.zip?.postal_code === properties.postal_code;
-  return { fillColor: routeColor(properties.route_id), fillOpacity: active && !selected ? 0.12 : selected ? 0.65 : 0.5,
-    color: zip ? '#db2777' : selected ? '#0f172a' : '#334155', weight: zip ? 5 : selected ? 3 : 1,
+  const level = selected ? properties.zip_detail_status === 'available' ? difficultyLevel(properties.zip_difficulty) : null
+    : difficultyLevel(properties.route_difficulty);
+  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : routeColor(properties.route_id), fillOpacity: active && !selected ? 0.12 : selected ? 0.65 : 0.5,
+    color: '#334155', weight: zip ? 5 : selected ? 3 : 1,
     opacity: active && !selected ? 0.35 : 1 };
 }
 

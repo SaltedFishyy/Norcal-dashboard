@@ -10,6 +10,7 @@
     "dms:login": "node --env-file-if-exists=.env server/bin/dms-login.js",
     "dms:scrape": "node --env-file-if-exists=.env server/bin/dms-scrape.js",
     "dms:scrape-route-detail": "node --env-file-if-exists=.env server/bin/dms-scrape-route-detail.js",
+    "dms:scrape-route-details": "node --env-file-if-exists=.env server/bin/dms-scrape-route-details.js",
     "export:tableau-route-zips": "node --env-file-if-exists=.env server/bin/export-tableau-route-zips.js",
     "test": "node --test server/test/"
   },

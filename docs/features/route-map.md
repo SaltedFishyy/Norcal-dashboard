@@ -607,3 +607,179 @@ Coverage
 ### RM4 本机验证（2026-10-02，Claude）
 
 - `npm test` 244/244；`git diff --check` 通过。`/map` 使用 `light` 彩色底图（海洋蓝、绿地、浅色道路），Route polygon 仍是视觉重点；选中线路、选中 ZIP（洋红实线）、无线路 ZIP（`94104` 洋红虚线 + 浅粉填充）均清楚；1440 / 390 正常；**无外部请求**，console 无 error，无 CSP violation。
+
+---
+
+## RM5 — 难易度颜色模式（**Approved**，Product Owner 2026-10-05；前置条件已满足，**开始实现**）
+
+> 2026-10-05：RD3 / RD4 全量完成。DMS 当前 SFO01 列表的 36 条 Route 全部有 Route Detail cache（含 `pickup_volume_daily`，175 个 ZIP，无 parse_errors）。Product Owner 指示开始 RM5，地图沿用现有 `route-profiles.json` 快照（不重新抓取）。快照中不在 detail cache 里的 Route，按 RM5-7 显示“暂无 ZIP 难度数据”。
+
+> Product Owner 2026-10-05 决定：RM-Q2 → 选中线路后，其他线路保持各自的 Route 难度颜色并淡化，不变灰（即 RM5-4 表）。RM-Q1 → 本轮同时把 Route Profile 页面（主表的线路难度标签、Route Detail modal 的线路 / ZIP 难度）统一为同一套五色（RM5-6 表），人工难度列本轮不改；只改显示颜色，不加入人工难度逻辑，不改任何数据。
+
+> 本节取代第 1 节“不做：Difficulty”和 W7“颜色只表示 Route”这两项，仅在“按难易度”模式下生效。“按线路”模式完全保持 RM1–RM4 的行为。依赖 `docs/features/route-detail.md` RD3（批量 ZIP 详情）；RD3 未完成时，选中线路后各 ZIP 显示为“无数据”。
+
+### RM5-1 已确认的要求（Product Owner 2026-10-05）
+
+- 两种颜色模式：**按线路**（默认，现有逻辑）和**按难易度**。
+- 难易度颜色固定：S 极难 紫、A 难 红、B 中 黄、C 易 深绿、D 极易 浅绿、无数据 灰。
+- 只使用系统难度，**不用人工难度**。
+- 未选中线路：每条 Route 的全部 ZIP 使用该 Route 的整体难度颜色。
+- 选中线路：这条 Route 内的每个 ZIP 按自己的 ZIP 难度着色；ZIP 难度只来自 route-details cache；没有 ZIP 详情时**不猜**，也不把 Route 难度复制给 ZIP，并明确显示“暂无 ZIP 难度数据”。
+- Legend 只在难易度模式显示，固定 6 项。
+- RM1–RM4 的全部功能不变（见 RM5-9）。
+
+### RM5-2 数据来源
+
+| 用途 | 来源 | 字段 | 说明 |
+|---|---|---|---|
+| Route 难度 | `route-profiles.json`（列表接口，T3） | `route_difficulty`（`roadAreaDifficulty`） | 51 条都有。实测分布：S 2 / A 5 / B 28 / C 15 / D 1。**不用** `route_difficulty_manual` |
+| ZIP 难度 | `route-details.json`（RD1 / RD3） | `zips[].postal_code_difficulty` | 只有文字，没有 code（RD-Q2）。SFO01-001 样本 21 个 ZIP 中有 3 个为 null |
+
+- **为什么 Route 难度不用 `route-details.json` 中的 `route_difficulty`**：它只在已抓详情的 Route 上才有，抓取时间也和地图快照不同。地图上的 Route 数据统一来自 `route-profiles.json`。
+- **等级识别**：新增一个共用的纯函数 `difficultyLevel(text)`，按 DMS 五个原文（`S级 极难` / `A级 难` / `B级 中` / `C级 易` / `D级 极易`，去掉首尾空格后完全匹配）返回 `'S' | 'A' | 'B' | 'C' | 'D'`。null 或其他文字一律返回 `null`，即无数据（灰色）。Route 和 ZIP 用同一个函数。Route Profile 页面原来的三色 `difficultyTone`（R8）改为使用同一个函数和同一套五色（RM-Q1）。
+- 不新增任何难度计算或推断规则（`AGENTS.md` 第 13 节、data-schema 第 4.5 节）。
+
+### RM5-3 API：在 server 端组装（不新增接口）
+
+沿用 W3 / W5：join 在 server 的 route-map 组装层完成，前端不按邮编做 join，也不需要选中线路后再请求 `/api/route-details`。
+
+`GET /api/route-map?station=` 响应新增字段（原有字段不变）：
+
+```text
+routes[]:
+  route_difficulty        string|null   DMS 原文（route-profiles）
+  zip_detail: {
+    status                'available' | 'missing'
+    fetched_at            ISO|null      该 Route 的 route-details fetched_at
+    zip_count             number|null   该 Route 在 route-details 中的 ZIP 行数（zips.length）；missing 时为 null
+  }
+features[].properties:
+  route_difficulty        string|null   同上，冗余到每个 polygon，样式函数不用再查表
+  zip_difficulty          string|null   来自 route-details；没有详情或该 ZIP 不在详情里时为 null
+  zip_detail_status       'available' | 'missing' | 'not_in_detail'
+details_status            'ok' | 'none' | 'invalid'   整个 route-details.json 的状态
+```
+
+- `zip_detail_status`：`available` 表示该 Route 有详情且其中有这个 ZIP（`zip_difficulty` 仍可能为 null，即 DMS 本身没有值）；`missing` 表示该 Route 还没有详情；`not_in_detail` 表示该 Route 有详情，但详情里没有这个 ZIP（快照和详情抓取时间不同造成）。难易度模式、选中该 Route 时：`available` 且 `difficultyLevel(zip_difficulty)` 能识别 → 按五色显示；`available` 但 `zip_difficulty` 为 null 或无法识别、`missing`、`not_in_detail` → 灰色，三种情况的提示文字不同（RM5-7）。（2026-10-05 Claude 澄清措辞）
+- 线路概览中的“已有 N 个 ZIP”使用 `routes[].zip_detail.zip_count`（详情行数），不使用快照的 `routes[].zip_count`。
+- 详情 join 条件：`route_id` 相同，且详情的 `station` 与当前 Station 相同；ZIP 按 `postal_code` 字符串精确匹配。
+- `route-details.json` 不存在时 `details_status: 'none'`（全部 `missing`），**地图正常返回 200**。文件损坏或结构不合法时 `details_status: 'invalid'`（全部 `missing`），地图仍返回 200，页面显示警告。地图的线路、邮编、覆盖率功能不能因为详情文件出问题而失败。
+- `GET /api/route-map/zip` 中有线路覆盖的结果同样带上 `route_difficulty`、`zip_difficulty`、`zip_detail_status`，使搜索定位后的高亮颜色和点击定位一致。
+- 响应体积：每个 polygon 增加 3 个短字段（约 254 个），可以忽略。
+
+### RM5-4 前端状态设计
+
+```text
+colorMode: 'route' | 'difficulty'    独立于 selection；默认 'route'；页面内存，不持久化
+selection: { station, route, zip }   不变
+```
+
+`polygonStyle(properties, selection, colorMode)` 决定填充色（边框、透明度、选中 / 淡化规则沿用现有逻辑）：
+
+| colorMode | 是否选中线路 | 该 polygon 属于选中的线路？ | 填充色 |
+|---|---|---|---|
+| route | — | — | `routeColor(route_id)`（不变） |
+| difficulty | 否 | — | `difficultyColor(difficultyLevel(route_difficulty))` |
+| difficulty | 是 | 是 | `difficultyColor(difficultyLevel(zip_difficulty))`；`zip_detail_status ≠ available` 时为灰 |
+| difficulty | 是 | 否 | Route 难度颜色，沿用现有的淡化透明度（0.12） |
+
+- 选中 ZIP 时 `selection.route` 也会设置，所以点击 ZIP 后该线路同样进入 ZIP 难度着色。
+- 选中 ZIP 的洋红边框、无线路 ZIP 的洋红虚线、hover 白边保持不变。洋红（`#db2777`）和 S 级紫色（`#7e22ce`）色相区分明显；实现后在本机截图确认。
+- 切换模式只重新设置样式：**不改变 selection，不改变缩放和视野，不重新请求数据**。
+
+### RM5-5 模式切换控件
+
+- 位置：地图右上角的 Leaflet 控件（与“定位站点”同一类控件），1440 和 390 都能直接看到，不会被侧边栏推到首屏以下。
+- 形式：两个按钮组成的分段控件 `按线路 | 按难易度`，用 `role="group"` 加 `aria-pressed`；键盘可操作；`L.DomEvent.disableClickPropagation`，避免点击时触发“清除选择”。
+- 侧边栏线路列表的色块随模式变化：按线路时为 Route 颜色（不变）；按难易度时为 Route 难度颜色，并在色块旁显示等级字母（S / A / B / C / D / —），不只靠颜色区分。
+
+### RM5-6 Legend
+
+- 只在“按难易度”模式显示，作为 Leaflet 控件放在地图右下角（在署名之上）；按线路模式下隐藏。
+- 固定 6 项，顺序和文字固定：`S 极难`、`A 难`、`B 中`、`C 易`、`D 极易`、`无数据`。每项为色块加文字，DOM 用 textContent 渲染（不使用 inline `<style>`，色块颜色用 `element.style`，与 RM1 的 CSP 做法相同）。
+- 标题随状态变化，说明当前颜色代表什么：未选中线路时为“颜色：线路难度”；选中线路时为“颜色：{线路名} 的 ZIP 难度”。
+- 390 宽时 legend 不超过约 140 px 宽，不遮挡缩放 / 定位控件；不做折叠。
+
+| 等级 | 文字 | 填充色（建议） |
+|---|---|---|
+| S | 极难 | `#7e22ce` 紫 |
+| A | 难 | `#dc2626` 红 |
+| B | 中 | `#eab308` 黄 |
+| C | 易 | `#15803d` 深绿 |
+| D | 极易 | `#86efac` 浅绿 |
+| — | 无数据 | `#9ca3af` 灰 |
+
+颜色常量集中定义在一个模块中（`web/difficulty.js`），legend、polygon 和线路列表色块都从这里取。
+
+### RM5-7 缺少 ZIP 详情时的降级
+
+| 情况（难易度模式、已选中线路） | 地图 | 侧边栏 / tooltip |
+|---|---|---|
+| 该 Route 没有详情（`missing`） | 该 Route 的全部 ZIP 显示灰色 | 线路概览中显示 **“暂无 ZIP 难度数据”**，并提示 `npm run dms:scrape-route-details -- --station SFO01`；Route 难度照常显示（文字），但**不**用于给 ZIP 着色 |
+| 有详情，但某个 ZIP 的难度为 null | 该 ZIP 显示灰色 | tooltip / ZIP 面板中“ZIP 难度：—（DMS 无数据）” |
+| 有详情，但其中没有该 ZIP（`not_in_detail`） | 灰色 | “ZIP 难度：—（该 ZIP 不在线路详情中，详情更新于 …）” |
+| `details_status: invalid` | 全部按 `missing` 处理 | 地图顶部状态行显示警告“线路详情文件无效，ZIP 难度不可用”；其他功能正常 |
+| 未选中线路 | 全部按 Route 难度着色，不需要 ZIP 详情 | — |
+| Route 难度为 null 或无法识别 | 灰色 | Route 难度显示 `—` |
+
+缺少边界的 ZIP 在地图上本来就没有 polygon，保持 RM3 现有显示（缺少边界清单不变），不为它们补充难度。
+
+### RM5-8 Tooltip / 面板内容
+
+- Tooltip（两种模式都显示，内容按模式增加）：ZIP、线路、站点（不变）；难易度模式下增加一行：未选中线路时显示“线路难度：B级 中”，选中线路且属于该线路时显示“ZIP 难度：A级 难”或按 RM5-7 显示降级文字。
+- 线路概览：增加“线路难度”一项（两种模式都显示）；难易度模式下增加“ZIP 难度：已有 21 个 ZIP · 更新于 …”或“暂无 ZIP 难度数据”。
+- 当前邮编面板：有数据时增加“ZIP 难度”一项。
+
+### RM5-9 保持不变（回归检查清单）
+
+中文 UI；彩色 `light` 底图；线路 / 邮编统一搜索（含跨 Station 的 ZIP 搜索）；定位站点；线路列表（搜索过滤、`aria-pressed`）；线路概览；ZIP 选中和高亮；覆盖率；缺少边界的邮编清单；hover / click / 触屏 tap；Esc 和“清除选择”；0 个第三方请求；CSP 不放宽；1440 / 390 响应式且无横向滚动；按线路模式下的 Route 颜色与 RM4 完全一致（palette 冻结）。
+
+### RM5-10 需要修改的文件（建议）
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| store | `server/src/store/route-details-file.js` | 新增 `readRouteDetailsForMap({ runtimeDir })`：只读，返回 `{ status: 'ok' \| 'none' \| 'invalid', routes }`，复用现有 `validFile`，不抛出到地图层 |
+| route-map 组装 | `server/src/route-map/route-map.js` | `buildRouteMap` / `lookupZip` 新增可选参数 `details`，组装 RM5-3 的字段；不传时与现在一致（全部 `missing`） |
+| API wiring | `server/src/api/server.js` | 地图和 ZIP 接口注入 details reader；`app.js` 的路由和错误码不变 |
+| 前端共用 | `web/difficulty.js`（新增） | `difficultyLevel`、`DIFFICULTY_COLORS`、`difficultyColor`；需要加入 `server/src/api/static-files.js` 的白名单 |
+| 前端 | `web/format.js`、`web/route-detail.js`、`web/app.js`、`web/styles.css` | Route Profile 主表和 modal 的难度标签改用 `difficultyLevel` 加五色（RM-Q1）；文字仍为 DMS 原值 |
+| 前端 | `web/map-state.js` | `polygonStyle` 增加 `colorMode` 参数（默认 `'route'`，保持现有调用不变） |
+| 前端 | `web/map-view.js` | 模式切换控件、legend 控件、tooltip 难度行、`setColorMode` 只重设样式 |
+| 前端 | `web/map-panel.js` | 色块随模式变化并显示等级字母；线路概览 / 当前邮编面板的难度项和降级文字 |
+| 前端 | `web/map.js` | 保存 `colorMode` 状态，连接控件、view 和 panel；处理 `details_status: invalid` 的警告 |
+| 前端 | `web/map-text.js`、`web/styles.css` | 中文文案；控件、legend 和窄屏样式 |
+| 测试 | `server/test/route-map.test.js`、`route-map-api.test.js`、`map-state.test.js`、`route-map-web.test.js`，新增 `difficulty.test.js` | 按模块补充 |
+
+不新增依赖，不新增 API 路径，不改 `route-details.json` / `route-profiles.json` 的 schema。
+
+### RM5-11 验收标准
+
+- **RM5-AC1** 默认是“按线路”模式，地图、色块和交互与 RM4 完全相同（现有测试不改断言即通过）。
+- **RM5-AC2** 有明显的 `按线路 | 按难易度` 切换控件；键盘可操作；切换时不改变选择、不改变视野、不发请求。
+- **RM5-AC3** 难易度模式、未选中线路：每个 polygon 的填充色等于其 Route 难度对应的颜色（RM5-6 表）；Route 难度为 null 或未知值时为灰色；不使用人工难度。
+- **RM5-AC4** 难易度模式、选中线路：该线路的 ZIP 按各自的 `zip_difficulty` 着色，同一线路内可以出现不同等级；其他线路按 Route 难度颜色并淡化。
+- **RM5-AC5** 没有 ZIP 详情时：该线路的 ZIP 全部为灰色，侧边栏显示“暂无 ZIP 难度数据”和批量命令；任何 ZIP 都不使用 Route 难度的颜色。null 和 `not_in_detail` 按 RM5-7 显示。
+- **RM5-AC6** Legend 只在难易度模式出现，6 项的顺序、文字和颜色固定；标题随是否选中线路变化；1440 / 390 都能看到，不遮挡控件。
+- **RM5-AC7** `/api/route-map` 和 `/api/route-map/zip` 返回 RM5-3 的字段；`route-details.json` 不存在或损坏时地图仍返回 200 且其他功能正常；原有字段不变。
+- **RM5-AC8** 等级识别只有一个共用函数；Route Profile 主表的**线路难度**（系统难度）和 Route Detail modal（线路难度、ZIP 难度）使用同一套五色，显示文字为 DMS 原值，无数据为灰色或普通 `—`；不改数据。**人工难度列本轮不改**，保持现状（Product Owner 2026-10-05：“人工难度这轮不加”）。
+- **RM5-AC9** RM5-9 清单全部回归通过：0 个外部请求，console 没有 error，没有 CSP violation，1440 / 390 页面无横向滚动。
+- **RM5-AC10** `npm test` 全部通过；没有新增依赖；Product Owner 本机预览签字。
+
+### RM5-12 未决问题
+
+RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
+
+
+### RM5 实现记录（Implementation Notes）
+
+- 2026-10-05，Codex：基于工作区已有 RD3 / RD4 改动实现；未改需求、验收标准、抓取代码、缓存 schema、依赖、API 路径或 CSP，未访问 DMS / 真实 session / 真实 runtime，未提交、推送或部署。
+- 新增只读容错 reader `readRouteDetailsForMap`，复用现有完整文件校验；缺失为 `none`，损坏、结构错误或读取失败为 `invalid`。两种情况地图 / ZIP API 均继续工作。服务端按 route_id + Station + ZIP 字符串精确匹配，只向地图投影难度及详情状态，不输出 raw 等私有字段。Route 难度来自 profile，ZIP 难度来自详情；详情数量采用 zips.length。
+- 新增 `web/difficulty.js` 并加入静态白名单；五种原文去首尾空白后精确匹配，未知值为灰。地图、legend、线路列表、Profile 系统难度和 modal 共用等级与颜色。保留人工难度原有三色展示；modal ZIP 表维持 RD4 的五列。
+- 默认按线路；模式保存在页面内存。右上分段控件采用原生 button、role=group 和 aria-pressed，并禁用地图点击传播。切换只更新既有图层样式 / tooltip 和面板，不重建地图图层、不定位、不请求。右下 legend 固定六项，宽 140px；难度 tooltip 的换行样式仅作用于难度模式。ZIP 无数据不继承 Route 难度，missing / null / not_in_detail 分别显示对应提示，invalid 在顶部警告。
+- 测试断言调整说明：route-map.test.js 的两个完整 summary 预期及 feature properties 预期补入 RM5 新字段；“响应不得包含 difficulty”改为仍禁止 color / raw / source_url（RM5 明确要求难度字段）。rd1.test.js 的系统难度三色 class 断言更新为五色标签，并新增逐色校验；t7.test.js 分别验证系统五色、人工原有三色，DOM doubles 增加 style 属性。既有 map-state 和 route-map-web 的按线路颜色、交互断言未改。
+- 检查：Node v24.19.0；`npm.cmd test`（即 npm test）319/319 通过，0 failed / skipped；`git diff --check` 通过。没有 lint / build scripts，未声称运行 lint / build。所有新增测试使用合成数据；API 测试启动临时 loopback server 并自动关闭，未启动真实 runtime 服务。测试输出：`.handoff/RM5-tests.log`。
+- 验收对照：AC1（既有 map-state / route-map-web 回归）；AC2（route-map-web：控件语义、aria-pressed、选择 / fit / 请求 / 图层数量不变，真实键盘激活待浏览器复核）；AC3 / AC4（map-state 样式表）；AC5（route-map-web 降级、无继承）；AC6（route-map-web 六项、标题、显隐，真实 1440 / 390 可见性待复核）；AC7（difficulty / route-map / route-map-api）；AC8（difficulty / t7 / rd1，人工列不变）：上述可用 doubles / 本地合成 API 验证部分通过。
+- 待 Claude：AC9 的完整真实浏览器回归、键盘 Enter / Space、1440 / 390 布局和 legend 遮挡、Network / console / CSP、真实底图上的五色及洋红描边观感。AC10 的测试和无新增依赖部分通过；Product Owner 本机预览签字尚未完成。本次仅实现完成，UI 未标记 Done。
+
+- **RM5b 选中描边 — 2026-10-05（Codex）**：按 RM5b task brief 将选中边框改为深色 `#0b1220` 外层 + 白色 `#ffffff` 内层；Route 为 3.5 / 1.5，ZIP 为 5 / 3，无覆盖 ZIP 的外层实线、内层 `8 6` 虚线，浅粉填充不变。数值集中在 `SELECTION_OUTLINE`。基础多边形改用中性边框，保留原有填充、透明度、hover 加粗规则、选择、搜索、tooltip 和视野行为。独立 Leaflet pane 在填充层上方，使用 CSSOM 设置 pointer-events:none；描边 fill:false、interactive:false、bubblingMouseEvents:false，选中 ZIP 最后绘制。选择变化重建描边，清除 / Station 切换移除，颜色模式切换复用既有描边，无残留或重复。
+- RM5b 检查：`npm.cmd test` 320/320 通过（日志 `.handoff/RM5b-tests.log`），`git diff --check` 通过；项目没有 lint / build scripts。新增 doubles 测试覆盖线宽 / 顺序、无覆盖虚线、非交互、模式复用、清除、Station 切换和 hover。临时合成数据 HTTP server + 已安装 Playwright / Chromium 在 1440 / 390 验证实际 SVG 线宽与顺序、pointer-events、模式切换、Esc 清除、无横向溢出、无 JavaScript / CSP 错误；server 和 browser 已关闭。首次浏览器检查因 PowerShell 管道中文按钮名编码为问号导致 locator 超时，改用 CSS selector 后通过。未新增依赖、未修改数据或需求 / 验收标准、未访问 DMS / credentials / 真实 runtime，未 commit / push / 部署。真实运营底图观感和 Product Owner 预览签字仍待确认；legacy 页面本轮未修改或做浏览器回归。

@@ -23,9 +23,21 @@ const validRoute = (route, key) => object(route) && Number.isSafeInteger(route.r
   && Array.isArray(route.zips) && route.zips.every((zip) => object(zip)
     && ['postal_code', 'postal_code_tag', 'postal_code_difficulty', 'safety_level'].every((field) => nullableText(zip[field]))
     && ['first_mile_distance', 'experienced_pph', 'delivery_fail_rate', 'dnr_rate'].every((field) => nullableNumber(zip[field]))
-    && object(zip.raw) && errors(zip.parse_errors));
+    && (!Object.hasOwn(zip, 'pickup_volume_daily') || nullableNumber(zip.pickup_volume_daily))
+    && object(zip.raw) && errors(zip.parse_errors))
+  && (!Object.hasOwn(route, 'capacity_raw') || Array.isArray(route.capacity_raw));
 const validFile = (data) => object(data) && data.schema_version === 1 && object(data.routes)
   && Object.entries(data.routes).every(([key, route]) => validRoute(route, key));
+
+// Map enrichment is optional: an unavailable cache must not break the map.
+export async function readRouteDetailsForMap({ runtimeDir, fileOps = fs }) {
+  try {
+    const data = JSON.parse(await fileOps.readFile(path.join(runtimeDir, 'route-details.json'), 'utf8'));
+    return validFile(data) ? { status: 'ok', routes: data.routes } : { status: 'invalid', routes: {} };
+  } catch (error) {
+    return { status: error.code === 'ENOENT' ? 'none' : 'invalid', routes: {} };
+  }
+}
 
 export async function saveRouteDetail({ runtimeDir, route, fileOps = fs }) {
   const filename = path.join(runtimeDir, 'route-details.json');
@@ -51,6 +63,27 @@ export async function getRouteDetail({ runtimeDir, routeId, fileOps = fs }) {
   const { route_id, station, route_name, route_difficulty, fetched_at, zip_count, zips, parse_errors } = data.routes[String(routeId)];
   // Explicit field selection keeps source records and future private metadata off the API.
   return { route_id, station, route_name, route_difficulty, fetched_at, zip_count, parse_errors,
-    zips: zips.map(({ postal_code, postal_code_tag, postal_code_difficulty, first_mile_distance, experienced_pph, delivery_fail_rate, dnr_rate, safety_level, parse_errors }) =>
-      ({ postal_code, postal_code_tag, postal_code_difficulty, first_mile_distance, experienced_pph, delivery_fail_rate, dnr_rate, safety_level, parse_errors })) };
+    zips: zips.map(({ postal_code, postal_code_tag, postal_code_difficulty, first_mile_distance, experienced_pph, delivery_fail_rate, dnr_rate, safety_level, pickup_volume_daily = null, parse_errors }) =>
+      ({ postal_code, postal_code_tag, postal_code_difficulty, first_mile_distance, experienced_pph, delivery_fail_rate, dnr_rate, safety_level, pickup_volume_daily, parse_errors })) };
+}
+
+export async function listCachedRouteIds({ runtimeDir, fileOps = fs }) {
+  let data;
+  try { data = JSON.parse(await fileOps.readFile(path.join(runtimeDir, 'route-details.json'), 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT') return new Set();
+    throw new RouteDetailInvalidError();
+  }
+  if (!validFile(data)) throw new RouteDetailInvalidError();
+  const ids = new Set(Object.values(data.routes).map(route => route.route_id));
+  // Inspect raw stored keys: the API normalizes absent values to null for compatibility.
+  Object.defineProperty(ids, 'missingPickup', { value: new Set(Object.values(data.routes)
+    .filter(route => route.zips.some(zip => !Object.hasOwn(zip, 'pickup_volume_daily'))).map(route => route.route_id)) });
+  return ids;
+}
+
+export async function writeRouteDetailsBatchRun({ runtimeDir, record, fileOps = fs }) {
+  try {
+    await writeFileAtomic(path.join(runtimeDir, 'route-details-batch-last-run.json'), JSON.stringify(record, null, 2) + '\n', { fileOps });
+  } catch { throw new StoreError(); }
 }

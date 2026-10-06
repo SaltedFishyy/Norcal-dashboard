@@ -1,16 +1,23 @@
 export class NeedsLoginError extends Error { constructor() { super('请重新运行 dms:login'); this.name = 'NeedsLoginError'; } }
-export class SelectorError extends Error { constructor(step) { super(`页面控件不可用：${step}`); this.name = 'SelectorError'; } }
+export class SelectorError extends Error { constructor(step, options) { super(`页面控件不可用：${step}`, options); this.name = 'SelectorError'; } }
 export class LoadLimitError extends Error { constructor() { super('路区画像请求数超过上限'); this.name = 'LoadLimitError'; } }
 export class CircuitBreakerError extends Error { constructor() { super('接口返回限流或服务错误'); this.name = 'CircuitBreakerError'; } }
 export class CaptureError extends Error { constructor() { super('页面捕获失败'); this.name = 'CaptureError'; } }
+export class InterruptedError extends Error { constructor() { super('SIGINT'); this.name = 'InterruptedError'; } }
 
 const listPath = '/dlvs-dataApi/roadAreaPortrait/home/frontPage/queryList/pagination';
 const pathname = (url) => new URL(url).pathname;
 
 export async function withPortraitPage({ browserType, statePath, baseUrl, station, pageSize = 100,
   maxListRequests = 3, headless = false, log = () => {},
-  listRequestPath = '/roadAreaPortrait/', needsLoginOn401 = false, maxDetailRequests, validate = () => {} }, capture) {
+  listRequestPath = '/roadAreaPortrait/', needsLoginOn401 = false, maxDetailRequests, validate = () => {},
+  maxBatchDetailRequests, maxProdApiRequests, signal, onCounts = () => {}, batch = false,
+  onPageFailure, pageFailureTimeout = 5000 }, capture) {
   let browser, page, failure, requestCount = 0, listRequestCount = 0, detailRequestCount = 0;
+  let prodApiRequestCount = 0, routeDetailRequestCount = 0, maxRouteDetailRequestCount = 0;
+  let loginChecksActive = false, listLoaded = false;
+  const counts = () => ({ requestCount, listRequestCount, detailRequestCount,
+    prodApiRequestCount, routeDetailRequestCount, maxRouteDetailRequestCount });
   let rejectStop;
   const stopped = new Promise((_, reject) => { rejectStop = reject; });
   // Observe rejection even when an event fires between awaited operations.
@@ -23,25 +30,40 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
   };
   const guarded = async (action) => {
     if (failure) throw failure;
-    return Promise.race([stopped, Promise.resolve().then(action)]);
+    if (batch && loginChecksActive && (!pathname(page.url()).includes('/areaDepiction')
+      || await Promise.race([stopped, page.locator('input[type=password]').count()]) > 0)) {
+      stop(new NeedsLoginError());
+      throw failure;
+    }
+    return Promise.race([stopped, Promise.resolve().then(() => {
+      if (failure) throw failure;
+      return action();
+    })]);
   };
   const control = async (step, action) => {
     log(`阶段：${step}`);
     try { return await guarded(action); }
-    catch (error) { throw failure || (error instanceof SelectorError ? error : new SelectorError(step)); }
+    catch (error) { throw failure || (error instanceof SelectorError ? error : new SelectorError(step, { cause: error })); }
   };
   const onRequest = (request) => {
     const route = pathname(request.url());
     requestCount++;
+    if (route.includes('/prod-api/')) {
+      prodApiRequestCount++;
+      if (maxProdApiRequests !== undefined && prodApiRequestCount > maxProdApiRequests) stop(new LoadLimitError());
+    }
     if (route.includes(listRequestPath)) {
       listRequestCount++;
-      log(`阶段：request；pathname：${route}；计数：${listRequestCount}`);
+      log(batch ? `阶段：列表请求；计数：${listRequestCount}` : `阶段：request；pathname：${route}；计数：${listRequestCount}`);
       if (listRequestCount > maxListRequests) stop(new LoadLimitError());
     }
     if (maxDetailRequests !== undefined && route.includes('/roadAreaPortraitDetails/')) {
       detailRequestCount++;
-      log(`阶段：detail request；pathname：${route}；计数：${detailRequestCount}`);
-      if (detailRequestCount > maxDetailRequests) stop(new LoadLimitError());
+      routeDetailRequestCount++;
+      maxRouteDetailRequestCount = Math.max(maxRouteDetailRequestCount, routeDetailRequestCount);
+      log(batch ? `阶段：详情请求；计数：${routeDetailRequestCount}` : `阶段：detail request；pathname：${route}；计数：${detailRequestCount}`);
+      if ((batch ? routeDetailRequestCount : detailRequestCount) > maxDetailRequests
+        || maxBatchDetailRequests !== undefined && detailRequestCount > maxBatchDetailRequests) stop(new LoadLimitError());
     }
   };
   const onResponse = (response) => {
@@ -51,19 +73,35 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       stop(new CircuitBreakerError());
     }
   };
+  const onAbort = () => stop(new InterruptedError());
+  const onNavigation = frame => {
+    if (frame === page.mainFrame() && !pathname(frame.url()).includes('/areaDepiction')) stop(new NeedsLoginError());
+  };
   try {
     if (station !== 'SFO01' || !Number.isSafeInteger(maxListRequests) || maxListRequests < 1) throw new CaptureError();
     validate();
+    for (const limit of [maxBatchDetailRequests, maxProdApiRequests]) {
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new CaptureError();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) throw new InterruptedError();
     if (!browserType) ({ chromium: browserType } = await import('playwright'));
     browser = await browserType.launch({ headless });
-    const context = await browser.newContext({ storageState: statePath });
-    page = await context.newPage();
+    const context = await guarded(() => browser.newContext({ storageState: statePath }));
+    page = await guarded(() => context.newPage());
     page.on('request', onRequest);
     page.on('response', onResponse);
+    if (batch) page.on('framenavigated', onNavigation);
     log('阶段：open');
     await guarded(() => page.goto(baseUrl, { waitUntil: 'networkidle' }));
+    loginChecksActive = true;
     if (!pathname(page.url()).includes('/areaDepiction') || await guarded(() => page.locator('input[type=password]').count()) > 0) {
       throw new NeedsLoginError();
+    }
+    if (batch) {
+      // Observe login forms even while a detail response or the inter-route delay is pending.
+      void page.locator('input[type=password]').first().waitFor({ state: 'attached', timeout: 0 })
+        .then(() => stop(new NeedsLoginError())).catch(() => {});
     }
     await control('展开', () => page.getByText('展开', { exact: true }).first().click());
     await control('转运站点', async () => {
@@ -97,15 +135,85 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
     ]));
     const body = await guarded(() => response.json());
     if (failure) throw failure;
-    const result = await capture({ page, body, guarded, control, counts: () => ({ requestCount, listRequestCount, detailRequestCount }) });
+    listLoaded = true;
+    let nextPage;
+    if (batch) {
+      const total = body?.data?.total;
+      if (!Number.isSafeInteger(total) || total < 0) throw new CaptureError();
+      const pages = Math.max(1, Math.ceil(total / pageSize));
+      if (pages > 10) throw new LoadLimitError();
+      // A next-page click sends one pagination request; retain the initial-load budget.
+      maxListRequests += pages - 1;
+      const initialFilter = response.request().postDataJSON().transitStationCodeList;
+      nextPage = previous => control('下一页', async () => {
+        const visible = await guarded(() => page.locator('.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]')
+          .evaluateAll(elements => elements.some(element => element.getClientRects().length > 0
+            && getComputedStyle(element).visibility !== 'hidden' && /路区画像详情|标签详情/.test(element.textContent))));
+        if (visible) throw new SelectorError('画像弹窗未关闭');
+        const buttons = page.locator('.vxe-pager .vxe-pager--next-btn:visible'), available = [];
+        for (let i = 0; i < await guarded(() => buttons.count()); i++) {
+          const button = buttons.nth(i);
+          if (await guarded(() => button.isEnabled())
+            && await guarded(() => button.getAttribute('aria-disabled')) !== 'true'
+            && !/(^|\s)is--disabled(\s|$)/.test(await guarded(() => button.getAttribute('class')) || '')) available.push(button);
+        }
+        if (available.length !== 1) throw new SelectorError('下一页按钮不唯一或缺失');
+        const [reply] = await guarded(() => Promise.all([
+          page.waitForResponse(item => pathname(item.url()).endsWith(listPath) && item.request().method() === 'POST'),
+          available[0].click(),
+        ]));
+        const query = reply.request().postDataJSON();
+        if (JSON.stringify(query?.transitStationCodeList) !== JSON.stringify(initialFilter)
+          || query.pageSize !== pageSize || query.pageNum !== previous + 1) throw new CaptureError();
+        const nextBody = await guarded(() => reply.json());
+        if (nextBody?.data?.current !== previous + 1 || nextBody.data.size !== pageSize) throw new CaptureError();
+        return nextBody;
+      });
+    }
+    const initialFilter = response.request().postDataJSON().transitStationCodeList;
+    const queryRouteName = (input, name, timeout) => control(name ? '按路区名称查询' : '恢复路区列表', async () => {
+      const deadline = Date.now() + timeout;
+      const remaining = () => {
+        const value = deadline - Date.now();
+        if (value <= 0) throw new SelectorError(name ? '按路区名称查询超时' : '恢复路区列表超时');
+        return value;
+      };
+      await guarded(() => input.fill(name, { timeout: remaining() }));
+      const [reply] = await guarded(() => Promise.all([
+        page.waitForResponse(item => pathname(item.url()).endsWith(listPath) && item.request().method() === 'POST', { timeout: remaining() }),
+        page.getByRole('button', { name: /查\s*询/ }).click({ timeout: remaining() }),
+      ]));
+      const query = reply.request().postDataJSON();
+      if (JSON.stringify(query?.transitStationCodeList) !== JSON.stringify(initialFilter) || query.pageSize !== pageSize) throw new CaptureError();
+      const value = await guarded(() => reply.json());
+      if (!Array.isArray(value?.data?.records)) throw new CaptureError();
+      return value;
+    });
+    const result = await capture({ page, body, guarded, control, counts,
+      allowNameFilter: () => { maxListRequests += 2; }, queryRouteName,
+      nextPage,
+      beginRoute: () => { routeDetailRequestCount = 0; } });
     if (failure) throw failure;
     return result;
   } catch (error) {
+    if (batch && listLoaded && onPageFailure) {
+      let timer;
+      try {
+        await Promise.race([
+          Promise.resolve().then(() => onPageFailure({ page, error: failure || error })),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error()), pageFailureTimeout); }),
+        ]);
+      } catch { /* Diagnostics must never replace the original failure. */ }
+      finally { clearTimeout(timer); }
+    }
     if (failure) throw failure;
-    if ([NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError].some((type) => error instanceof type)) throw error;
+    if (batch || [NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError].some((type) => error instanceof type)) throw error;
     throw new CaptureError();
   } finally {
     if (page) { page.off('request', onRequest); page.off('response', onResponse); }
+    if (page && batch) page.off('framenavigated', onNavigation);
+    signal?.removeEventListener('abort', onAbort);
     if (browser) await browser.close().catch(() => {});
+    onCounts(counts());
   }
 }

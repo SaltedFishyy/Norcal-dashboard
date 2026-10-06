@@ -1,4 +1,5 @@
-import { formatValue, formatNumber, formatPercent, formatUpdated, difficultyTone, profileText as t } from './format.js';
+import { difficultyColor, difficultyLevel } from './difficulty.js';
+import { formatValue, formatNumber, formatUpdated, difficultyTone, profileText as t } from './format.js';
 
 let sequence = 0;
 let trigger;
@@ -6,9 +7,9 @@ let activeDialog;
 const initialized = new WeakSet();
 const codes = new Set(['invalid_route_id', 'route_detail_invalid', 'internal_error', 'not_found', 'method_not_allowed']);
 const columns = [
-  ['ZIP', 'postal_code'], [t.zipDifficulty, 'postal_code_difficulty', 'difficulty'],
-  [t.firstMile, 'first_mile_distance', 'number'], [t.experiencedPph, 'experienced_pph', 'number'],
-  [t.exceptionRate, 'delivery_fail_rate', 'percent'], [t.dnrRate, 'dnr_rate', 'percent'], [t.safety, 'safety_level'],
+  ['ZIP', 'postal_code'], [t.pickupDaily, 'pickup_volume_daily', 'pickup'],
+  [t.experiencedPph, 'experienced_pph', 'number'], [t.zipDifficulty, 'postal_code_difficulty', 'difficulty'],
+  [t.firstMile, 'first_mile_distance', 'number'],
 ];
 const element = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -16,9 +17,14 @@ const element = (tag, text, className) => {
   if (className) node.className = className;
   return node;
 };
-function difficulty(value) {
+function difficulty(value, manual = false) {
   if (value === null || value === undefined || value === '') return element('span', '—');
-  return element('span', formatValue(value), `difficulty tone-${difficultyTone(value)}`);
+  if (manual) return element('span', formatValue(value), `difficulty tone-${difficultyTone(value)}`);
+  const node = element('span', formatValue(value), 'difficulty system-difficulty');
+  const level = difficultyLevel(value);
+  node.style.backgroundColor = difficultyColor(level);
+  node.style.color = ['B', 'D', null].includes(level) ? '#0f172a' : '#ffffff';
+  return node;
 }
 function basicInfo(row, fetchedAt, data) {
   const metrics = element('dl', undefined, 'metrics detail-metrics');
@@ -27,11 +33,11 @@ function basicInfo(row, fetchedAt, data) {
     [t.routeName, row.route_name], [t.routeId, row.route_id], [t.station, row.station], [t.dsp, row.dsp_name],
     [t.volume, row.pickup_volume, 'integer'], [t.pph, row.pph, 'number'],
     [t.firstMile, row.first_mile_distance, 'number'], [t.difficulty, row.route_difficulty, 'difficulty'],
-    [t.manualDifficulty, row.route_difficulty_manual, 'difficulty'], [t.zipCount, zipCount, 'integer'],
+    [t.manualDifficulty, row.route_difficulty_manual, 'manual'], [t.zipCount, zipCount, 'integer'],
     [t.profileUpdated, fetchedAt, 'date'], [t.detailUpdated, data?.fetched_at, 'date'],
   ]) {
     const item = element('div'), dd = element('dd');
-    if (kind === 'difficulty') dd.append(difficulty(value));
+    if (kind === 'difficulty' || kind === 'manual') dd.append(difficulty(value, kind === 'manual'));
     else dd.textContent = kind === 'date' ? formatUpdated(value)
       : kind === 'integer' ? formatNumber(value, 0, 0)
       : kind === 'number' ? formatNumber(value, 2, 2) : formatValue(value);
@@ -47,7 +53,7 @@ function renderDetail(content, data, row, fetchedAt) {
   const table = element('table'), head = element('thead'), header = element('tr'), body = element('tbody');
   table.append(element('caption', t.zipCaption, 'sr-only'));
   for (const [label, , kind] of columns) {
-    const th = element('th', label, kind === 'number' || kind === 'percent' ? 'numeric' : undefined);
+    const th = element('th', label, kind === 'number' || kind === 'pickup' ? 'numeric' : undefined);
     th.setAttribute('scope', 'col'); header.append(th);
   }
   head.append(header);
@@ -65,8 +71,8 @@ function renderDetail(content, data, row, fetchedAt) {
         if (zip[field] === null || zip[field] === undefined || zip[field] === '') td.textContent = '—';
         else td.append(difficulty(zip[field]));
       } else {
-        td.textContent = kind === 'percent' ? formatPercent(zip[field]) : kind === 'number' ? formatNumber(zip[field], 2, 2) : formatValue(zip[field]);
-        if (kind === 'number' || kind === 'percent') td.className = 'numeric';
+        td.textContent = kind === 'pickup' ? formatNumber(zip[field], 2, 0) : kind === 'number' ? formatNumber(zip[field], 2, 2) : formatValue(zip[field]);
+        if (kind === 'number' || kind === 'pickup') td.className = 'numeric';
       }
       tr.append(td);
     }
@@ -107,7 +113,7 @@ export async function openRouteDetail(row, source = document.activeElement, fetc
     if (current !== sequence) return;
     if (response.status === 200 && Array.isArray(data?.zips)) renderDetail(content, data, row, fetchedAt);
     else if (response.status === 404 && data?.error === 'route_detail_not_found') {
-      showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(formatValue(row.route_name)), 'detail-note'));
+      showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(row.station), 'detail-note'));
     } else {
       const code = codes.has(data?.error) ? data.error : 'internal_error';
       showStatus(element('p', t.detailError(code), 'detail-status'));

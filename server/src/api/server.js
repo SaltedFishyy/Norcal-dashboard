@@ -2,7 +2,7 @@ import http from 'node:http';
 import { getStationSnapshot, readRouteProfiles, StationNotFoundError } from '../store/route-profiles-file.js';
 import { readBoundaries } from '../store/boundaries-file.js';
 import { buildRouteMap, lookupZip } from '../route-map/route-map.js';
-import { getRouteDetail } from '../store/route-details-file.js';
+import { getRouteDetail, readRouteDetailsForMap } from '../store/route-details-file.js';
 import { createRequestHandler } from './app.js';
 import { fileURLToPath } from 'node:url';
 import { createStaticReader } from './static-files.js';
@@ -24,11 +24,11 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
       const profiles = await readRouteProfiles({ runtimeDir });
       if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
       const boundaries = await readBoundaries({ geoDir });
-      return buildRouteMap({ profiles, station, boundaries });
+      return buildRouteMap({ profiles, station, boundaries, details: await readRouteDetailsForMap({ runtimeDir }) });
     },
     getMapStations: async () => Object.keys((await readRouteProfiles({ runtimeDir })).stations).sort(),
     getZip: async postalCode => lookupZip({ profiles: await readRouteProfiles({ runtimeDir }),
-      boundaries: await readBoundaries({ geoDir }), postalCode }),
+      boundaries: await readBoundaries({ geoDir }), postalCode, details: await readRouteDetailsForMap({ runtimeDir }) }),
     getStaticFile: createStaticReader(webDir, leafletDir, protomapsDir),
     getBasemap: name => readBasemap({ basemapDir, name }),
   }));
