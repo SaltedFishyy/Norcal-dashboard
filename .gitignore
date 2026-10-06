@@ -28,3 +28,6 @@ playwright/.auth/
 runtime-data/
 *.storageState.json
 dms-state.json
+
+# Local Claude Code settings (per-machine permissions)
+.claude/settings.local.json
