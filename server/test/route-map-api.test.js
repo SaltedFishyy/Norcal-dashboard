@@ -39,6 +39,19 @@ async function json(url, pathname, status, expected, options) {
   return response;
 }
 
+test('MS-T2b Station API follows configured order, then alphabetical extras, only available snapshots', async t => {
+  const { url, profileFile } = await fixture(t);
+  const { defaultStationOrder } = await import('../src/config.js');
+  const snapshot = profiles().stations.MOCKA;
+  const codes = [...defaultStationOrder].reverse();
+  await fs.writeFile(profileFile, JSON.stringify({ schema_version: 1,
+    stations: Object.fromEntries(['ZZZ01', ...codes, 'AAA01'].map(code => [code, snapshot])) }));
+  await json(url, '/api/route-map/stations', 200, { stations: [...defaultStationOrder, 'AAA01', 'ZZZ01'] });
+  await fs.writeFile(profileFile, JSON.stringify({ schema_version: 1,
+    stations: { RDG02: snapshot, SMF01: snapshot, ZZZ01: snapshot, AAA01: snapshot } }));
+  await json(url, '/api/route-map/stations', 200, { stations: ['SMF01', 'RDG02', 'AAA01', 'ZZZ01'] });
+});
+
 test('route-map API returns assembled data and sorted Station list, read-only', async t => {
   const { url, profileFile, geoFile, metaFile, logs } = await fixture(t);
   const files = [profileFile, geoFile, metaFile];
@@ -117,7 +130,7 @@ test('route-map API maps snapshot, postal-code, conflict and boundary failures t
   const data = profiles(); delete data.stations.MOCKA.rows[0].postal_codes;
   await fs.writeFile(profileFile, JSON.stringify(data));
   await json(url, '/api/route-map?station=MOCKA', 409, { error: 'postal_codes_missing' });
-  for (const station of ['MOCKA', 'MOCKB']) {
+  for (const station of ['MOCKA']) {
     const conflict = profiles(); conflict.stations[station].rows[0].postal_codes = ['00002'];
     await fs.writeFile(profileFile, JSON.stringify(conflict));
     await json(url, '/api/route-map?station=MOCKA', 500, { error: 'route_zip_conflict' });
@@ -223,4 +236,15 @@ test('RM5 map and ZIP APIs tolerate missing, malformed and structurally invalid 
     assert.equal(zip.route_difficulty, null);
     if (contents !== null) assert.equal(await fs.readFile(filename, 'utf8'), contents);
   }
+});
+
+test('MS-T2 API permits cross-Station ownership while preserving existing fields', async t => {
+  const { url, profileFile } = await fixture(t); const data = profiles();
+  const original = buildRouteMap({ profiles: data, station: 'MOCKA', boundaries: boundaries() });
+  data.stations.MOCKB.rows[0].postal_codes.push('00002'); await fs.writeFile(profileFile, JSON.stringify(data));
+  const response = await fetch(url + '/api/route-map?station=MOCKA'); assert.equal(response.status, 200);
+  const actual = await response.json();
+  for (const key of Object.keys(original).filter(key => key !== 'cross_station_conflicts')) assert.deepEqual(actual[key], original[key]);
+  assert.deepEqual(actual.cross_station_conflicts, [{ postal_code: '00002', stations: ['MOCKA', 'MOCKB'] }]);
+  await json(url, '/api/route-map/zip?postal_code=00002', 200, lookupZip({ profiles: data, boundaries: boundaries(), postalCode: '00002' }));
 });

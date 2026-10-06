@@ -74,6 +74,9 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
         dl.append(entry(t.station, next.station), entry(t.route, next.route.route_name));
         if (next.zip.status === 'covered' && (colorMode === 'difficulty' || next.zip.zip_detail_status === 'available')) dl.append(entry(t.zipDifficulty, zipDifficultyText(next.zip, route?.zip_detail)));
       }
+      if (next.zip.status === 'multi_station') {
+        for (const owner of next.zip.owners) dl.append(entry(t.station, owner.station), entry(t.route, owner.route_name));
+      }
       element('selection').append(dl, text('p', t.zipNotes[next.zip.status]));
     }
   }
@@ -84,6 +87,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   }
   function clear() {
     data = null; search.value = ''; search.disabled = true;
+    element('conflicts-details').hidden = true; element('conflicts-details').open = false; element('conflicts').replaceChildren();
     applySelection(clearSelection());
     element('no-match').hidden = true; searchStatus('success');
     element('coverage').textContent = '—'; element('coverage-count').textContent = '';
@@ -94,6 +98,10 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   }
   function render(next) {
     data = next; search.disabled = false;
+    const conflicts = data.cross_station_conflicts || [];
+    element('conflicts-details').hidden = conflicts.length === 0; element('conflicts-details').open = false;
+    element('conflicts-title').textContent = t.crossStation; element('conflicts').replaceChildren();
+    for (const conflict of conflicts) element('conflicts').append(text('li', `${conflict.postal_code} · ${conflict.stations.join(' / ')}`));
     const { total, mapped, missing_no_zcta, missing_not_checked } = data.coverage;
     element('coverage').textContent = total > 0 ? `${(mapped / total * 100).toFixed(2)}%` : '—';
     element('coverage-count').textContent = t.coverageCount(mapped, total);

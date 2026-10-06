@@ -1,6 +1,7 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from './format.js';
 import { openRouteDetail } from './route-detail.js';
+import { chooseStation, readSavedStation, saveStation } from './station-preference.js';
 
 const updated = document.getElementById('updated');
 const total = document.getElementById('total');
@@ -9,6 +10,8 @@ const table = document.getElementById('table-container');
 const message = document.getElementById('message');
 const retry = document.getElementById('retry');
 const profiles = document.getElementById('profiles');
+const stationSelect = document.getElementById('profile-station');
+let stationsLoaded = false, sequence = 0;
 const columns = [
   ['route_name'], ['dsp_name'], ['pickup_volume', 'numeric', 0], ['pph', 'numeric', 2],
   ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'], ['route_difficulty_manual', 'difficulty'],
@@ -60,15 +63,41 @@ function render(result, data) {
 }
 
 async function load() {
+  const current = ++sequence;
   render(pageState({ loading: true }));
   try {
-    const response = await fetch('/api/route-profiles?station=SFO01', { cache: 'no-store' });
+    const response = await fetch(`/api/route-profiles?station=${encodeURIComponent(stationSelect.value)}`, { cache: 'no-store' });
     const data = await response.json();
-    render(pageState({ status: response.status, data }), data);
+    if (current === sequence) render(pageState({ status: response.status, data }), data);
   } catch {
-    render(pageState({ failed: true }));
+    if (current === sequence) render(pageState({ failed: true }));
   }
 }
 
-retry.addEventListener('click', load);
-void load();
+async function start() {
+  const current = ++sequence;
+  render(pageState({ loading: true })); stationSelect.disabled = true;
+  try {
+    const response = await fetch('/api/route-map/stations', { cache: 'no-store' });
+    const data = await response.json();
+    if (current !== sequence) return;
+    if (response.status !== 200) { render(pageState({ status: response.status, data })); return; }
+    stationSelect.replaceChildren();
+    for (const station of data.stations) {
+      const option = document.createElement('option'); option.value = station; option.textContent = station; stationSelect.append(option);
+    }
+    if (!data.stations.length) { render({ state: 'empty', message: '暂无数据：没有站点快照。' }); return; }
+    const desired = new URLSearchParams(globalThis.location?.search || '').get('station');
+    stationSelect.value = chooseStation({ urlStation: desired, savedStation: readSavedStation(), stations: data.stations });
+    stationsLoaded = true; stationSelect.disabled = false;
+    await load();
+  } catch { if (current === sequence) render(pageState({ failed: true })); }
+}
+stationSelect.addEventListener('change', () => {
+  saveStation(undefined, stationSelect.value);
+  const dialog = document.getElementById('route-detail');
+  if (dialog?.open) dialog.close();
+  return load();
+});
+retry.addEventListener('click', () => stationsLoaded ? load() : start());
+void start();

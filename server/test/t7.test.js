@@ -13,7 +13,8 @@ import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } f
 const webDir = fileURLToPath(new URL('../../web/', import.meta.url));
 const assets = [['/', 'index.html', 'text/html'], ['/styles.css', 'styles.css', 'text/css'],
   ['/app.js', 'app.js', 'text/javascript'], ['/format.js', 'format.js', 'text/javascript'],
-  ['/route-detail.js', 'route-detail.js', 'text/javascript'], ['/difficulty.js', 'difficulty.js', 'text/javascript']];
+  ['/route-detail.js', 'route-detail.js', 'text/javascript'], ['/difficulty.js', 'difficulty.js', 'text/javascript'],
+  ['/station-preference.js', 'station-preference.js', 'text/javascript']];
 
 async function fixture(t, options = {}) {
   // A temporary directory ensures these tests never read the real runtime snapshot.
@@ -164,7 +165,7 @@ test('T7 page states cover loading, success, no data and sanitized errors', () =
   }
   assert.equal(pageState({ failed: true }).message, '无法连接本地服务器。');
   assert.equal(pageState({ loading: true }).message, '加载中…');
-  assert.equal(pageState({ status: 200, data: { rows: [] } }).message, 'SFO01 暂无数据。请运行 npm run dms:scrape 创建快照。');
+  assert.equal(pageState({ status: 200, data: { rows: [] } }).message, '所选站点 暂无数据。请运行 npm run dms:scrape 创建快照。');
   assert.equal(pageState({ status: 500, data: { error: 'snapshot_invalid' } }).message, '无法加载线路画像 (snapshot_invalid)。');
   assert.equal(pageState({ status: 200, data: {} }).state, 'error');
   assert.doesNotMatch(pageState({ status: 500, data: { error: 'C:/private/path stack' } }).message, /private|stack|C:/);
@@ -175,7 +176,7 @@ test('T7 frontend structure and safe rendering use no external resources', async
   const [html, css, app] = sources;
   assert.match(html, /北加州线路画像/);
   assert.match(html, /lang="zh-CN"/);
-  for (const label of ['站点', 'SFO01', '更新时间', '线路总数', 'DMS 快照，非实时数据',
+  for (const label of ['站点', 'profile-station', '更新时间', '线路总数', 'DMS 快照，非实时数据',
     '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '人工难度', '重试', '线路地图', '关闭']) {
     assert.ok(html.includes(label), label);
   }
@@ -184,7 +185,8 @@ test('T7 frontend structure and safe rendering use no external resources', async
   assert.doesNotMatch(html, /style=|<script(?![^>]*src=)/);
   for (const source of sources) assert.doesNotMatch(source, /https?:\/\/|Daily Volume/);
   assert.doesNotMatch(app, /innerHTML|address_type_distribution|parse_errors/);
-  assert.match(app, /fetch\('\/api\/route-profiles\?station=SFO01'/);
+  assert.match(app, /encodeURIComponent\(stationSelect.value\)/);
+  assert.doesNotMatch(app, /station=SFO01/);
   assert.match(app, /updated.title = data.fetched_at/);
   assert.match(css, /overflow-x: auto/);
 });
@@ -204,7 +206,7 @@ test('T7 app renders API order and text safely, and handles retries and failures
     removeAttribute(name) { delete this.attributes[name]; if (name === 'title') delete this.title; }
     addEventListener(name, handler) { this.listeners[name] = handler; }
   }
-  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles']
+  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station']
     .map((id) => [id, new Element()]));
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const previousFetch = globalThis.fetch;
@@ -218,12 +220,15 @@ test('T7 app renders API order and text safely, and handles retries and failures
     createDocumentFragment: () => Object.assign(new Element(), { fragment: true }),
   };
   let reply;
+  const requestedStations = [];
   let release;
   const pending = new Promise((resolve) => { release = resolve; });
   let requests = 0;
   globalThis.fetch = async (url, options) => {
-    requests++;
-    assert.equal(url, '/api/route-profiles?station=SFO01');
+    if (url !== '/api/route-map/stations') requests++;
+    if (url === '/api/route-map/stations') return { status: 200, json: async () => ({ stations: ['MOCKA', 'MOCKB'] }) };
+    assert.equal(url, `/api/route-profiles?station=${elements['profile-station'].value}`);
+    requestedStations.push(elements['profile-station'].value);
     assert.equal(options.cache, 'no-store');
     if (requests === 1) await pending;
     if (reply instanceof Error) throw reply;
@@ -308,4 +313,81 @@ test('T7 app renders API order and text safely, and handles retries and failures
     assert.doesNotMatch(elements.message.textContent, /secret|stack|private-path/);
   }
   assert.equal(requests, 15);
+  assert.equal(elements['profile-station'].value, 'MOCKA');
+  assert.deepEqual(elements['profile-station'].children.map(option => option.value), ['MOCKA', 'MOCKB']);
+  elements['profile-station'].value = 'MOCKB';
+  reply = { status: 200, json: async () => ({ total: 0, rows: [] }) };
+  await elements['profile-station'].listeners.change();
+  assert.equal(requestedStations.at(-1), 'MOCKB'); assert.equal(elements.rows.children.length, 0);
+  assert.equal(elements.total.textContent, '0'); assert.equal(elements.retry.hidden, false);
+});
+
+test('MS-T2 Profile URL priority, first Station fallback and Station-list retry states', async t => {
+  const saved = { document: globalThis.document, fetch: globalThis.fetch, location: globalThis.location };
+  t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } });
+  class Element {
+    constructor() { this.children = []; this.listeners = {}; this.style = {}; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren() { this.children = []; }
+    setAttribute() {} removeAttribute() {}
+    addEventListener(name, fn) { this.listeners[name] = fn; }
+  }
+  let run = 0;
+  for (const [search, stations, failure, expected] of [
+    ['?station=MOCKB', ['MOCKA', 'MOCKB'], false, 'MOCKB'],
+    ['?station=ABSENT', ['MOCKA', 'MOCKB'], false, 'MOCKA'],
+    ['', [], false, null], ['', [], true, null],
+  ]) {
+    const elements = Object.fromEntries(['updated','total','rows','table-container','message','retry','profiles','profile-station'].map(id => [id,new Element()]));
+    globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
+    globalThis.location = { search }; const urls = [];
+    globalThis.fetch = async url => { urls.push(url); if (failure) throw new Error('private');
+      return { status: 200, json: async () => url.includes('/stations') ? { stations } : { total: 0, rows: [] } }; };
+    await import(`../../web/app.js?multi-station=${run++}`); await new Promise(resolve => setImmediate(resolve));
+    if (expected) { assert.equal(elements['profile-station'].value, expected); assert.equal(urls[1], `/api/route-profiles?station=${expected}`); }
+    else { assert.equal(urls.length, 1); assert.equal(elements['profile-station'].disabled, true); assert.equal(elements.retry.hidden, false);
+      await elements.retry.listeners.click(); assert.equal(urls.length, 2); }
+  }
+});
+
+test('MS-T2b Profile restores shared preference and saves only manual Station changes', async t => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const savedGlobals = { document: globalThis.document, fetch: globalThis.fetch, location: globalThis.location };
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage;
+    for (const [key, value] of Object.entries(savedGlobals)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  });
+  class Element {
+    constructor() { this.children = []; this.listeners = {}; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren() { this.children = []; }
+    setAttribute() {} removeAttribute() {}
+    addEventListener(name, fn) { this.listeners[name] = fn; }
+  }
+  let preference = 'SMF01'; const writes = [], requests = [];
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: () => preference, setItem: (key, value) => { preference = value; writes.push([key, value]); },
+  } });
+  globalThis.fetch = async url => {
+    requests.push(url);
+    return { status: 200, json: async () => url.endsWith('/stations')
+      ? { stations: ['SMF01', 'SFO01', 'RNO01'] } : { total: 0, rows: [] } };
+  };
+  let run = 0;
+  for (const [search, expected] of [['', 'SMF01'], ['', 'RNO01'], ['?station=SFO01', 'SFO01']]) {
+    const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station'].map(id => [id, new Element()]));
+    globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
+    globalThis.location = { search };
+    await import(`../../web/app.js?station-preference=${run++}`);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements['profile-station'].value, expected);
+    assert.equal(requests.at(-1), `/api/route-profiles?station=${expected}`);
+    if (run === 1) {
+      assert.deepEqual(writes, []);
+      elements['profile-station'].value = 'RNO01'; await elements['profile-station'].listeners.change();
+    }
+    assert.deepEqual(writes, [['nc-ops-console.station', 'RNO01']]);
+  }
 });

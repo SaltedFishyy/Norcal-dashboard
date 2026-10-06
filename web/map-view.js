@@ -145,7 +145,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     const feature = zip && layers.find(layer => layer.feature.properties.postal_code === zip.postal_code)?.feature;
     const geometry = zip?.geometry || feature?.geometry;
     if (geometry) {
-      const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id };
+      const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id ?? feature?.properties.route_id };
       highlight = L.geoJSON({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties }] }, {
         style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode),
         onEachFeature(_, layer) {

@@ -897,7 +897,7 @@ class Element {
 }
 function documentDouble(t) {
   const previousDocument = globalThis.document, previousFetch = globalThis.fetch;
-  const elements = Object.fromEntries(['route-detail', 'detail-content', 'detail-close', 'detail-title', 'updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles'].map((id) => [id, new Element()]));
+  const elements = Object.fromEntries(['route-detail', 'detail-content', 'detail-close', 'detail-title', 'updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station'].map((id) => [id, new Element()]));
   globalThis.document = { getElementById: (id) => elements[id], createElement: (tag) => new Element(tag), createDocumentFragment: () => Object.assign(new Element(), { fragment: true }) };
   t.after(() => {
     if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
@@ -954,6 +954,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
   detail.route_name = malicious; detail.zips[0].safety_level = malicious;
   globalThis.fetch = async (url) => {
     requests.push(url);
+    if (url === "/api/route-map/stations") return { status: 200, json: async () => ({ stations: ["MOCKA"] }) };
     return { status: 200, json: async () => url.includes('route-profiles') ? { fetched_at: metadata.fetchedAt, total: 1, rows: [route] } : detail };
   };
   await import('../../web/app.js?rd1'); await new Promise((resolve) => setImmediate(resolve));
@@ -964,7 +965,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
   assert.equal(elements['route-detail'].open, true);
   assert.equal(elements['detail-content'].children[1].textContent, '加载中…');
   await pending;
-  assert.deepEqual(requests, ['/api/route-profiles?station=SFO01', '/api/route-details?route_id=900101']);
+  assert.deepEqual(requests, ['/api/route-map/stations', '/api/route-profiles?station=MOCKA', '/api/route-details?route_id=900101']);
   const nodes = descendants(elements['detail-content']);
   const metrics = elements['detail-content'].children[0];
   const values = Object.fromEntries(metrics.children.map(item => [item.children[0].textContent, item.children[1]]));
@@ -990,7 +991,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
   assert.equal(rows[0].children[3].children[0].className, 'difficulty system-difficulty');
   assert.ok(!nodes.some((node) => node.textContent === 'postal_code_tag'));
   elements['detail-close'].listeners.click(); assert.equal(elements['route-detail'].open, false); assert.equal(button.focused, true);
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
 });
 
 test('RD1b modal stably sorts ZIP strings, puts invalid values last and preserves frozen input', async (t) => {

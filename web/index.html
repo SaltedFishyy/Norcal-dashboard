@@ -15,7 +15,7 @@
       <a href="/map">线路地图</a>
       <p class="snapshot">DMS 快照，非实时数据</p>
       <dl class="metrics">
-        <div><dt>站点</dt><dd>SFO01</dd></div>
+        <div><dt><label for="profile-station">站点</label></dt><dd><select id="profile-station" disabled></select></dd></div>
         <div><dt>更新时间</dt><dd id="updated">—</dd></div>
         <div><dt>线路总数</dt><dd id="total">—</dd></div>
       </dl>
@@ -27,7 +27,7 @@
       </div>
       <div class="table-scroll" id="table-container" hidden tabindex="0" role="region" aria-label="线路画像表">
         <table>
-          <caption class="sr-only">最新 DMS 快照中的 SFO01 线路画像</caption>
+          <caption class="sr-only">所选站点最新 DMS 快照中的线路画像</caption>
           <thead><tr>
             <th scope="col">线路名称</th><th scope="col">DSP</th>
             <th scope="col" class="numeric">Pickup Volume</th><th scope="col" class="numeric">PPH</th>

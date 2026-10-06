@@ -9,7 +9,7 @@ export class RouteZipConflictError extends Error {
 }
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
-function validateProfiles(profiles) {
+function validateProfiles(profiles, station = null) {
   const conflicts = [];
   for (const [key, snapshot] of Object.entries(profiles.stations)) {
     for (const row of snapshot.rows) {
@@ -20,9 +20,9 @@ function validateProfiles(profiles) {
       try { validatePostalCodes(row.postal_codes, row); }
       catch { throw new SnapshotInvalidError(); }
     }
-    conflicts.push(...findPostalCodeConflicts(snapshot.rows).map(conflict => ({ station: key, ...conflict })));
+    if (station === null || station === key) conflicts.push(...findPostalCodeConflicts(snapshot.rows).map(conflict => ({ station: key, ...conflict })));
   }
-  conflicts.push(...findCrossStationConflicts(profiles.stations));
+
   if (conflicts.length) throw new RouteZipConflictError(conflicts);
 }
 
@@ -44,7 +44,7 @@ const source = boundaries => ({ dataset: boundaries.meta.dataset, vintage: bound
 
 export function buildRouteMap({ profiles, station, boundaries, details }) {
   if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
-  validateProfiles(profiles);
+  validateProfiles(profiles, station);
   const snapshot = profiles.stations[station];
   const byZip = boundaries.byZip;
   const features = [], missing = [], routes = [];
@@ -71,12 +71,23 @@ export function buildRouteMap({ profiles, station, boundaries, details }) {
     boundary_source: source(boundaries),
     coverage: { total: features.length + missing.length, mapped: features.length, missing: missing.length,
       missing_no_zcta, missing_not_checked: missing.length - missing_no_zcta },
+    cross_station_conflicts: findCrossStationConflicts(profiles.stations)
+      .filter(conflict => conflict.routes.some(owner => owner.station === station))
+      .map(({ postal_code, routes }) => ({ postal_code, stations: [...new Set(routes.map(owner => owner.station))].sort(compare) }))
+      .sort((a, b) => compare(a.postal_code, b.postal_code)),
     routes, missing, features: { type: 'FeatureCollection', features } };
 }
 
 export function lookupZip({ profiles, boundaries, postalCode, details }) {
   validateProfiles(profiles);
   const geometry = boundaries.byZip.get(postalCode) ?? null;
+  const owners = Object.entries(profiles.stations).flatMap(([station, snapshot]) => snapshot.rows
+    .filter(row => row.postal_codes.includes(postalCode))
+    .map(row => ({ station, route_id: row.route_id, route_name: row.route_name })))
+    .sort((a, b) => compare(a.station, b.station));
+  if (owners.length > 1) return { postal_code: postalCode, status: 'multi_station', owners,
+    station: null, route_id: null, route_name: null, route: null, fetched_at: null,
+    geometry, boundary_source: source(boundaries) };
   for (const [station, snapshot] of Object.entries(profiles.stations)) {
     const row = snapshot.rows.find(row => row.postal_codes.includes(postalCode));
     const detail = row && detailFor(details, row, station);

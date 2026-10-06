@@ -3,7 +3,7 @@ import { difficultyLevel } from './difficulty.js';
 // Lightweight user-facing text shared by the profile page and detail modal.
 export const profileText = {
   loading: '加载中…', networkError: '无法连接本地服务器。',
-  empty: 'SFO01 暂无数据。请运行 npm run dms:scrape 创建快照。',
+  empty: '所选站点 暂无数据。请运行 npm run dms:scrape 创建快照。',
   loadError: code => `无法加载线路画像 (${code})。`,
   routeName: '线路名称', routeId: 'Route ID', station: '站点', dsp: 'DSP',
   volume: 'Pickup Volume', pph: 'PPH', firstMile: '首公里距离 (mi)',

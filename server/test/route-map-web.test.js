@@ -107,10 +107,10 @@ class Element {
   addEventListener(name, handler) { this.listeners[name] = handler; }
 }
 
-async function fixture(search = '', basemapStatus = 206) {
+async function fixture(search = '', basemapStatus = 206, storage = null) {
   const { createMapPage } = await import('../../web/map.js');
   const ids = ['route-map', ...['station', 'message', 'retry', 'content', 'selection', 'coverage',
-    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'snapshot-source', 'basemap-message', 'current', 'search-hint', 'search-message', 'summary-panel'].map(id => `map-${id}`)];
+    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'snapshot-source', 'basemap-message', 'current', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag) };
   const map = { panes: {}, createPane(name) { return this.panes[name] = { style: {} }; }, listeners: {}, fits: [], removed: [], attributionControl: {
@@ -137,7 +137,7 @@ async function fixture(search = '', basemapStatus = 206) {
     } };
   leaflet.control.zoom = options => ({ addTo() { map.zoomTitles = options; } });
   const requests = [], replies = [];
-  const page = createMapPage({ document: doc, leaflet, search, protomaps: {
+  const page = createMapPage({ document: doc, leaflet, search, storage, protomaps: {
     PmtilesSource: class { constructor(url) { this.p = { url, getZxy: async () => { throw new Error('mock archive unavailable'); } }; } },
     leafletLayer(options) {
     const layer = { options, on(name, fn) { this.error = fn; }, addTo() { baselayers.push(this); return this; } }; return layer;
@@ -153,6 +153,24 @@ async function fixture(search = '', basemapStatus = 206) {
   return { doc, controls, baselayers, elements, map, groups, page, requests, replies, reply };
 }
 const payload = () => buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
+
+test('MS-T2b Map restores manual preference without saving startup or automatic ZIP switches', async () => {
+  let saved = 'MOCKB'; const writes = [];
+  const storage = { getItem: () => saved, setItem: (key, value) => { saved = value; writes.push([key, value]); } };
+  const { elements: e, page, replies, reply } = await fixture('', 206, storage);
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
+  await page.start(); assert.equal(e['map-station'].value, 'MOCKB'); assert.deepEqual(writes, []);
+  e['map-station'].value = 'MOCKA'; replies.push(reply(200, payload()));
+  await e['map-station'].listeners.change();
+  assert.deepEqual(writes, [['nc-ops-console.station', 'MOCKA']]);
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })),
+    reply(200, buildRouteMap({ profiles: profiles(), station: 'MOCKB', boundaries: boundaries() })));
+  await page.searchQuery('00009', true);
+  assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(saved, 'MOCKA'); assert.equal(writes.length, 1);
+  const restored = await fixture('', 206, storage);
+  restored.replies.push(restored.reply(200, { stations: ['MOCKB', 'MOCKA'] }), restored.reply(200, payload()));
+  await restored.page.start(); assert.equal(restored.elements['map-station'].value, 'MOCKA');
+});
 
 test('map DOM uses API coverage and missing rows, safe tooltip elements and persistent click selection', async () => {
   const { elements: e, page, map, groups, requests, replies, reply } = await fixture('?station=MOCKA');
@@ -491,4 +509,25 @@ test('RM5 ZIP search highlight uses the same difficulty fields as polygon clicks
   assert.equal(highlightLayer().styles[0].dashArray, '8 6');
   const highlight = highlightLayer(); controls[1].children[0].listeners.click();
   assert.deepEqual(highlight.styles.at(-1), highlight.styles[0]);
+});
+
+test('MS-T2 warnings collapse, multi-Station ZIP keeps Station and highlights only ZIP', async () => {
+  const { elements: e, page, replies, reply, requests, groups, map } = await fixture('?station=MOCKB');
+  const data = profiles(); data.stations.MOCKB.rows[0].postal_codes.push('00002');
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, buildRouteMap({ profiles: data, station: 'MOCKB', boundaries: boundaries() })));
+  await page.start();
+  assert.equal(e['map-conflicts-details'].hidden, false); assert.equal(e['map-conflicts-details'].open, false);
+  assert.match(e['map-conflicts'].children[0].textContent, /00002.*MOCKA.*MOCKB/);
+  e['map-conflicts-details'].open = true; assert.equal(e['map-conflicts-details'].open, true);
+  const before = requests.length, fits = map.fits.length;
+  replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundaries(), postalCode: '00002' })));
+  await page.searchQuery('00002', true);
+  assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(requests.length, before + 1); assert.equal(map.fits.length, fits + 1);
+  assert.equal(e['map-summary-panel'].hidden, true);
+  assert.ok(e['map-selection'].children[0].children.some(row => row.children?.[1]?.textContent === 'MOCKA'));
+  assert.ok(e['map-selection'].children[0].children.some(row => row.children?.[1]?.textContent === 'MOCKB'));
+  const outlines = groups.filter(group => group.options.pane && !map.removed.includes(group));
+  assert.equal(outlines.length, 2); assert.ok(outlines.every(group => group.layers.length === 1));
+  replies.push(reply(200, payload())); await page.loadStation();
+  assert.equal(e['map-conflicts-details'].hidden, true); assert.equal(e['map-conflicts-details'].open, false);
 });

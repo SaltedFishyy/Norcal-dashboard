@@ -4,6 +4,7 @@ import './cli.test.js';
 import './t3.test.js';
 import './t6.test.js';
 import './t7.test.js';
+import './station-preference.test.js';
 import './rd1.test.js';
 import './route-detail-batch.test.js';
 import './multi-station-batch.test.js';

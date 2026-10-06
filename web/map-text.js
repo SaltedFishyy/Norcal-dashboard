@@ -38,11 +38,14 @@ export const mapText = {
   mapLabel: '线路邮编覆盖地图',
   boundaryNote: 'ZCTA 是 USPS ZIP 区域的近似边界，不能用于具体地址的线路分配。',
   noscript: '请启用 JavaScript 以加载本地线路地图。',
+  crossStation: '以下 ZIP 同时出现在多个站点：',
   statuses: {
+    multi_station: '该 ZIP 同时属于多个站点',
     covered: '有线路覆盖', covered_no_boundary: '有线路覆盖', uncovered: '当前无线路覆盖',
     no_boundary: '暂无可用边界数据', out_of_range: '不在支持范围内',
   },
   zipNotes: {
+    multi_station: '该 ZIP 同时属于多个站点',
     covered: '该 ZIP 有线路覆盖，地图已定位并高亮。',
     covered_no_boundary: '有线路覆盖 · 该 ZIP 暂无可用边界数据',
     uncovered: '该 ZIP 当前无线路覆盖，地图以虚线高亮。',

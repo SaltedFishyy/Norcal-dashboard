@@ -2,12 +2,13 @@ import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
 import { clearSelection, selectRoute, selectZip, classifyQuery, searchRoutes } from './map-state.js';
 import { mapText as t, localizeMap } from './map-text.js';
+import { chooseStation, readSavedStation, saveStation } from './station-preference.js';
 
 const knownErrors = new Set(['invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
 
 export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.protomapsL,
-  document: doc = document, fetch: request = fetch, search = location.search } = {}) {
+  document: doc = document, fetch: request = fetch, search = location.search, storage } = {}) {
   const element = id => doc.getElementById(`map-${id}`);
   localizeMap(doc);
   const stationSelect = element('station'), message = element('message'), retry = element('retry');
@@ -65,7 +66,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
         panel.searchStatus('error', t.zipError(knownErrors.has(data?.error) ? data.error : 'internal_error')); return;
       }
       // A ZIP can belong to another Station. Load that Station before applying its result.
-      if (data.station && data.station !== stationSelect.value) {
+      if (data.status !== 'multi_station' && data.station && data.station !== stationSelect.value) {
         stationSelect.value = data.station;
         const loaded = await loadStation({ preserveSearch: true });
         if (!loaded || current !== zipSequence) return;
@@ -113,12 +114,15 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       }
       if (!data.stations.length) { status('empty', t.noStations); return; }
       const desired = new URLSearchParams(search).get('station');
-      stationSelect.value = data.stations.includes(desired) ? desired : data.stations[0];
+      stationSelect.value = chooseStation({ urlStation: desired, savedStation: readSavedStation(storage), stations: data.stations });
       stationsLoaded = true; stationSelect.disabled = false;
       await loadStation();
     } catch { status('error', t.stationsError); }
   }
-  stationSelect.addEventListener('change', loadStation);
+  stationSelect.addEventListener('change', () => {
+    saveStation(storage, stationSelect.value);
+    return loadStation();
+  });
   retry.addEventListener('click', () => stationsLoaded ? loadStation() : start());
   doc.addEventListener('keydown', event => { if (event.key === 'Escape') deselect(); });
   const basemapReady = view.loadBasemaps();

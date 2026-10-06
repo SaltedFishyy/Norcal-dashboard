@@ -39,7 +39,7 @@ test('ZIP lookup distinguishes all five statuses, searches across Stations and r
 });
 
 test('ZIP lookup validates every Station and rejects ownership conflicts even for an unrelated query', () => {
-  for (const station of ['MOCKA', 'MOCKB']) {
+  for (const station of ['MOCKA']) {
     const data = profiles(); data.stations[station].rows[0].postal_codes = ['00002'];
     assert.throws(() => lookupZip({ profiles: data, boundaries: boundaries(), postalCode: '10001' }), RouteZipConflictError);
   }
@@ -93,8 +93,8 @@ test('route map requires postal_codes and validates format in all Station snapsh
   assert.throws(() => build(data), SnapshotInvalidError);
 });
 
-test('route map rejects intra-Station and cross-Station conflicts with ownership details', () => {
-  for (const station of ['MOCKA', 'MOCKB']) {
+test('route map rejects intra-Station conflicts with ownership details', () => {
+  for (const station of ['MOCKA']) {
     const data = profiles(); data.stations[station].rows[0].postal_codes = ['00002'];
     assert.throws(() => build(data), error => {
       assert.ok(error instanceof RouteZipConflictError);
@@ -141,4 +141,21 @@ test('RM5 detail join is exact by route, Station and ZIP, without inference or i
     assert.equal(fallback.details_status, cache?.status ?? 'none');
     assert.ok(fallback.features.features.every(f => f.properties.zip_difficulty === null && f.properties.zip_detail_status === 'missing'));
   }
+});
+
+ test('MS-T2 cross-Station warnings are local and lookup never chooses an owner', () => {
+  const data = profiles(), boundary = boundaries();
+  data.stations.MOCKB.rows[0].postal_codes.push('00002');
+  data.stations.MOCKC = structuredClone(data.stations.MOCKB);
+  data.stations.MOCKC.rows[0].postal_codes = ['00009'];
+  data.stations.MOCKC.rows[0].station = 'MOCKC';
+  const result = build(data);
+  assert.deepEqual(result.cross_station_conflicts, [{ postal_code: '00002', stations: ['MOCKA', 'MOCKB'] }]);
+  const lookup = lookupZip({ profiles: data, boundaries: boundary, postalCode: '00002' });
+  assert.equal(lookup.status, 'multi_station'); assert.equal(lookup.station, null); assert.equal(lookup.route, null);
+  assert.deepEqual(lookup.owners, [{ station: 'MOCKA', route_id: 1, route_name: 'Mock-A' }, { station: 'MOCKB', route_id: 3, route_name: 'Mock-C' }]);
+  assert.deepEqual(lookup.geometry, boundary.byZip.get('00002'));
+  data.stations.MOCKB.rows.push({ ...data.stations.MOCKB.rows[0], route_id: 4 });
+  assert.doesNotThrow(() => build(data));
+  assert.throws(() => buildRouteMap({ profiles: data, station: 'MOCKB', boundaries: boundary }), RouteZipConflictError);
 });
