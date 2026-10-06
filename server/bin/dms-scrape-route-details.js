@@ -10,15 +10,10 @@ import { captureRouteDetailOnPage, closeRouteDetailModals } from '../src/dms/rou
 import { transformRouteDetail } from '../src/transform/route-detail.js';
 import { listCachedRouteIds, getRouteDetail, saveRouteDetail, writeRouteDetailsBatchRun } from '../src/store/route-details-file.js';
 import { writeLastFailure } from '../src/store/route-profiles-file.js';
-import { writeFileAtomic } from '../src/store/atomic-file.js';
+import { writePageFailureDiagnostic } from '../src/dms/batch-diagnostics.js';
+export { diagnosticMessage } from '../src/dms/batch-diagnostics.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-export function diagnosticMessage(error) {
-  const seen = new Set();
-  while (error?.cause && !seen.has(error.cause)) { seen.add(error); error = error.cause; }
-  return String(error?.message || '').split(/[\r\n]/, 1)[0]
-    .replace(/https?:\/\/\S+/g, '').split(/[?#]/, 1)[0].slice(0, 300);
-}
 export function parseBatchArgs(args) {
   const seen = new Set();
   const options = { refresh: false, headless: false, maxRoutes: null };
@@ -98,32 +93,8 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
       signal: controller.signal, log, onCounts: value => { counts = value; },
       onPageFailure: async ({ page, error }) => {
         if (!['capture', 'close_modals', 'delay'].includes(phase)) return;
-        const json = 'route-details-batch-failure.json', png = 'route-details-batch-failure.png';
-        let screenshot = null, warned = false;
-        const warn = () => { if (!warned) { warned = true; errorLog('诊断保存失败，请检查本地目录或页面状态。'); } };
-        let timer, expired = false;
-        const work = async () => {
-          try {
-            await diagnosticFileOps.mkdir(runtimeDir, { recursive: true });
-            if (expired) return;
-            await page.screenshot({ path: path.join(runtimeDir, png), fullPage: false, timeout: 4000 });
-            screenshot = png;
-          } catch { warn(); }
-          if (expired) return;
-          try {
-            const record = { at: now().toISOString(), route_name: current?.route_name ?? null,
-              route_id: current?.route_id ?? null, phase, error_type: error.name,
-              step: error.name === 'SelectorError' ? error.message.replace(/^页面控件不可用：/, '') : null,
-              message_first_line: diagnosticMessage(error) };
-            await writeFileAtomic(path.join(runtimeDir, json), JSON.stringify(record, null, 2) + '\n', { fileOps: diagnosticFileOps });
-            if (!expired) diagnostic = { json, screenshot };
-          } catch { warn(); }
-        };
-        try {
-          await Promise.race([work(), new Promise(resolve => {
-            timer = setTimeout(() => { expired = true; warn(); resolve(); }, 4500);
-          })]);
-        } finally { clearTimeout(timer); }
+        diagnostic = await writePageFailureDiagnostic({ runtimeDir, page, error, currentRoute: current,
+          phase, now, fileOps: diagnosticFileOps, errorLog });
       } }, async context => {
       total = context.body.data.total;
       const pages = Math.max(1, Math.ceil(total / 100));

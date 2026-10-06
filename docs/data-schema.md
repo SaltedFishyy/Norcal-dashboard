@@ -136,6 +136,7 @@ Notes
 - 粒度：一行 = 一个 Station 下的一条 Route（最新一次成功抓取）
 - 新鲜度：每个 Station 单独记录 `fetched_at`（Last Updated）；第一阶段不保存历史
 - 存储：本机 runtime 目录中的 `route-profiles.json`（不进 Git）
+- MS-T1 多站点批处理：手动运行 `npm run dms:scrape-stations`，通过同一 Playwright 会话的全局 Station 和列表逐条验证获取 active Route；全部页完成后按 Station 覆盖 snapshot，沿用 `fetched_at` 和 schema_version 1。来源仍是 DMS browser automation，续跑状态与 summary 单独保存在 runtime（见 `docs/features/multi-station.md`）。
 
 | 字段 | 类型 | 定义 | 状态 |
 |---|---|---|---|
@@ -165,6 +166,7 @@ Station / Route 关联：`station` 取抓取时在 DMS 中选择的真实 Statio
 - 粒度：一行 = 某条 Route 下的一个 ZIP（最新一次成功抓取）。逻辑唯一标识 `route_id + postal_code`
 - 新鲜度：每条 Route 单独记录 `fetched_at`，与 `route-profiles.json` 中 Station 的 `fetched_at` 互相独立
 - 存储：本机 runtime 目录中的 `route-details.json`（不进 Git），不修改 `route-profiles.json`
+- MS-T1 新命令也通过相同详情页面流程写入此 cache，沿用 RD4 字段和每 Route 的 `fetched_at`；同时独立更新该 Station 的 Route Profile snapshot。移出 active 列表的历史 Route Detail 保留，完整性判断检查原始 `pickup_volume_daily` 键，不使用 API 的 null 默认值。
 
 ```json
 {

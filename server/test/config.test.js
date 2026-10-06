@@ -1,6 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStatePath, checkStatePath, parseBaseUrl } from '../src/config.js';
+import { resolveStatePath, checkStatePath, parseBaseUrl, parseStationBatchConfig, parseRouteDetailBatchDelay } from '../src/config.js';
+
+test('batch delays keep command defaults, honor overrides and validate lower bounds', () => {
+  assert.equal(parseRouteDetailBatchDelay(undefined), 4000);
+  assert.equal(parseStationBatchConfig({}).routeDelay, 2000);
+  assert.equal(parseStationBatchConfig({}).stationDelay, 15000);
+  for (const route of ['2000', '3500', '5000']) {
+    assert.equal(parseRouteDetailBatchDelay(route), Number(route));
+    assert.equal(parseStationBatchConfig({ ROUTE_DETAIL_BATCH_DELAY_MS: route }).routeDelay, Number(route));
+  }
+  for (const station of ['10000', '12000', '60000']) {
+    assert.equal(parseStationBatchConfig({ STATION_BATCH_DELAY_MS: station }).stationDelay, Number(station));
+  }
+  for (const value of ['', '-1', '1.5', 'invalid', '9007199254740992']) {
+    assert.throws(() => parseRouteDetailBatchDelay(value));
+    assert.throws(() => parseStationBatchConfig({ ROUTE_DETAIL_BATCH_DELAY_MS: value }));
+    assert.throws(() => parseStationBatchConfig({ STATION_BATCH_DELAY_MS: value }));
+  }
+  assert.throws(() => parseRouteDetailBatchDelay('1999'));
+  assert.throws(() => parseStationBatchConfig({ ROUTE_DETAIL_BATCH_DELAY_MS: '1999' }));
+  assert.throws(() => parseStationBatchConfig({ STATION_BATCH_DELAY_MS: '9999' }));
+});
 
 const options = { env: { LOCALAPPDATA: 'C:\\Users\\owner\\AppData\\Local' },
   platform: 'win32', homedir: 'C:\\Users\\owner', repoRoot: 'C:\\work\\repo' };

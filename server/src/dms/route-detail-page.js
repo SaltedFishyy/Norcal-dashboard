@@ -126,6 +126,11 @@ async function locateL3(context, routeName, index, deadline) {
 }
 
 async function locateL5(context, routeName, routeId, deadline, state) {
+  if (context.forbidNameFilter) {
+    const error = new SelectorError('L5 不可用于第 2 页以后');
+    error.noFallback = true;
+    throw error;
+  }
   const selected = await context.guarded(() => context.page.locator('.dbuMicroSysApp-form-item').evaluateAll(elements => {
     document.querySelectorAll('[data-rd1-name-filter]').forEach(element => element.removeAttribute('data-rd1-name-filter'));
     const visible = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
@@ -166,7 +171,7 @@ async function clickPortraitRow(context, { routeName, routeId }) {
           : await locate(context, routeName, index, until);
       } catch (error) {
         attempts.push(method);
-        if (error.portraitClickAttempted || !(error instanceof SelectorError || error.name === 'TimeoutError')
+        if (error.portraitClickAttempted || error.noFallback || !(error instanceof SelectorError || error.name === 'TimeoutError')
           || /画像详情按钮不唯一|Route 行不唯一/.test(error.message)) throw error;
         outcome = 'not_found';
         attempts.pop();

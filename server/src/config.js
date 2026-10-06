@@ -47,6 +47,46 @@ export const parseRouteDetailBatchDelay = value => batchInteger(value, 4000, 200
 export const parseMaxRouteDetailBatchRequests = value => batchInteger(value, 800, 1, 'MAX_ROUTE_DETAIL_BATCH_REQUESTS');
 export const parseMaxRouteDetailBatchProdApiRequests = value => batchInteger(value, 1000, 1, 'MAX_ROUTE_DETAIL_BATCH_PROD_API_REQUESTS');
 
+export const defaultStationOrder = ['SFO01', 'SMF01', 'RNO01', 'SCK01', 'MOD01', 'MFR01', 'OAR01', 'RDG01', 'RDG02'];
+export function parseStationBatchArgs(args) {
+  const options = { stations: [...defaultStationOrder], maxRoutesPerStation: null, refresh: false, newRun: false, headless: false };
+  const seen = new Set();
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    if (seen.has(flag)) throw new Error('Invalid batch arguments');
+    seen.add(flag);
+    if (flag === '--stations') {
+      options.stations = (args[++i] || '').split(',');
+      if (!options.stations.every(code => /^[A-Z]{3}\d{2}$/.test(code))
+        || new Set(options.stations).size !== options.stations.length) throw new Error('Invalid stations');
+    } else if (flag === '--max-routes-per-station') {
+      const value = args[++i];
+      if (!/^[1-9]\d*$/.test(value || '') || !Number.isSafeInteger(Number(value))) throw new Error('Invalid route limit');
+      options.maxRoutesPerStation = Number(value);
+    } else if (flag === '--refresh') options.refresh = true;
+    else if (flag === '--new-run') options.newRun = true;
+    else if (flag === '--headless') options.headless = true;
+    else throw new Error('Invalid batch arguments');
+  }
+  return options;
+}
+export function parseStationBatchConfig(env) {
+  return {
+    routeDelay: batchInteger(env.ROUTE_DETAIL_BATCH_DELAY_MS, 2000, 2000, 'ROUTE_DETAIL_BATCH_DELAY_MS'),
+    stationDelay: batchInteger(env.STATION_BATCH_DELAY_MS, 15000, 10000, 'STATION_BATCH_DELAY_MS'),
+    stationBase: batchInteger(env.STATION_REQUEST_BASE, 80, 1, 'STATION_REQUEST_BASE'),
+    perRoute: batchInteger(env.STATION_REQUEST_PER_ROUTE, 22, 1, 'STATION_REQUEST_PER_ROUTE'),
+    batchMax: batchInteger(env.MAX_MULTI_STATION_BATCH_REQUESTS, 12000, 1, 'MAX_MULTI_STATION_BATCH_REQUESTS'),
+    maxDetailRequests: parseMaxRouteDetailRequests(env.MAX_ROUTE_DETAIL_REQUESTS),
+    maxListRequests: parseMaxListRequests(env.MAX_PAGE_LOADS_PER_STATION),
+  };
+}
+export function stationRequestCap(total, { stationBase, perRoute }) {
+  const cap = stationBase + perRoute * total + (Math.max(1, Math.ceil(total / 100)) - 1) * 5;
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(cap)) throw new Error('Invalid station cap');
+  return cap;
+}
+
 export function resolveStatePath({ env, platform, homedir, repoRoot }) {
   const p = pathApi(platform);
   const override = env.DMS_STATE_PATH?.trim();

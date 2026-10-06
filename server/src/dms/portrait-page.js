@@ -12,10 +12,11 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
   maxListRequests = 3, headless = false, log = () => {},
   listRequestPath = '/roadAreaPortrait/', needsLoginOn401 = false, maxDetailRequests, validate = () => {},
   maxBatchDetailRequests, maxProdApiRequests, signal, onCounts = () => {}, batch = false,
-  onPageFailure, pageFailureTimeout = 5000 }, capture) {
+  onPageFailure, pageFailureTimeout = 5000, globalStationMode = false }, capture) {
   let browser, page, failure, requestCount = 0, listRequestCount = 0, detailRequestCount = 0;
   let prodApiRequestCount = 0, routeDetailRequestCount = 0, maxRouteDetailRequestCount = 0;
   let loginChecksActive = false, listLoaded = false;
+  let stationBudget, batchBudget = 0;
   const counts = () => ({ requestCount, listRequestCount, detailRequestCount,
     prodApiRequestCount, routeDetailRequestCount, maxRouteDetailRequestCount });
   let rejectStop;
@@ -51,11 +52,13 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
     if (route.includes('/prod-api/')) {
       prodApiRequestCount++;
       if (maxProdApiRequests !== undefined && prodApiRequestCount > maxProdApiRequests) stop(new LoadLimitError());
+      if (stationBudget && (prodApiRequestCount - stationBudget.prodStart > stationBudget.cap
+        || prodApiRequestCount > batchBudget)) stop(new LoadLimitError());
     }
     if (route.includes(listRequestPath)) {
       listRequestCount++;
       log(batch ? `阶段：列表请求；计数：${listRequestCount}` : `阶段：request；pathname：${route}；计数：${listRequestCount}`);
-      if (listRequestCount > maxListRequests) stop(new LoadLimitError());
+      if (stationBudget ? listRequestCount - stationBudget.listStart > stationBudget.listCap : listRequestCount > maxListRequests) stop(new LoadLimitError());
     }
     if (maxDetailRequests !== undefined && route.includes('/roadAreaPortraitDetails/')) {
       detailRequestCount++;
@@ -78,7 +81,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
     if (frame === page.mainFrame() && !pathname(frame.url()).includes('/areaDepiction')) stop(new NeedsLoginError());
   };
   try {
-    if (station !== 'SFO01' || !Number.isSafeInteger(maxListRequests) || maxListRequests < 1) throw new CaptureError();
+    if ((!globalStationMode && !/^[A-Z]{3}\d{2}$/.test(station || '')) || !Number.isSafeInteger(maxListRequests) || maxListRequests < 1) throw new CaptureError();
     validate();
     for (const limit of [maxBatchDetailRequests, maxProdApiRequests]) {
       if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new CaptureError();
@@ -103,8 +106,15 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       void page.locator('input[type=password]').first().waitFor({ state: 'attached', timeout: 0 })
         .then(() => stop(new NeedsLoginError())).catch(() => {});
     }
-    await control('展开', () => page.getByText('展开', { exact: true }).first().click());
-    await control('转运站点', async () => {
+    const queryStation = async () => {
+    if (globalStationMode) {
+      await control('展开', async () => {
+        const expand = page.getByText('展开', { exact: true });
+        if (await guarded(() => expand.count()) > 1) throw new SelectorError('展开不唯一');
+        if (await guarded(() => expand.count()) === 1) await guarded(() => expand.click({ timeout: 30000 }));
+      });
+    } else await control('展开', () => page.getByText('展开', { exact: true }).first().click());
+    if (!globalStationMode) await control('转运站点', async () => {
       const items = page.locator('.dbuMicroSysApp-form-item');
       let target;
       for (let i = 0; i < await guarded(() => items.count()); i++) {
@@ -128,11 +138,12 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
         if (!pathname(response.url()).endsWith(listPath) || response.request().method() !== 'POST') return false;
         try {
           const body = response.request().postDataJSON();
-          return Array.isArray(body?.transitStationCodeList) && body.pageSize === pageSize;
+          return (globalStationMode ? !Object.hasOwn(body || {}, 'transitStationCodeList') && body?.pageNum === 1 : Array.isArray(body?.transitStationCodeList)) && body.pageSize === pageSize;
         } catch { return false; }
       }),
       page.getByRole('button', { name: /查\s*询/ }).click(),
     ]));
+    if (globalStationMode && response.status() !== 200) throw new CaptureError();
     const body = await guarded(() => response.json());
     if (failure) throw failure;
     listLoaded = true;
@@ -143,7 +154,8 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       const pages = Math.max(1, Math.ceil(total / pageSize));
       if (pages > 10) throw new LoadLimitError();
       // A next-page click sends one pagination request; retain the initial-load budget.
-      maxListRequests += pages - 1;
+      if (stationBudget) stationBudget.listCap += pages - 1;
+      else maxListRequests += pages - 1;
       const initialFilter = response.request().postDataJSON().transitStationCodeList;
       nextPage = previous => control('下一页', async () => {
         const visible = await guarded(() => page.locator('.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]')
@@ -163,6 +175,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
           available[0].click(),
         ]));
         const query = reply.request().postDataJSON();
+        if (globalStationMode && (reply.status() !== 200 || Object.hasOwn(query || {}, 'transitStationCodeList'))) throw new CaptureError();
         if (JSON.stringify(query?.transitStationCodeList) !== JSON.stringify(initialFilter)
           || query.pageSize !== pageSize || query.pageNum !== previous + 1) throw new CaptureError();
         const nextBody = await guarded(() => reply.json());
@@ -184,15 +197,31 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
         page.getByRole('button', { name: /查\s*询/ }).click({ timeout: remaining() }),
       ]));
       const query = reply.request().postDataJSON();
+      if (globalStationMode && (reply.status() !== 200 || Object.hasOwn(query || {}, 'transitStationCodeList') || query.pageNum !== 1)) throw new CaptureError();
       if (JSON.stringify(query?.transitStationCodeList) !== JSON.stringify(initialFilter) || query.pageSize !== pageSize) throw new CaptureError();
       const value = await guarded(() => reply.json());
       if (!Array.isArray(value?.data?.records)) throw new CaptureError();
       return value;
     });
-    const result = await capture({ page, body, guarded, control, counts,
-      allowNameFilter: () => { maxListRequests += 2; }, queryRouteName,
+    return { page, body, guarded, control, counts,
+      allowNameFilter: () => { if (stationBudget) stationBudget.listCap += 2; else maxListRequests += 2; }, queryRouteName,
       nextPage,
-      beginRoute: () => { routeDetailRequestCount = 0; } });
+      beginRoute: () => { routeDetailRequestCount = 0; } };
+    };
+    const beginStation = base => {
+      if (!Number.isSafeInteger(base) || base < 1) throw new CaptureError();
+      stationBudget = { cap: base, finalized: false, prodStart: prodApiRequestCount, listStart: listRequestCount, listCap: maxListRequests + 1 };
+      batchBudget += base;
+    };
+    const setStationCap = cap => {
+      if (!stationBudget || stationBudget.finalized || !Number.isSafeInteger(cap) || cap < stationBudget.cap) throw new CaptureError();
+      batchBudget += cap - stationBudget.cap;
+      stationBudget.cap = cap;
+      stationBudget.finalized = true;
+      if (prodApiRequestCount - stationBudget.prodStart > cap || prodApiRequestCount > batchBudget) throw new LoadLimitError();
+    };
+    const result = await capture(globalStationMode ? { page, guarded, control, counts, queryStation, beginStation, setStationCap,
+      batchCap: () => Math.min(batchBudget, maxProdApiRequests ?? batchBudget) } : await queryStation());
     if (failure) throw failure;
     return result;
   } catch (error) {

@@ -82,6 +82,18 @@ export async function listCachedRouteIds({ runtimeDir, fileOps = fs }) {
   return ids;
 }
 
+// Batch completeness needs the original keys, unlike the API's null defaults.
+export async function readRouteDetailsForBatch({ runtimeDir, fileOps = fs }) {
+  try {
+    const data = JSON.parse(await fileOps.readFile(path.join(runtimeDir, 'route-details.json'), 'utf8'));
+    if (!validFile(data)) throw new RouteDetailInvalidError();
+    return data.routes;
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw new RouteDetailInvalidError();
+  }
+}
+
 export async function writeRouteDetailsBatchRun({ runtimeDir, record, fileOps = fs }) {
   try {
     await writeFileAtomic(path.join(runtimeDir, 'route-details-batch-last-run.json'), JSON.stringify(record, null, 2) + '\n', { fileOps });

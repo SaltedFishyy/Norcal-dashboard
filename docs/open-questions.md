@@ -25,7 +25,7 @@
 - [x] D3 Address Type Distribution → 占比，10 种类型（T2）
 - [x] D4 Route Difficulty 由 DMS 直接提供（T2）
 - [x] D4b 两者都存：`roadAreaDifficulty` 作为 `route_difficulty`（前端默认展示），人工值存 `route_difficulty_manual`，空值为 null（2026-09-30）
-- [ ] D8 多 Station：现在不自动切换页头全局站点；T3 稳定后再设计受控测试（记录原站点 → MFR01 → 验证 → 切回），需 Product Owner 明确授权才执行（2026-09-30）
+- [x] D8 多 Station → **已授权（Product Owner 2026-10-06）**：通过页头 Station 下拉框自动切站，双重验证后串行处理 9 个站点；结束时恢复原站点。见 `docs/features/multi-station.md`
 - [x] D9 现在就保存 `roadAreaId` 作为 `route_id`（首选唯一标识）；`station + route_name` 用于展示和校验（2026-09-30）
 - [ ] D5 DMS Route Name 能否与 legacy route（如 `SFO02-042`）对应
 - [ ] D6 Pickup Volume 的统计窗口（目前只确认 `receiptQty` = 页面“领件量”；不猜测，不称为 Daily Volume，保留原值）
@@ -50,7 +50,7 @@
 - [ ] TBL-Q3 无 ZCTA polygon 的 ZIP 以后是否用点显示；点位坐标从哪里来（2026-10-02）
 - [ ] TBL-Q4 边界截取的州范围（至少 CA + NV）和服务区 Station 清单（2026-10-02）
 - [ ] TBL-Q5 `.twbx` 和导出数据以后的存放位置（Tableau Server / Cloud 或其他内部位置）（2026-10-02）
-- [ ] TBL-Q6 SMF01 等非 SFO01 Station 的数据依赖 D8（切换页头全局站点）的受控测试授权（2026-10-02）
+- [x] TBL-Q6 → 随 D8 解决（2026-10-06），见 `docs/features/multi-station.md`
 
 ## Web Route Map
 
