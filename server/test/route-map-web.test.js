@@ -51,16 +51,14 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
   e['map-search'].value = '023'; await e['map-search'].listeners.input();
   assert.equal(e['map-search-hint'].hidden, false);
   e['map-search'].value = '00009';
-  replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00009' })),
-    reply(200, buildRouteMap({ profiles: data, station: 'MOCKB', boundaries: boundary })));
+  replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00009' })));
   await e['map-search'].listeners.keydown({ key: 'Enter', preventDefault() {} });
-  assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(e['map-search'].value, '00009');
+  assert.equal(e['map-station'].value, 'MOCKA'); assert.equal(e['map-search'].value, '00009');
   assert.equal(e['map-current'].children[0].children[1].children[1].textContent, 'Mock-C');
-  // Switching Station for an owned ZIP without geometry must leave the viewport unchanged.
+  // An owned ZIP without geometry leaves the viewport and selected Station unchanged.
   data.stations.MOCKA.rows[0].postal_codes.push('00024');
   const beforeFits = map.fits.length;
-  replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00024' })),
-    reply(200, buildRouteMap({ profiles: data, station: 'MOCKA', boundaries: boundary })));
+  replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00024' })));
   await page.searchQuery('00024', true);
   assert.equal(e['map-station'].value, 'MOCKA');
   assert.equal(map.fits.length, beforeFits);
@@ -109,7 +107,7 @@ class Element {
 
 async function fixture(search = '', basemapStatus = 206, storage = null) {
   const { createMapPage } = await import('../../web/map.js');
-  const ids = ['route-map', ...['station', 'message', 'retry', 'content', 'selection', 'coverage',
+  const ids = ['route-map', ...['district', 'station', 'message', 'retry', 'content', 'selection', 'coverage',
     'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'snapshot-source', 'basemap-message', 'current', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag) };
@@ -148,32 +146,35 @@ async function fixture(search = '', basemapStatus = 206, storage = null) {
     if (reply instanceof Error) throw reply;
     return typeof reply === 'function' ? reply() : reply;
   } });
-  const reply = (status, data) => ({ status, json: async () => data });
+  const reply = (status, data) => ({ status, json: async () => {
+    if (data?.stations && !data.routes && typeof data.stations[0] !== 'object') return { districts: [{ id: 'mock', name_zh: '测试片区', name_en: 'Mock District', stations: data.stations.map(code => ({ code, has_snapshot: true })) }] };
+    if (data?.routes && !data.stations) return { ...data, routes: data.routes.map(route => ({ ...route, station: data.station })), district: 'mock', stations: [{ code: data.station, fetched_at: data.fetched_at, route_count: data.routes.length }], missing: data.missing.map(row => ({ ...row, station: data.station })) };
+    return data;
+  } });
   await page.basemapReady;
   return { doc, controls, baselayers, elements, map, groups, page, requests, replies, reply };
 }
 const payload = () => buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
 
 test('MS-T2b Map restores manual preference without saving startup or automatic ZIP switches', async () => {
-  let saved = 'MOCKB'; const writes = [];
-  const storage = { getItem: () => saved, setItem: (key, value) => { saved = value; writes.push([key, value]); } };
+  let saved = JSON.stringify({ district: 'mock', station: 'MOCKB' }); const writes = [];
+  const storage = { getItem: key => key === 'nc-ops-console.selection' ? saved : null, setItem: (key, value) => { if (key === 'nc-ops-console.selection') saved = value; writes.push([key, value]); } };
   const { elements: e, page, replies, reply } = await fixture('', 206, storage);
   replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
   await page.start(); assert.equal(e['map-station'].value, 'MOCKB'); assert.deepEqual(writes, []);
   e['map-station'].value = 'MOCKA'; replies.push(reply(200, payload()));
   await e['map-station'].listeners.change();
-  assert.deepEqual(writes, [['nc-ops-console.station', 'MOCKA']]);
-  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })),
-    reply(200, buildRouteMap({ profiles: profiles(), station: 'MOCKB', boundaries: boundaries() })));
+  assert.deepEqual(writes, [['nc-ops-console.selection', JSON.stringify({ district: 'mock', station: 'MOCKA' })], ['nc-ops-console.map-scope', 'station']]);
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })));
   await page.searchQuery('00009', true);
-  assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(saved, 'MOCKA'); assert.equal(writes.length, 1);
+  assert.equal(e['map-station'].value, 'MOCKA'); assert.equal(JSON.parse(saved).station, 'MOCKA'); assert.equal(writes.length, 2);
   const restored = await fixture('', 206, storage);
   restored.replies.push(restored.reply(200, { stations: ['MOCKB', 'MOCKA'] }), restored.reply(200, payload()));
   await restored.page.start(); assert.equal(restored.elements['map-station'].value, 'MOCKA');
 });
 
 test('map DOM uses API coverage and missing rows, safe tooltip elements and persistent click selection', async () => {
-  const { elements: e, page, map, groups, requests, replies, reply } = await fixture('?station=MOCKA');
+  const { elements: e, page, map, groups, requests, replies, reply } = await fixture('?station=MOCKA', 206, { getItem: key => key === 'nc-ops-console.map-scope' ? 'district' : null });
   const data = payload(), malicious = '<img src=x onerror=alert(1)>';
   data.features.features.forEach(feature => feature.properties.route_name = malicious);
   data.missing[0].route_name = malicious;
@@ -181,15 +182,15 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   data.coverage = { total: 269, mapped: 254, missing: 15, missing_no_zcta: 14, missing_not_checked: 1 };
   replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, data));
   await page.start();
-  assert.equal(e['map-station'].value, 'MOCKA'); assert.equal(e['map-station'].disabled, false);
-  assert.deepEqual(requests.map(item => item.url), ['/api/route-map/stations', '/api/route-map?station=MOCKA']);
+  assert.equal(e['map-station'].value, ''); assert.equal(e['map-station'].disabled, false);
+  assert.deepEqual(requests.map(item => item.url), ['/api/districts', '/api/route-map/district?district=mock']);
   assert.ok(requests.every(item => item.options.cache === 'no-store'));
   assert.equal(e['map-coverage'].textContent, '94.42%');
   assert.equal(e['map-regenerate'].textContent, '14 无 Census ZCTA · 1 需重新生成边界');
   assert.equal(e['map-regenerate'].hidden, false);
   assert.equal(e['map-missing'].children.length, data.missing.length);
   assert.deepEqual(e['map-missing'].children.map(row => row.children.map(cell => cell.textContent)), [
-    ['00004', malicious, '无 Census ZCTA'], ['00005', 'Mock-B', '边界数据未覆盖（需重新生成）'],
+    ['00004', 'MOCKA', malicious, '无 Census ZCTA'], ['00005', 'MOCKA', 'Mock-B', '边界数据未覆盖（需重新生成）'],
   ]);
   assert.equal(map.fits.length, 1);
   assert.equal(map.attributionControl.prefix, undefined);
@@ -213,7 +214,7 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   assert.equal(layer.styles.at(-1).weight, 1);
   replies.push(reply(200, { ...payload(), station: 'MOCKB' })); e['map-station'].value = 'MOCKB';
   await e['map-station'].listeners.change();
-  assert.equal(requests.at(-1).url, '/api/route-map?station=MOCKB');
+  assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
   assert.equal(map.removed.length, 6);
 });
 
@@ -242,7 +243,7 @@ test('map page loading, no data, known errors, retries and network failures clea
   assert.match(e['map-message'].textContent, /本地服务器/);
   replies.push({ status: 200, json: async () => { throw new Error('private'); } }); await page.loadStation();
   assert.doesNotMatch(e['map-message'].textContent, /private/);
-  const empty = payload(); empty.features.features = []; empty.missing = [];
+  const empty = payload(); empty.features.features = []; empty.missing = []; empty.routes = [];
   empty.coverage = { total: 0, mapped: 0, missing: 0, missing_no_zcta: 0, missing_not_checked: 0 };
   replies.push(reply(200, empty)); await e['map-retry'].listeners.click();
   assert.equal(e['map-missing-empty'].hidden, false);
@@ -255,11 +256,12 @@ test('map Station loading handles absent snapshots, empty list and retry', async
   const { elements: e, page, replies, reply } = await fixture();
   replies.push(reply(404, { error: 'snapshot_not_found' })); await page.start();
   assert.match(e['map-message'].textContent, /暂无数据/); assert.equal(e['map-station'].disabled, true);
-  replies.push(reply(200, { stations: [] })); await e['map-retry'].listeners.click();
-  assert.match(e['map-message'].textContent, /没有站点快照/);
-  replies.push(new Error('secret')); await e['map-retry'].listeners.click();
+  const empty = payload(); empty.features.features = []; empty.routes = []; empty.missing = []; empty.coverage = { total: 0, mapped: 0, missing: 0, missing_no_zcta: 0, missing_not_checked: 0 };
+  replies.push(reply(200, { stations: [] }), reply(200, empty)); await e['map-retry'].listeners.click();
+  assert.match(e['map-message'].textContent, /暂无数据/);
+  replies.push(new Error('secret')); await page.start();
   assert.match(e['map-message'].textContent, /本地服务器/);
-  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload())); await e['map-retry'].listeners.click();
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload())); await page.start();
   assert.equal(e['map-retry'].hidden, true);
 });
 
@@ -530,4 +532,50 @@ test('MS-T2 warnings collapse, multi-Station ZIP keeps Station and highlights on
   assert.equal(outlines.length, 2); assert.ok(outlines.every(group => group.layers.length === 1));
   replies.push(reply(200, payload())); await page.loadStation();
   assert.equal(e['map-conflicts-details'].hidden, true); assert.equal(e['map-conflicts-details'].open, false);
+});
+
+test('DS map selectors, grouped overview, Station focus, ZIP search and manual persistence', async () => {
+  const values = new Map(), writes = [];
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); } };
+  const { elements: e, page, replies, reply, map, groups, controls, requests } = await fixture('', 206, storage);
+  const districts = [{ id: 'mock', name_zh: '测试片区', name_en: 'Mock District', stations: [{ code: 'MOCKA', has_snapshot: true }, { code: 'MOCKB', has_snapshot: true }, { code: 'ABSENT', has_snapshot: false }] }, { id: 'other', name_zh: '其他片区', name_en: 'Other District', stations: [{ code: 'OTHER', has_snapshot: true }] }];
+  const { buildDistrictMap } = await import('../src/route-map/route-map.js');
+  const data = buildDistrictMap({ profiles: profiles(), districts, district: 'mock', boundaries: boundaries() });
+  replies.push(reply(200, { districts }), reply(200, data)); await page.start();
+  assert.equal(e['map-district'].children.length, 2); assert.equal(e['map-district'].children[0].title, 'Mock District');
+  assert.equal(e['map-station'].children[0].textContent, '全部站点（片区总览）');
+  assert.equal(e['map-station'].children[3].disabled, true); assert.equal(writes.length, 0);
+  assert.equal(e['map-station'].value, 'MOCKA');
+  const initial = groups[0];
+  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, 0.12);
+  assert.equal(e['map-coverage-count'].textContent, '2 / 4 ZIP 已上图');
+  assert.equal(e['map-missing'].children[0].children[1].textContent, 'MOCKA');
+  e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.equal(controls[0].children[0].textContent, '定位片区'); assert.equal(values.get('nc-ops-console.map-scope'), 'district');
+  assert.equal(JSON.parse(values.get('nc-ops-console.selection')).station, 'MOCKA');
+  assert.deepEqual(e['map-routes'].children.filter(node => node.tagName === 'h3').map(node => node.textContent), ['MOCKA', 'MOCKB']);
+  assert.equal(e['map-coverage-count'].textContent, '3 / 5 ZIP 已上图');
+  const before = writes.length;
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })));
+  await page.searchQuery('00009', true); assert.equal(e['map-station'].value, ''); assert.equal(writes.length, before);
+  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.equal(controls[0].children[0].textContent, '定位站点');
+  e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
+  assert.equal(e['map-routes'].children[0].children[1].textContent, 'MOCKB · Mock-C');
+  const fits = map.fits.length; const requestCount = requests.length;
+  await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits + 1); assert.equal(requests.length, requestCount);
+  assert.equal(e['map-station'].value, 'MOCKA');
+  const active = groups.filter(group => !map.removed.includes(group) && !group.options.pane && group.layers.length > 1).at(-1);
+  assert.equal(active.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles.at(-1).fillOpacity, 0.65);
+  const saved = values.get('nc-ops-console.selection');
+  replies.push(reply(200, { ...lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' }), station: 'OTHER' }));
+  const beforeOutside = map.fits.length; await page.searchQuery('00009', true);
+  assert.equal(e['map-search-message'].textContent, '该 ZIP 属于 其他片区/OTHER'); assert.equal(map.fits.length, beforeOutside);
+  assert.equal(values.get('nc-ops-console.selection'), saved);
+  e['map-district'].value = 'other';
+  replies.push(reply(200, { ...data, district: 'other', stations: [], routes: [], missing: [], features: { type: 'FeatureCollection', features: [] }, coverage: { total: 0, mapped: 0, missing: 0, missing_no_zcta: 0, missing_not_checked: 0 } }));
+  await e['map-district'].listeners.change(); assert.equal(e['map-station'].value, 'OTHER');
+  assert.deepEqual(JSON.parse(values.get('nc-ops-console.selection')), { district: 'other', station: 'OTHER' });
+  const restored = await fixture('', 206, storage); restored.replies.push(restored.reply(200, { districts }), restored.reply(200, data));
+  await restored.page.start(); assert.equal(restored.elements['map-district'].value, 'other'); assert.equal(restored.elements['map-station'].value, 'OTHER');
 });

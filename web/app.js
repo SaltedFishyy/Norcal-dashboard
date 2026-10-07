@@ -1,7 +1,7 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from './format.js';
 import { openRouteDetail } from './route-detail.js';
-import { chooseStation, readSavedStation, saveStation } from './station-preference.js';
+import { chooseSelection, readSelection, saveSelection, populateDistricts, populateStations } from './station-preference.js';
 
 const updated = document.getElementById('updated');
 const total = document.getElementById('total');
@@ -11,7 +11,8 @@ const message = document.getElementById('message');
 const retry = document.getElementById('retry');
 const profiles = document.getElementById('profiles');
 const stationSelect = document.getElementById('profile-station');
-let stationsLoaded = false, sequence = 0;
+const districtSelect = document.getElementById('profile-district');
+let districts = [], selected = {}, stationsLoaded = false, sequence = 0;
 const columns = [
   ['route_name'], ['dsp_name'], ['pickup_volume', 'numeric', 0], ['pph', 'numeric', 2],
   ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'], ['route_difficulty_manual', 'difficulty'],
@@ -65,6 +66,7 @@ function render(result, data) {
 async function load() {
   const current = ++sequence;
   render(pageState({ loading: true }));
+  if (!selected.station) { render({ state: 'empty', message: '暂无数据：该片区没有站点快照。' }); return; }
   try {
     const response = await fetch(`/api/route-profiles?station=${encodeURIComponent(stationSelect.value)}`, { cache: 'no-store' });
     const data = await response.json();
@@ -76,28 +78,34 @@ async function load() {
 
 async function start() {
   const current = ++sequence;
-  render(pageState({ loading: true })); stationSelect.disabled = true;
+  render(pageState({ loading: true })); stationSelect.disabled = true; districtSelect.disabled = true;
   try {
-    const response = await fetch('/api/route-map/stations', { cache: 'no-store' });
+    const response = await fetch('/api/districts', { cache: 'no-store' });
     const data = await response.json();
     if (current !== sequence) return;
     if (response.status !== 200) { render(pageState({ status: response.status, data })); return; }
-    stationSelect.replaceChildren();
-    for (const station of data.stations) {
-      const option = document.createElement('option'); option.value = station; option.textContent = station; stationSelect.append(option);
-    }
-    if (!data.stations.length) { render({ state: 'empty', message: '暂无数据：没有站点快照。' }); return; }
-    const desired = new URLSearchParams(globalThis.location?.search || '').get('station');
-    stationSelect.value = chooseStation({ urlStation: desired, savedStation: readSavedStation(), stations: data.stations });
-    stationsLoaded = true; stationSelect.disabled = false;
+    districts = data.districts;
+    const params = new URLSearchParams(globalThis.location?.search || '');
+    selected = chooseSelection({ districts, urlDistrict: params.get('district'), urlStation: params.get('station'), saved: readSelection(undefined, districts) });
+    populateDistricts(document, districtSelect, districts); districtSelect.value = selected.district;
+    populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
+    stationsLoaded = true;
     await load();
   } catch { if (current === sequence) render(pageState({ failed: true })); }
 }
 stationSelect.addEventListener('change', () => {
-  saveStation(undefined, stationSelect.value);
+  selected.station = stationSelect.value;
+  saveSelection(undefined, selected);
   const dialog = document.getElementById('route-detail');
   if (dialog?.open) dialog.close();
   return load();
 });
-retry.addEventListener('click', () => stationsLoaded ? load() : start());
+districtSelect.addEventListener('change', () => {
+  selected = chooseSelection({ districts, urlDistrict: districtSelect.value, saved: selected });
+  populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
+  saveSelection(undefined, selected);
+  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
+  return load();
+});
+retry.addEventListener('click', () => stationsLoaded && selected.station ? load() : start());
 void start();

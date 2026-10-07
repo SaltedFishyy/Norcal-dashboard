@@ -174,9 +174,11 @@ test('T7 page states cover loading, success, no data and sanitized errors', () =
 test('T7 frontend structure and safe rendering use no external resources', async () => {
   const sources = await Promise.all(assets.map(([, filename]) => fs.readFile(path.join(webDir, filename), 'utf8')));
   const [html, css, app] = sources;
-  assert.match(html, /北加州线路画像/);
+  assert.ok(html.includes('<title>美西线路画像</title>'));
+  assert.ok(html.includes('<h1>美西线路画像</h1>'));
+  assert.match(html, /West Region Route Profile/);
   assert.match(html, /lang="zh-CN"/);
-  for (const label of ['站点', 'profile-station', '更新时间', '线路总数', 'DMS 快照，非实时数据',
+  for (const label of ['站点', 'profile-station', 'profile-district', '更新时间', '线路总数', 'DMS 快照，非实时数据',
     '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '人工难度', '重试', '线路地图', '关闭']) {
     assert.ok(html.includes(label), label);
   }
@@ -206,7 +208,7 @@ test('T7 app renders API order and text safely, and handles retries and failures
     removeAttribute(name) { delete this.attributes[name]; if (name === 'title') delete this.title; }
     addEventListener(name, handler) { this.listeners[name] = handler; }
   }
-  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station']
+  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district']
     .map((id) => [id, new Element()]));
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const previousFetch = globalThis.fetch;
@@ -225,8 +227,8 @@ test('T7 app renders API order and text safely, and handles retries and failures
   const pending = new Promise((resolve) => { release = resolve; });
   let requests = 0;
   globalThis.fetch = async (url, options) => {
-    if (url !== '/api/route-map/stations') requests++;
-    if (url === '/api/route-map/stations') return { status: 200, json: async () => ({ stations: ['MOCKA', 'MOCKB'] }) };
+    if (url !== '/api/districts') requests++;
+    if (url === '/api/districts') return { status: 200, json: async () => (districtReply(['MOCKA', 'MOCKB'])) };
     assert.equal(url, `/api/route-profiles?station=${elements['profile-station'].value}`);
     requestedStations.push(elements['profile-station'].value);
     assert.equal(options.cache, 'no-store');
@@ -338,11 +340,11 @@ test('MS-T2 Profile URL priority, first Station fallback and Station-list retry 
     ['?station=ABSENT', ['MOCKA', 'MOCKB'], false, 'MOCKA'],
     ['', [], false, null], ['', [], true, null],
   ]) {
-    const elements = Object.fromEntries(['updated','total','rows','table-container','message','retry','profiles','profile-station'].map(id => [id,new Element()]));
+    const elements = Object.fromEntries(['updated','total','rows','table-container','message','retry','profiles','profile-station', 'profile-district'].map(id => [id,new Element()]));
     globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
     globalThis.location = { search }; const urls = [];
     globalThis.fetch = async url => { urls.push(url); if (failure) throw new Error('private');
-      return { status: 200, json: async () => url.includes('/stations') ? { stations } : { total: 0, rows: [] } }; };
+      return { status: 200, json: async () => url.includes('/districts') ? districtReply(stations) : { total: 0, rows: [] } }; };
     await import(`../../web/app.js?multi-station=${run++}`); await new Promise(resolve => setImmediate(resolve));
     if (expected) { assert.equal(elements['profile-station'].value, expected); assert.equal(urls[1], `/api/route-profiles?station=${expected}`); }
     else { assert.equal(urls.length, 1); assert.equal(elements['profile-station'].disabled, true); assert.equal(elements.retry.hidden, false);
@@ -366,18 +368,18 @@ test('MS-T2b Profile restores shared preference and saves only manual Station ch
     setAttribute() {} removeAttribute() {}
     addEventListener(name, fn) { this.listeners[name] = fn; }
   }
-  let preference = 'SMF01'; const writes = [], requests = [];
+  let preference = JSON.stringify({ district: 'mock', station: 'SMF01' }); const writes = [], requests = [];
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: () => preference, setItem: (key, value) => { preference = value; writes.push([key, value]); },
+    getItem: key => key === 'nc-ops-console.selection' ? preference : null, setItem: (key, value) => { preference = value; writes.push([key, value]); },
   } });
   globalThis.fetch = async url => {
     requests.push(url);
-    return { status: 200, json: async () => url.endsWith('/stations')
-      ? { stations: ['SMF01', 'SFO01', 'RNO01'] } : { total: 0, rows: [] } };
+    return { status: 200, json: async () => url.endsWith('/districts')
+      ? districtReply(['SMF01', 'SFO01', 'RNO01']) : { total: 0, rows: [] } };
   };
   let run = 0;
   for (const [search, expected] of [['', 'SMF01'], ['', 'RNO01'], ['?station=SFO01', 'SFO01']]) {
-    const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station'].map(id => [id, new Element()]));
+    const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
     globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
     globalThis.location = { search };
     await import(`../../web/app.js?station-preference=${run++}`);
@@ -388,6 +390,29 @@ test('MS-T2b Profile restores shared preference and saves only manual Station ch
       assert.deepEqual(writes, []);
       elements['profile-station'].value = 'RNO01'; await elements['profile-station'].listeners.change();
     }
-    assert.deepEqual(writes, [['nc-ops-console.station', 'RNO01']]);
+    assert.deepEqual(writes, [['nc-ops-console.selection', JSON.stringify({ district: 'mock', station: 'RNO01' })]]);
   }
+});
+
+function districtReply(stations) { return { districts: [{ id: 'mock', name_zh: '测试片区', name_en: 'Mock District', stations: stations.map(code => ({ code, has_snapshot: true })) }] }; }
+
+test('DS Profile district changes filter stations, disable missing snapshots and save shared selection', async t => {
+  const originals = { document: globalThis.document, location: globalThis.location, fetch: globalThis.fetch };
+  const savedStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { for (const [key, value] of Object.entries(originals)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } if (savedStorage) Object.defineProperty(globalThis, 'localStorage', savedStorage); else delete globalThis.localStorage; });
+  class Element { constructor() { this.children = []; this.listeners = {}; } append(...children) { this.children.push(...children); } replaceChildren() { this.children = []; } setAttribute() {} removeAttribute() {} addEventListener(name, handler) { this.listeners[name] = handler; } }
+  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
+  globalThis.document = { getElementById: id => elements[id], createElement: () => new Element() };
+  globalThis.location = { search: '' };
+  const values = new Map([['nc-ops-console.selection', JSON.stringify({ district: 'one', station: 'SFO01' })], ['nc-ops-console.map-scope', 'district']]), writes = [], requests = [];
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key), setItem: (key, value) => { values.set(key, value); writes.push(key); } } });
+  const districts = [{ id: 'one', name_zh: '测试一', name_en: 'One', stations: [{ code: 'SFO01', has_snapshot: true }, { code: 'OAR01', has_snapshot: false }] }, { id: 'two', name_zh: '测试二', name_en: 'Two', stations: [{ code: 'LAX01', has_snapshot: true }] }];
+  globalThis.fetch = async url => { requests.push(url); return { status: 200, json: async () => url === '/api/districts' ? { districts } : { total: 0, rows: [] } }; };
+  await import('../../web/app.js?district-change'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(elements['profile-district'].children.length, 2); assert.equal(elements['profile-station'].value, 'SFO01');
+  assert.equal(elements['profile-station'].children[1].disabled, true); assert.equal(writes.length, 0);
+  elements['profile-district'].value = 'two'; await elements['profile-district'].listeners.change();
+  assert.equal(elements['profile-station'].value, 'LAX01'); assert.deepEqual(elements['profile-station'].children.map(node => node.value), ['LAX01']);
+  assert.equal(requests.at(-1), '/api/route-profiles?station=LAX01'); assert.deepEqual(writes, ['nc-ops-console.selection']);
+  assert.deepEqual(JSON.parse(values.get('nc-ops-console.selection')), { district: 'two', station: 'LAX01' });
 });

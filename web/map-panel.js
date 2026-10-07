@@ -12,19 +12,23 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     return node;
   };
   const entry = (label, value) => { const node = text('div', ''); node.append(text('dt', label), text('dd', formatValue(value))); return node; };
-  let data, selection = clearSelection(), colorMode = 'route';
+  let data, selection = clearSelection(), colorMode = 'route', focusStation = null;
   const search = element('search');
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
-    const { matches } = searchRoutes(data?.routes || [], classified.kind === 'zip' ? '' : query);
+    const { matches } = searchRoutes((data?.routes || []).filter(route => (query && classified.kind !== 'zip') || !focusStation || route.station === focusStation), classified.kind === 'zip' ? '' : query);
     element('routes').replaceChildren();
     element('no-match').hidden = matches.length !== 0;
     element('search-hint').hidden = !classified.zipHint;
-    for (const route of matches) {
+    const groups = !focusStation && data?.stations;
+    const ordered = groups ? data.stations.flatMap(station => matches.filter(route => route.station === station.code)) : matches;
+    let previous;
+    for (const route of ordered) {
+      if (groups && previous !== route.station) { element('routes').append(text('h3', route.station)); previous = route.station; }
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
       const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : routeColor(route.route_id);
-      button.append(swatch, text('span', route.route_name));
+      button.append(swatch, text('span', query ? route.station + ' · ' + route.route_name : route.route_name));
       if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
       button.append(text('span', `${route.zip_count} ZIP`));
       button.addEventListener('click', () => onRoute(route.route_id)); element('routes').append(button);
@@ -40,7 +44,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     selection = next; renderRoutes();
     element('clear').disabled = !next.route && !next.zip;
     const current = text('dl', '');
-    current.append(entry(t.station, next.station), entry(t.route, next.route?.route_name));
+    current.append(entry(t.station, next.route?.station || next.station), entry(t.route, next.route?.route_name));
     const zipEntry = entry(t.zip, next.zip?.postal_code);
     if (next.zip) zipEntry.children[1].append(text('span', t.statuses[next.zip.status], 'map-badge'));
     current.append(zipEntry); element('current').replaceChildren(current);
@@ -54,14 +58,14 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       const count = entry(t.zipCount, formatNumber(route.zip_count, 0));
       count.append(text('small', t.mapped(formatValue(route.mapped_count))));
       metrics.append(count, entry('Pickup Volume', formatNumber(route.pickup_volume, 0)), entry('PPH', formatNumber(route.pph, 2, 2)));
-      element('summary').append(name, owner, metrics, text('p', `${t.updated} ${formatUpdated(next.zip?.fetched_at || data?.fetched_at)}`));
+      element('summary').append(name, owner, metrics, text('p', `${t.updated} ${formatUpdated(next.zip?.fetched_at || (data?.stations?.find(station => station.code === route.station)?.fetched_at || data?.fetched_at))}`));
       if (route.mapped_count === 0) element('summary').append(text('p', t.noMapped));
       const difficulty = text('dl', ''); difficulty.append(entry(t.routeDifficulty, routeDifficultyText(route.route_difficulty)));
       element('summary').append(difficulty);
       if (colorMode === 'difficulty') {
         element('summary').append(text('p', route.zip_detail?.status === 'available'
           ? t.detailAvailable(route.zip_detail.zip_count, route.zip_detail.fetched_at) : t.missingDetail));
-        if (route.zip_detail?.status !== 'available') element('summary').append(text('p', t.detailCommand(next.station), 'snapshot'));
+        if (route.zip_detail?.status !== 'available') element('summary').append(text('p', t.detailCommand(route.station), 'snapshot'));
       }
       element('snapshot-source').textContent = t.source;
     } else element('snapshot-source').textContent = '';
@@ -96,28 +100,32 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('missing-empty').hidden = true; element('regenerate').hidden = true;
     element('source').textContent = ''; element('updated').textContent = '—'; element('updated').removeAttribute('title');
   }
-  function render(next) {
-    data = next; search.disabled = false;
+  function render(next, { focusStation: focus = null } = {}) {
+    data = next; focusStation = focus;
+    const scoped = focus ? next.routes.filter(route => route.station === focus) : next.routes;
+    const missing = focus ? next.missing.filter(row => row.station === focus) : next.missing;
+    const coverage = focus ? { total: scoped.reduce((sum, row) => sum + row.zip_count, 0), mapped: scoped.reduce((sum, row) => sum + row.mapped_count, 0), missing: missing.length, missing_no_zcta: missing.filter(row => row.reason === 'no_zcta').length, missing_not_checked: missing.filter(row => row.reason === 'not_checked').length } : next.coverage; search.disabled = false;
     const conflicts = data.cross_station_conflicts || [];
     element('conflicts-details').hidden = conflicts.length === 0; element('conflicts-details').open = false;
     element('conflicts-title').textContent = t.crossStation; element('conflicts').replaceChildren();
     for (const conflict of conflicts) element('conflicts').append(text('li', `${conflict.postal_code} · ${conflict.stations.join(' / ')}`));
-    const { total, mapped, missing_no_zcta, missing_not_checked } = data.coverage;
+    const { total, mapped, missing_no_zcta, missing_not_checked } = coverage;
     element('coverage').textContent = total > 0 ? `${(mapped / total * 100).toFixed(2)}%` : '—';
     element('coverage-count').textContent = t.coverageCount(mapped, total);
     element('regenerate').hidden = false;
     element('regenerate').textContent = t.missingCount(missing_no_zcta, missing_not_checked);
     element('regenerate').className = missing_not_checked > 0 ? 'map-warning' : '';
     element('source').textContent = t.boundaries(data.boundary_source.dataset, data.boundary_source.vintage);
-    element('updated').textContent = formatUpdated(data.fetched_at);
-    if (element('updated').textContent !== '—') element('updated').title = data.fetched_at;
-    element('missing-title').textContent = t.missingTitle(data.coverage.missing);
+    const times = data.stations?.filter(station => !focus || station.code === focus) || [];
+    element('updated').textContent = times.length ? times.map(station => station.code + ' ' + formatUpdated(station.fetched_at)).join(' · ') : formatUpdated(data.fetched_at);
+    element('updated').removeAttribute('title');
+    element('missing-title').textContent = t.missingTitle(coverage.missing);
     element('missing-details').open = false; element('missing').replaceChildren();
-    for (const row of data.missing) {
-      const tr = text('tr', ''); tr.append(text('td', row.postal_code), text('td', row.route_name),
+    for (const row of missing) {
+      const tr = text('tr', ''); tr.append(text('td', row.postal_code), text('td', row.station), text('td', row.route_name),
         text('td', row.reason === 'no_zcta' ? t.noZcta : t.notChecked)); element('missing').append(tr);
     }
-    element('missing-empty').hidden = data.missing.length !== 0; renderRoutes();
+    element('missing-empty').hidden = missing.length !== 0; renderRoutes();
   }
   function setColorMode(mode) { colorMode = mode; applySelection(selection); }
   return { render, clear, applySelection, searchStatus, setColorMode };

@@ -241,3 +241,12 @@ RD4 起 Route Detail 页面只展示 ZIP、领件量（日均）、熟手 PPH、
 CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数字，TBL3 中需把该字段设为字符串（北加 ZIP 没有前导 0，但规则上必须是字符串）。
 
 边界文件：Census 2020 ZCTA cb 1:500k（`cb_2020_us_zcta520_500k`），join key `ZCTA5CE20`。**ZCTA ≠ USPS 投递 ZIP 边界**；PO Box / 单一机构 / 2020 年后新设的 ZIP 可能没有 polygon（实测 SFO01-001 中 21 个 ZIP 有 6 个没有）。
+
+## 11. District 业务配置（DS）
+
+- 来源类型：人工维护的业务配置，文件为 `config/districts.json`，版本 `schema_version: 1`。配置可进 Git，不包含 DMS 运行数据或凭据。
+- 粒度：一个 District 包含一个有序 Station 代码列表；`id` 唯一，`name_zh` / `name_en` 为显示名称，`stations` 的顺序为展示顺序。配置不决定 active Route，后者仍来自 Station snapshot。
+- `/api/districts` 将配置与本地 snapshot 合并，Station 的 `has_snapshot` 仅表示该 Station 存在有效结构的 snapshot（成功空列表也算存在）。未配置但有 snapshot 的 Station 自动归入末尾 `unassigned`，按字母排序。
+- `/api/route-map/district` 复用单站地图组装，逐站合并 Route、边界及缺少边界的 ZIP；coverage 汇总 Station–Route–ZIP 行数，跨站重叠按各站分别计数，不擅自判定唯一归属。missing 行增加 `station`，现有单站 API 字段不变。
+- 快照非实时：响应中的 `stations[].fetched_at` 来自各 Station snapshot，地图按当前范围逐站显示更新时间，不生成虚假的统一数据时刻。详情难度仍使用既有 snapshot / detail join。
+- 配置展示顺序独立于批处理抓取顺序；不改变 cache schema、清洗规则或 Tableau 导出结构。

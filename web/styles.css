@@ -5,6 +5,7 @@ main { width: 100%; max-width: 1500px; margin: auto; padding: 32px 24px; }
 h1 { margin: 0; font-size: clamp(24px, 4vw, 32px); line-height: 1.25; }
 .eyebrow { color: #2dd9c6; font-size: 11px; letter-spacing: .15em; }
 .snapshot, dt, .status { color: #a0adc5; font-size: 13px; }
+.profile-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
 .metrics { display: flex; flex-wrap: wrap; gap: 24px 48px; margin: 24px 0; }
 dt { margin-bottom: 6px; }
 dd { margin: 0; font-size: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -72,7 +73,8 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .map-missing { min-width: 0; table-layout: fixed; }
 .map-missing th, .map-missing td { white-space: normal; overflow-wrap: anywhere; padding: 6px 4px; }
 .map-missing th:first-child { width: 22%; }
-.map-missing th:nth-child(2) { width: 32%; }
+.map-missing th:nth-child(2) { width: 20%; }
+.map-missing th:nth-child(3) { width: 26%; }
 .map-page .leaflet-tooltip { background: #101828; color: #e9eef9; border-color: #8592ad; }
 .map-page .leaflet-tooltip { width: max-content; white-space: nowrap; }
 .map-page .leaflet-tooltip dl > div { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }

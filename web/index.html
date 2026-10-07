@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>北加州线路画像</title>
+  <title>美西线路画像</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -11,10 +11,11 @@
   <main>
     <header>
       <p class="eyebrow">NC OPS CONSOLE</p>
-      <h1>北加州线路画像</h1>
+      <div class="profile-heading"><h1>美西线路画像</h1><small class="snapshot">West Region Route Profile</small></div>
       <a href="/map">线路地图</a>
       <p class="snapshot">DMS 快照，非实时数据</p>
       <dl class="metrics">
+        <div><dt><label for="profile-district">片区</label></dt><dd><select id="profile-district" disabled></select></dd></div>
         <div><dt><label for="profile-station">站点</label></dt><dd><select id="profile-station" disabled></select></dd></div>
         <div><dt>更新时间</dt><dd id="updated">—</dd></div>
         <div><dt>线路总数</dt><dd id="total">—</dd></div>

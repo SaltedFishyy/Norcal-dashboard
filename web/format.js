@@ -49,7 +49,7 @@ export function formatUpdated(value) {
 }
 
 // Only stable API codes are shown; unexpected response text may contain private paths.
-const errorCodes = new Set(['invalid_station', 'snapshot_invalid', 'internal_error', 'not_found', 'method_not_allowed']);
+const errorCodes = new Set(['district_config_invalid', 'district_not_found', 'invalid_district', 'invalid_station', 'snapshot_invalid', 'internal_error', 'not_found', 'method_not_allowed']);
 export function pageState({ loading = false, status, data, failed = false } = {}) {
   if (loading) return { state: 'loading', message: profileText.loading };
   if (failed) return { state: 'error', message: profileText.networkError };

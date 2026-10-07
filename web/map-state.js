@@ -34,20 +34,21 @@ export function selectionOutlineStyles({ zip = false, uncovered = false } = {}) 
   ];
 }
 
-export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route') {
+export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null) {
   const active = selection.route !== null;
   const selected = active && selection.route.route_id === properties.route_id;
+  const faded = active ? !selected : focusStation !== null && properties.station !== focusStation;
   const zip = selected && selection.zip?.postal_code === properties.postal_code;
   const level = selected ? properties.zip_detail_status === 'available' ? difficultyLevel(properties.zip_difficulty) : null
     : difficultyLevel(properties.route_difficulty);
-  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : routeColor(properties.route_id), fillOpacity: active && !selected ? 0.12 : selected ? 0.65 : 0.5,
+  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : routeColor(properties.route_id), fillOpacity: faded ? 0.12 : selected ? 0.65 : 0.5,
     color: '#334155', weight: zip ? 5 : selected ? 3 : 1,
-    opacity: active && !selected ? 0.35 : 1 };
+    opacity: faded ? 0.35 : 1 };
 }
 
 export function searchRoutes(routes, query) {
   const term = query.trim().toLowerCase();
-  const matches = routes.filter(route => route.route_name.toLowerCase().includes(term))
+  const matches = routes.filter(route => (route.station + ' · ' + route.route_name).toLowerCase().includes(term))
     .sort((a, b) => a.route_name.localeCompare(b.route_name));
   return { exact: term ? matches.find(route => route.route_name.toLowerCase() === term) : undefined, matches };
 }

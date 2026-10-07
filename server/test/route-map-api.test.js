@@ -41,7 +41,8 @@ async function json(url, pathname, status, expected, options) {
 
 test('MS-T2b Station API follows configured order, then alphabetical extras, only available snapshots', async t => {
   const { url, profileFile } = await fixture(t);
-  const { defaultStationOrder } = await import('../src/config.js');
+  const { districts } = JSON.parse(await fs.readFile(new URL('../../config/districts.json', import.meta.url)));
+  const defaultStationOrder = districts[0].stations;
   const snapshot = profiles().stations.MOCKA;
   const codes = [...defaultStationOrder].reverse();
   await fs.writeFile(profileFile, JSON.stringify({ schema_version: 1,
@@ -247,4 +248,41 @@ test('MS-T2 API permits cross-Station ownership while preserving existing fields
   for (const key of Object.keys(original).filter(key => key !== 'cross_station_conflicts')) assert.deepEqual(actual[key], original[key]);
   assert.deepEqual(actual.cross_station_conflicts, [{ postal_code: '00002', stations: ['MOCKA', 'MOCKB'] }]);
   await json(url, '/api/route-map/zip?postal_code=00002', 200, lookupZip({ profiles: data, boundaries: boundaries(), postalCode: '00002' }));
+});
+
+test('DS district APIs use injected config, ordered snapshots, scope and sanitized errors', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'nc-district-api-')); t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const districtsPath = path.join(dir, 'districts.json');
+  const config = { schema_version: 1, districts: [{ id: 'north', name_zh: '测试片区', name_en: 'Mock District', stations: ['SMF01', 'SFO01', 'OAR01'] }, { id: 'empty', name_zh: '空片区', name_en: 'Empty District', stations: [] }] };
+  await fs.writeFile(districtsPath, JSON.stringify(config));
+  const { url, profileFile } = await fixture(t, { districtsPath });
+  const source = profiles();
+  source.stations = Object.fromEntries([['SFO01', source.stations.MOCKA], ['SMF01', source.stations.MOCKB]]);
+  for (const [station, snapshot] of Object.entries(source.stations)) snapshot.rows.forEach(row => row.station = station);
+  await fs.writeFile(profileFile, JSON.stringify(source));
+  const data = await (await fetch(url + '/api/districts')).json();
+  assert.deepEqual(data.districts[0].stations, [{ code: 'SMF01', has_snapshot: true }, { code: 'SFO01', has_snapshot: true }, { code: 'OAR01', has_snapshot: false }]);
+  await json(url, '/api/route-map/stations', 200, { stations: ['SMF01', 'SFO01'] });
+  const { buildDistrictMap } = await import('../src/route-map/route-map.js');
+  await json(url, '/api/route-map/district?district=north', 200, buildDistrictMap({ profiles: source, boundaries: boundaries(), districts: data.districts, district: 'north', details: { status: 'none' } }));
+  const empty = await (await fetch(url + '/api/route-map/district?district=empty')).json(); assert.equal(empty.coverage.total, 0);
+  await json(url, '/api/route-map/district?district=absent', 404, { error: 'district_not_found' });
+  for (const query of ['', '?district=UPPER', '?district=north&district=empty']) await json(url, '/api/route-map/district' + query, 400, { error: 'invalid_district' });
+  await json(url, '/api/districts', 405, { error: 'method_not_allowed' }, { method: 'POST' });
+  await fs.writeFile(districtsPath, '{');
+  await json(url, '/api/districts', 500, { error: 'district_config_invalid' });
+  await json(url, '/api/route-map/district?district=north', 500, { error: 'district_config_invalid' });
+  await json(url, '/api/route-map/stations', 500, { error: 'district_config_invalid' });
+  // Existing station endpoint keeps its exact fields even with invalid district configuration.
+  await json(url, '/api/route-map?station=SFO01', 200, buildRouteMap({ profiles: source, station: 'SFO01', boundaries: boundaries() }));
+});
+
+test('DS APIs return configured unavailable stations and empty district without a snapshot file', async t => {
+  const { url, profileFile } = await fixture(t); await fs.unlink(profileFile);
+  const response = await fetch(url + '/api/districts'); assert.equal(response.status, 200);
+  const data = await response.json(); assert.equal(data.districts[0].stations.length, 9);
+  assert.ok(data.districts[0].stations.every(station => !station.has_snapshot));
+  const mapResponse = await fetch(url + '/api/route-map/district?district=north-cal'); assert.equal(mapResponse.status, 200);
+  const map = await mapResponse.json(); assert.deepEqual(map.routes, []); assert.equal(map.coverage.total, 0);
+  await json(url, '/api/route-profiles?station=SFO01', 404, { error: 'snapshot_not_found' });
 });

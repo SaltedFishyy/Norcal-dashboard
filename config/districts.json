@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "districts": [
+    {
+      "id": "north-cal",
+      "name_zh": "北加州片区",
+      "name_en": "North Cal District",
+      "stations": ["SFO01", "OAR01", "SMF01", "SCK01", "RNO01", "RDG01", "RDG02", "MOD01", "MFR01"]
+    }
+  ]
+}

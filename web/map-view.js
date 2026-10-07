@@ -37,12 +37,15 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   outlinePane.style.zIndex = '450';
   outlinePane.style.pointerEvents = 'none';
   const outlines = [];
-  let polygons, highlight, selection = clearSelection(), colorMode = 'route';
+  let polygons, highlight, selection = clearSelection(), colorMode = 'route', focusStation = null;
   let routeDetails = new Map();
   const highlightLayers = [];
   const layers = [];
   const fit = bounds => { if (bounds.isValid()) map.fitBounds(bounds, { padding: [16, 16] }); };
-  const fitStation = () => { if (polygons) fit(polygons.getBounds()); };
+  const fitStation = () => {
+    const targets = focusStation ? layers.filter(layer => layer.feature.properties.station === focusStation) : layers;
+    if (targets.length) fit(L.featureGroup(targets).getBounds());
+  };
   const fitRoute = routeId => {
     const routeLayers = layers.filter(layer => layer.feature.properties.route_id === routeId);
     if (routeLayers.length) fit(L.featureGroup(routeLayers).getBounds());
@@ -53,10 +56,11 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       if (layer) fit(layer.getBounds());
     } else if (target) fit(L.geoJSON({ type: 'Feature', properties: {}, geometry: target }).getBounds());
   };
+  let fitButton;
   const control = L.control({ position: 'topleft' });
   control.onAdd = () => {
     const container = doc.createElement('div'), button = doc.createElement('button');
-    container.className = 'leaflet-bar map-fit'; button.type = 'button'; button.textContent = t.fit;
+    fitButton = button; container.className = 'leaflet-bar map-fit'; button.type = 'button'; button.textContent = t.fit;
     button.addEventListener('click', fitStation); container.append(button);
     L.DomEvent.disableClickPropagation(container); return container;
   };
@@ -92,11 +96,11 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   const tooltip = properties => zipDetails(doc, properties, selection, colorMode, routeDetails.get(properties.route_id));
   function refreshStyles() {
     layers.forEach(layer => {
-      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode));
+      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation));
       layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     highlightLayers.forEach(layer => {
-      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode));
+      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation));
       if (selection.route) layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     updateLegend();
@@ -147,7 +151,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (geometry) {
       const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id ?? feature?.properties.route_id };
       highlight = L.geoJSON({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties }] }, {
-        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode),
+        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation),
         onEachFeature(_, layer) {
           highlightLayers.push(layer);
           layer.options.bubblingMouseEvents = false;
@@ -188,21 +192,22 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (polygons) map.removeLayer(polygons);
     polygons = null; layers.length = 0; selection = clearSelection(); routeDetails = new Map(); updateLegend();
   }
-  function render(data, { fitToStation = true } = {}) {
+  function render(data, { fitToStation = true, focusStation: focus = null } = {}) {
     clear();
+    focusStation = focus; fitButton.textContent = focus ? t.fit : '定位片区';
     routeDetails = new Map(data.routes.map(route => [route.route_id, route.zip_detail]));
     polygons = L.geoJSON(data.features, {
-      style: feature => polygonStyle(feature.properties, selection, colorMode),
+      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation),
       onEachFeature(feature, layer) {
         layers.push(layer);
         layer.bindTooltip(tooltip(feature.properties), { direction: 'auto', sticky: true });
         layer.options.bubblingMouseEvents = false;
         layer.on({
           mouseover: () => {
-            const style = polygonStyle(feature.properties, selection, colorMode);
+            const style = polygonStyle(feature.properties, selection, colorMode, focusStation);
             layer.setStyle({ weight: style.weight + 2, color: '#ffffff', opacity: 1 });
           },
-          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode)),
+          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode, focusStation)),
           click: event => {
             if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
             onZip(feature.properties);

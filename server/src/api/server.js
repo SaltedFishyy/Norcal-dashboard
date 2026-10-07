@@ -1,8 +1,8 @@
 import http from 'node:http';
-import { defaultStationOrder } from '../config.js';
-import { getStationSnapshot, readRouteProfiles, StationNotFoundError } from '../store/route-profiles-file.js';
+import { getStationSnapshot, readRouteProfiles, StationNotFoundError, SnapshotNotFoundError } from '../store/route-profiles-file.js';
+import { readDistricts, DistrictNotFoundError } from '../store/districts-file.js';
 import { readBoundaries } from '../store/boundaries-file.js';
-import { buildRouteMap, lookupZip } from '../route-map/route-map.js';
+import { buildRouteMap, buildDistrictMap, lookupZip } from '../route-map/route-map.js';
 import { getRouteDetail, readRouteDetailsForMap } from '../store/route-details-file.js';
 import { createRequestHandler } from './app.js';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,11 @@ const defaultProtomapsDir = fileURLToPath(new URL('../../../node_modules/protoma
 
 export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = defaultGeoDir,
   leafletDir = defaultLeafletDir, protomapsDir = defaultProtomapsDir,
-  basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, log } = {}) {
+  basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, districtsPath, log } = {}) {
+  const districtProfiles = async () => {
+    try { return await readRouteProfiles({ runtimeDir }); }
+    catch (error) { if (error instanceof SnapshotNotFoundError) return { stations: {} }; throw error; }
+  };
   return http.createServer(createRequestHandler({
     getSnapshot: (station) => getStationSnapshot({ runtimeDir, station }), log,
     getRouteDetail: (routeId) => getRouteDetail({ runtimeDir, routeId }),
@@ -28,9 +32,16 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
       return buildRouteMap({ profiles, station, boundaries, details: await readRouteDetailsForMap({ runtimeDir }) });
     },
     getMapStations: async () => {
-      const stations = Object.keys((await readRouteProfiles({ runtimeDir })).stations);
-      return [...defaultStationOrder.filter(code => stations.includes(code)),
-        ...stations.filter(code => !defaultStationOrder.includes(code)).sort()];
+      const districts = await readDistricts({ districtsPath, profiles: await readRouteProfiles({ runtimeDir }) });
+      return districts.flatMap(district => district.stations.filter(station => station.has_snapshot).map(station => station.code));
+    },
+    getDistricts: async () => readDistricts({ districtsPath, profiles: await districtProfiles() }),
+    getDistrictMap: async district => {
+      const profiles = await districtProfiles();
+      const districts = await readDistricts({ districtsPath, profiles });
+      if (!districts.some(item => item.id === district)) throw new DistrictNotFoundError();
+      return buildDistrictMap({ profiles, districts, district, boundaries: await readBoundaries({ geoDir }),
+        details: await readRouteDetailsForMap({ runtimeDir }) });
     },
     getZip: async postalCode => lookupZip({ profiles: await readRouteProfiles({ runtimeDir }),
       boundaries: await readBoundaries({ geoDir }), postalCode, details: await readRouteDetailsForMap({ runtimeDir }) }),

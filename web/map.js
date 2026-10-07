@@ -2,25 +2,28 @@ import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
 import { clearSelection, selectRoute, selectZip, classifyQuery, searchRoutes } from './map-state.js';
 import { mapText as t, localizeMap } from './map-text.js';
-import { chooseStation, readSavedStation, saveStation } from './station-preference.js';
+import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
 
-const knownErrors = new Set(['invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
+const knownErrors = new Set(['district_config_invalid', 'district_not_found', 'invalid_district', 'invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
 
 export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.protomapsL,
   document: doc = document, fetch: request = fetch, search = location.search, storage } = {}) {
   const element = id => doc.getElementById(`map-${id}`);
   localizeMap(doc);
-  const stationSelect = element('station'), message = element('message'), retry = element('retry');
+  const districtSelect = element('district'), stationSelect = element('station'), message = element('message'), retry = element('retry');
   let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData, colorMode = 'route';
+  let districts = [], selected = {}, scope = readMapScope(storage);
+  const focus = () => scope === 'station' ? stationSelect.value || null : null;
+  const currentDistrict = () => districts.find(item => item.id === districtSelect.value);
   const updateSelection = next => { selection = next; view.applySelection(selection); panel.applySelection(selection); };
-  const deselect = () => { zipSequence++; panel.searchStatus('success'); updateSelection(clearSelection(stationSelect.value)); };
+  const deselect = () => { zipSequence++; panel.searchStatus('success'); updateSelection(clearSelection(focus())); };
   const view = createMapView({ leaflet, protomaps, document: doc, fetch: request,
     onColorMode: mode => { colorMode = mode; view.setColorMode(colorMode); panel.setColorMode(colorMode); },
     onZip: properties => {
       zipSequence++; panel.searchStatus('success');
       const route = stationData?.routes.find(row => row.route_id === properties.route_id);
-      updateSelection(selectZip({ ...properties, route, fetched_at: stationData?.fetched_at }, stationSelect.value));
+      updateSelection(selectZip({ ...properties, route, fetched_at: stationData?.stations?.find(station => station.code === properties.station)?.fetched_at }, properties.station));
     }, onClear: deselect,
     onBasemapError: () => {
       element('basemap-message').hidden = false;
@@ -28,11 +31,11 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     } });
   const chooseRoute = routeId => {
     zipSequence++; panel.searchStatus('success');
-    updateSelection(selectRoute(stationData.routes.find(row => row.route_id === routeId), stationSelect.value));
+    updateSelection(selectRoute(stationData.routes.find(row => row.route_id === routeId)));
     view.fitRoute(routeId);
   };
   const panel = createMapPanel({ document: doc, onClear: deselect, onRoute: chooseRoute, onSearch: searchQuery });
-  function clear() { zipSequence++; stationData = null; selection = clearSelection(stationSelect.value); view.clear(); panel.clear(); }
+  function clear() { zipSequence++; stationData = null; selection = clearSelection(focus()); view.clear(); panel.clear(); }
   function status(state, value) {
     message.textContent = value;
     message.className = state === 'error' ? 'map-error' : '';
@@ -65,13 +68,11 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       if (response.status !== 200) {
         panel.searchStatus('error', t.zipError(knownErrors.has(data?.error) ? data.error : 'internal_error')); return;
       }
-      // A ZIP can belong to another Station. Load that Station before applying its result.
-      if (data.status !== 'multi_station' && data.station && data.station !== stationSelect.value) {
-        stationSelect.value = data.station;
-        const loaded = await loadStation({ preserveSearch: true });
-        if (!loaded || current !== zipSequence) return;
+      if (data.status !== 'multi_station' && data.station && !currentDistrict()?.stations.some(station => station.code === data.station)) {
+        const owner = districts.find(district => district.stations.some(station => station.code === data.station));
+        panel.searchStatus('success', '该 ZIP 属于 ' + (owner?.name_zh || '未分配站点') + '/' + data.station); return;
       }
-      updateSelection(selectZip(data, stationSelect.value));
+      updateSelection(selectZip(data, data.station || focus()));
       if (data.geometry) view.fitZip(data.geometry);
       panel.searchStatus('success');
     } catch {
@@ -79,19 +80,20 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     }
   }
   async function loadStation({ preserveSearch = false } = {}) {
-    const current = ++sequence, station = stationSelect.value;
+    const current = ++sequence, station = focus(), district = districtSelect.value;
     const savedQuery = element('search').value, savedZipSequence = zipSequence;
     clear();
     if (preserveSearch) { zipSequence = savedZipSequence; element('search').value = savedQuery; }
-    status('loading', t.loadingStation(station));
+    status('loading', t.loadingStation(station || currentDistrict()?.name_zh));
     try {
-      const response = await request(`/api/route-map?station=${encodeURIComponent(station)}`, { cache: 'no-store' });
+      const response = await request(`/api/route-map/district?district=${encodeURIComponent(district)}`, { cache: 'no-store' });
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
-      stationData = data; panel.render(data); view.render(data, { fitToStation: !preserveSearch }); updateSelection(clearSelection(station));
-      status('success', data.coverage.total === 0 ? t.noRoutes
-        : data.coverage.mapped === 0 ? t.noBoundaries : t.loaded(data.station));
+      stationData = data; panel.render(data, { focusStation: station }); view.render(data, { fitToStation: !preserveSearch, focusStation: station }); updateSelection(clearSelection(station));
+      const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
+      status('success', routes.length === 0 ? t.noRoutes
+        : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
       if (data.details_status === 'invalid') {
         message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
       }
@@ -102,25 +104,35 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   }
   async function start() {
     const current = ++sequence;
-    clear(); status('loading', t.loadingStations); stationSelect.disabled = true;
+    clear(); status('loading', t.loadingStations); stationSelect.disabled = true; districtSelect.disabled = true;
     try {
-      const response = await request('/api/route-map/stations', { cache: 'no-store' });
+      const response = await request('/api/districts', { cache: 'no-store' });
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error); return; }
-      stationSelect.replaceChildren();
-      for (const station of data.stations) {
-        const option = doc.createElement('option'); option.textContent = station; option.value = station; stationSelect.append(option);
-      }
-      if (!data.stations.length) { status('empty', t.noStations); return; }
-      const desired = new URLSearchParams(search).get('station');
-      stationSelect.value = chooseStation({ urlStation: desired, savedStation: readSavedStation(storage), stations: data.stations });
-      stationsLoaded = true; stationSelect.disabled = false;
+      districts = data.districts;
+      const params = new URLSearchParams(search);
+      selected = chooseSelection({ districts, urlDistrict: params.get('district'), urlStation: params.get('station'), saved: readSelection(storage, districts) });
+      populateDistricts(doc, districtSelect, districts); districtSelect.value = selected.district;
+      populateStations(doc, stationSelect, currentDistrict(), true);
+      stationSelect.value = scope === 'district' ? '' : selected.station || '';
+      if (!selected.station) scope = 'district';
+      stationsLoaded = true;
       await loadStation();
     } catch { status('error', t.stationsError); }
   }
   stationSelect.addEventListener('change', () => {
-    saveStation(storage, stationSelect.value);
+    scope = stationSelect.value ? 'station' : 'district';
+    if (stationSelect.value) selected.station = stationSelect.value;
+    saveSelection(storage, selected); saveMapScope(storage, scope);
+    return loadStation();
+  });
+  districtSelect.addEventListener('change', () => {
+    selected = chooseSelection({ districts, urlDistrict: districtSelect.value, saved: selected });
+    populateStations(doc, stationSelect, currentDistrict(), true);
+    if (!selected.station) scope = 'district';
+    stationSelect.value = scope === 'district' ? '' : selected.station || '';
+    saveSelection(storage, selected); saveMapScope(storage, scope);
     return loadStation();
   });
   retry.addEventListener('click', () => stationsLoaded ? loadStation() : start());

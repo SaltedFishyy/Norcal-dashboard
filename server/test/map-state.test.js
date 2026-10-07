@@ -73,3 +73,16 @@ test('RM5 difficulty style table preserves every route-mode border, opacity and 
   for (const route_difficulty of [null, 'unknown']) assert.equal(polygonStyle({ ...properties, route_difficulty }, clearSelection(), 'difficulty').fillColor, difficultyColor(null));
   assert.equal(polygonStyle(properties, selectRoute(2), 'difficulty').fillOpacity, 0.12);
 });
+
+ test('DS focus Station changes only opacity; explicit Route selection takes precedence in both modes', () => {
+  const properties = { station: 'SFO01', route_id: 7, route_difficulty: 'A级 难', zip_difficulty: 'B级 中', zip_detail_status: 'available' };
+  for (const mode of ['route', 'difficulty']) {
+    const normal = polygonStyle(properties, clearSelection(), mode);
+    const faded = polygonStyle(properties, clearSelection(), mode, 'SMF01');
+    assert.equal(faded.fillColor, normal.fillColor); assert.equal(faded.fillOpacity, 0.12); assert.equal(faded.opacity, 0.35);
+    assert.deepEqual(polygonStyle(properties, clearSelection(), mode, 'SFO01'), normal);
+    const selected = selectRoute({ route_id: 7, station: 'SFO01' });
+    assert.deepEqual(polygonStyle(properties, selected, mode, 'SMF01'), polygonStyle(properties, selected, mode));
+    assert.equal(polygonStyle({ ...properties, station: 'SMF01', route_id: 8 }, selected, mode, 'SMF01').fillOpacity, 0.12);
+  }
+});

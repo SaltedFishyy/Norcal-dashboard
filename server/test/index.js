@@ -20,3 +20,6 @@ import './route-map-web.test.js';
 import './basemap-file.test.js';
 import './map-state.test.js';
 import './difficulty.test.js';
+
+import './districts-file.test.js';
+import './district-map.test.js';

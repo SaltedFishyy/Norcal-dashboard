@@ -17,17 +17,20 @@ const mapErrors = new Map([
   ['RouteZipConflictError', [500, 'route_zip_conflict']],
   ['BoundaryInvalidError', [500, 'boundary_invalid']],
   ['BoundaryNotFoundError', [500, 'boundary_not_found']],
+  ['DistrictConfigInvalidError', [500, 'district_config_invalid']],
+  ['DistrictNotFoundError', [404, 'district_not_found']],
 ]);
 const csp = "default-src 'self'; frame-ancestors 'none'";
 const basemapErrors = new Map([['BasemapNotFoundError', [404, 'basemap_not_found']],
   ['BasemapInvalidError', [500, 'basemap_invalid']]]);
 const errorMappings = new Map([
   ['/api/route-profiles', profileErrors], ['/api/route-details', detailErrors],
-  ['/api/route-map', mapErrors], ['/api/route-map/zip', mapErrors], ['/api/route-map/stations', profileErrors],
+  ['/api/route-map', mapErrors], ['/api/route-map/zip', mapErrors], ['/api/route-map/stations', mapErrors],
+  ['/api/districts', mapErrors], ['/api/route-map/district', mapErrors],
   ...[...basemapPaths.keys()].map(pathname => [pathname, basemapErrors]),
 ]);
 
-export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap, getZip, getMapStations, getStaticFile, getBasemap, log = () => {} }) {
+export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap, log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
   const stationEndpoint = read => async ({ url, respond }) => {
@@ -50,6 +53,14 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
     respond(200, await getZip(codes[0]));
   };
   const mapStations = async ({ respond }) => respond(200, { stations: await getMapStations() });
+  const districts = async ({ respond }) => respond(200, { districts: await getDistricts() });
+  const districtMap = async ({ url, respond }) => {
+    const ids = url.searchParams.getAll('district');
+    if (ids.length !== 1 || !/^[a-z0-9-]{1,32}$/.test(ids[0])) {
+      respond(400, { error: 'invalid_district' }); return;
+    }
+    respond(200, await getDistrictMap(ids[0]));
+  };
   const health = ({ respond }) => respond(200, { ok: true });
   const detail = async ({ url, respond }) => {
     const ids = url.searchParams.getAll('route_id');
@@ -67,6 +78,7 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
   const handlers = new Map([
     ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', detail],
     ['/api/route-map', routeMap], ['/api/route-map/zip', zipLookup], ['/api/route-map/stations', mapStations],
+    ['/api/districts', districts], ['/api/route-map/district', districtMap],
   ]);
   for (const pathname of basemapPaths.keys()) {
     handlers.set(pathname, createBasemapHandler(getBasemap, csp, record));

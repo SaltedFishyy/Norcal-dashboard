@@ -1,5 +1,6 @@
 import { StationNotFoundError, SnapshotInvalidError } from '../store/route-profiles-file.js';
 import { validatePostalCodes, findPostalCodeConflicts, findCrossStationConflicts } from '../transform/postal-codes.js';
+import { DistrictNotFoundError } from '../store/districts-file.js';
 
 export class PostalCodesMissingError extends Error {
   constructor() { super('Snapshot lacks postal_codes.'); this.name = 'PostalCodesMissingError'; }
@@ -76,6 +77,24 @@ export function buildRouteMap({ profiles, station, boundaries, details }) {
       .map(({ postal_code, routes }) => ({ postal_code, stations: [...new Set(routes.map(owner => owner.station))].sort(compare) }))
       .sort((a, b) => compare(a.postal_code, b.postal_code)),
     routes, missing, features: { type: 'FeatureCollection', features } };
+}
+
+export function buildDistrictMap({ profiles, districts, district, boundaries, details }) {
+  const configured = districts.find(item => item.id === district);
+  if (!configured) throw new DistrictNotFoundError();
+  const maps = configured.stations.filter(({ code }) => Object.hasOwn(profiles.stations, code))
+    .map(({ code }) => buildRouteMap({ profiles, station: code, boundaries, details }));
+  const coverage = { total: 0, mapped: 0, missing: 0, missing_no_zcta: 0, missing_not_checked: 0 };
+  for (const map of maps) for (const key of Object.keys(coverage)) coverage[key] += map.coverage[key];
+  const members = Object.fromEntries(maps.map(map => [map.station, profiles.stations[map.station]]));
+  return { district, details_status: details?.status ?? 'none', boundary_source: source(boundaries), coverage,
+    stations: maps.map(map => ({ code: map.station, fetched_at: map.fetched_at, route_count: map.routes.length })),
+    routes: maps.flatMap(map => map.routes.map(route => ({ ...route, station: map.station }))),
+    missing: maps.flatMap(map => map.missing.map(row => ({ ...row, station: map.station }))),
+    features: { type: 'FeatureCollection', features: maps.flatMap(map => map.features.features) },
+    cross_station_conflicts: findCrossStationConflicts(members)
+      .map(({ postal_code, routes }) => ({ postal_code, stations: [...new Set(routes.map(owner => owner.station))].sort(compare) }))
+      .sort((a, b) => compare(a.postal_code, b.postal_code)) };
 }
 
 export function lookupZip({ profiles, boundaries, postalCode, details }) {

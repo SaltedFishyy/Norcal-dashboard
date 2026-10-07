@@ -14,6 +14,7 @@
   <main class="map-page">
     <header class="map-heading">
       <div><p class="eyebrow">NC OPS CONSOLE</p><h1 data-map-text="title">线路地图</h1></div>
+      <label><span>片区</span> <select id="map-district" disabled aria-label="片区"></select></label>
       <label><span data-map-text="station">站点</span> <select id="map-station" disabled aria-label="站点"></select></label>
       <a href="/" data-map-text="profiles">线路档案</a>
     </header>
@@ -38,7 +39,7 @@
         <section class="panel"><h2 data-map-text="coverage">地图覆盖率</h2><p id="map-coverage">—</p><p id="map-coverage-count"></p><p id="map-regenerate" hidden></p><p id="map-source"></p></section>
         <details class="panel" id="map-conflicts-details" hidden><summary id="map-conflicts-title"></summary><ul id="map-conflicts"></ul></details>
         <details class="panel" id="map-missing-details"><summary id="map-missing-title">缺少边界的邮编 (0)</summary>
-          <table class="map-missing"><thead><tr><th scope="col">ZIP</th><th scope="col" data-map-text="route">线路</th><th scope="col" data-map-text="reason">原因</th></tr></thead><tbody id="map-missing"></tbody></table>
+          <table class="map-missing"><thead><tr><th scope="col">ZIP</th><th scope="col" data-map-text="station">站点</th><th scope="col" data-map-text="route">线路</th><th scope="col" data-map-text="reason">原因</th></tr></thead><tbody id="map-missing"></tbody></table>
           <p id="map-missing-empty" hidden data-map-text="noMissing">没有缺少边界的邮编。</p>
         </details>
         <p class="snapshot" data-map-text="boundaryNote">ZCTA 是 USPS ZIP 区域的近似边界，不能用于具体地址的线路分配。</p>
