@@ -2,7 +2,16 @@
 
 规格：`docs/features/route-map.md`（RM3 R3-5）。这里只放**截取后**的边界文件；全国原始文件不进 Git。
 
-## 服务区边界库 `zcta2020_ca_nv_or.geojson`（唯一正式来源）
+## 服务区边界库（两个区域文件，共用 Census 来源）
+
+server 按文件名排序读取本目录全部 `*.meta.json`，通过各 meta 的 `boundary_file` 加载对应 GeoJSON。当前包括：
+
+| 区域文件 | 范围规则 | polygon 数 |
+|---|---|---|
+| `zcta2020_ca_nv_or.geojson` | `^(9[0-6]|889|89[0-8]|97)`（CA / NV / OR） | 2,519 |
+| `zcta2020_mountain.geojson` | `^(80|81|82|83[0-8]|84[0-7]|87|88[0-4]|59)`（CO / WY / ID / UT / NM / MT） | 2,023 |
+
+两份文件使用相同 dataset / vintage，合并后为 4,542 个 ZIP。范围判断取所有规则的并集；跨文件重复 ZIP、dataset / vintage 不一致、meta 引用文件缺失或校验失败均为 `boundary_invalid`，没有 meta 为 `boundary_not_found`。以下生成说明以 CA / NV / OR 为例。
 
 | 项 | 内容 |
 |---|---|
@@ -42,10 +51,12 @@
 3. 重写 `zcta2020_ca_nv_or.meta.json`（`feature_count`、`generated_at` 等）。
 4. 只有在 Census 发布新一期 ZCTA，或需要扩大州范围时才重新生成。新增 Station / Route / ZIP **不需要**重新生成。
 
+新增区域时，使用同一 Census dataset / vintage，替换上述 filter 为完整的区域 ZIP 前缀规则，生成新的 `.geojson` 与 `.meta.json` 配对文件即可，无需改代码。meta 的 `boundary_file` 必须为本目录内的 GeoJSON 文件名，并记录来源、生成时间、范围规则和实际 feature 数；各区域不能包含重复 ZIP。边界不做额外简化，也不为没有 ZCTA 的 ZIP 生成 polygon。
+
 ### 缺失分类
 
-- ZIP 在范围规则内、但本文件中没有 → `no_zcta`（本文件对这些前缀是完整的，等于 Census 确认没有 ZCTA）。
-- ZIP 不在范围规则内 → `not_checked`（需要扩大边界库范围）。
+- ZIP 在任一区域范围规则内、但合并库中没有 → `no_zcta`（各区域对其前缀完整截取 Census 数据）。
+- ZIP 不在任何区域范围规则内 → `not_checked`（需要扩大边界库范围）。
 
 ## 历史
 

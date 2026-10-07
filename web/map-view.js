@@ -6,6 +6,7 @@ export const BASEMAP_FLAVOR = 'light';
 export const basemaps = [
   { name: 'us', maxDataZoom: 6 },
   { name: 'norcal', maxDataZoom: 10, bounds: [[35.5, -124.6], [42.5, -119.0]] },
+  { name: 'mountain', maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] },
   { name: 'ops', maxDataZoom: 14, bounds: [[36.43, -123.16], [39.01, -121.06]] },
 ];
 

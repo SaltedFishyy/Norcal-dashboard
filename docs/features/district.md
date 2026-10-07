@@ -174,3 +174,59 @@
 - 实际运行检查：临时合成 9 站 snapshot / 边界，loopback HTTP server + 已安装 Playwright / Chromium，1440 / 390 检查标题、两页选择恢复、总览 / focus、定位按钮、难度切换、真实 SVG 双层描边、Esc、ZIP 搜索不保存、无横向溢出、0 第三方请求、0 pageerror / console error。底图缺失用模拟响应检查降级，不读取真实 archive；日志 `.handoff/DS-browser.log`，脚本 `.handoff/DS-browser-check.mjs`，截图 `.handoff/DS-profile-1440.png`、`DS-profile-390.png`、`DS-map-1440.png`、`DS-map-390.png`。server / browser 已关闭，临时合成数据目录已清理。
 - 验收映射：DS-AC1 标题 / 英文；AC2 配置驱动与两个页面 fixture 新片区；AC3 顺序 / 联动 / 禁用 / unassigned；AC4 合成 9 站 / route color / 汇总；AC5 focus / 搜索 / 选中优先 / 双层描边；AC6 原 RM5 回归与两范围模式；AC7 共用选择 / 恢复 / 默认 / 回退 / 修正 / 迁移；AC8 测试与 diff / 无新依赖 / 无 DMS：在自动化与合成浏览器范围内满足。DS-AC9 的真实数据 / 真实底图本机验证仍由 Claude 完成，Product Owner 预览签字未完成，不宣称 UI 最终验收完成。
 - 没有读取真实 runtime、访问 DMS 或任何凭据；没有改 cache schema、抓取 / 批处理代码、CSP、RM5 颜色或 legend；没有新增依赖、commit、push、部署。legacy 页面未修改，本轮未对其做浏览器回归。原有 `.claude/` 和原有 District spec 内容均保留，仅追加本实现记录。
+
+---
+
+## DS2 — 丹佛片区接入（**Approved**，Product Owner 2026-10-06）
+
+### DS2-1 配置
+
+- `config/districts.json` 新增 `denver`（丹佛片区 / Denver District）。Station 顺序按 Product Owner 给出的顺序。
+- **Station ID 核对**（2026-10-06，Claude 实时读取 DMS 页头 Station 菜单，共 52 个 Station，只读）：
+  - **PIHO1** 不在 DMS 中（DMS 中是 **PIH01**，数字 0）。Product Owner 2026-10-07 确认使用 **PIH01**，已按原顺序（SLC01 之后）加入配置。尚未抓取，抓取前显示为禁用的“暂无数据”。
+  - **GJT01**、**BZN01** 不在 DMS 菜单中（可能尚未开站或账号无权限；Product Owner 2026-10-07：暂时保留“暂无数据”状态，不视为错误）。按原样写入配置（没有 snapshot 时显示为禁用的“暂无数据”），**不加入批处理**（切站会找不到菜单项，从而触发安全停止）。
+- 其余 10 个 Station 在 DMS 中存在，已按 `dms:scrape-stations` 抓取（见 DS2-4）。
+
+### DS2-2 边界库支持多个区域文件（Claude 设计）
+
+- 丹佛片区 10 个 Station 共 299 个 ZIP，分布在 CO 159 / UT 86 / NM 37 / ID 9 / MT 5 / WY 3，原来全部超出 CA / NV / OR 边界库的范围（`not_checked`）。
+- 新增 `geo/zcta2020_mountain.geojson` 和 `.meta.json`：数据源和生成方式与 `zcta2020_ca_nv_or` 完全相同（Census 2020 ZCTA 1:500k，mapshaper 截取，不做简化），范围规则为 `^(80|81|82|83[0-8]|84[0-7]|87|88[0-4]|59)`（CO / WY / ID / UT / NM / MT），共 2,023 个 polygon，约 14.9 MB。与现有文件没有重复的 ZIP。它覆盖丹佛片区 299 个 ZIP 中的 296 个；剩下 3 个（83303、87131、87158）在 Census 中没有 ZCTA，按 `no_zcta` 处理，不生成 polygon。
+- **boundary store 改为加载 `geo/` 下所有 `*.meta.json`**（按文件名排序）：
+  - 每个 meta 的 `boundary_file` 必须存在，并且各自通过现有校验；
+  - 所有文件的 `dataset` / `vintage` 必须相同；
+  - 不同文件之间不能有重复的 `postal_code`；
+  - `byZip` 合并所有文件；`inScope(zip)` = 任一文件的范围规则匹配；
+  - 任何一项失败 → `boundary_invalid`；`geo/` 下没有任何 meta → `boundary_not_found`。
+  - API 的 `boundary_source` 字段不变（dataset、vintage）。
+  - 以后新增区域时，只需要添加一对文件，不改代码。
+
+### DS2-3 区域底图
+
+- 原来的底图只有 `us`（z0–6）、`norcal`（z0–10）、`ops`（z0–14），丹佛片区放大后只能看到 z6 的低精度底图。
+- 新增 `mountain.pmtiles`：与 RM2 同样的方式（`pmtiles extract`，Protomaps 构建 `20261002`），bbox `-116.5,34.0,-103.0,47.0`，z0–10，33.8 MB，放在 runtime `basemap/` 目录，不进 Git。
+- 前端 `basemaps` 列表新增 `{ name: 'mountain', maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] }`；server 端的 basemap 白名单新增 `mountain`。文件缺失时沿用现有的底图缺失提示，不影响 polygon。
+- `docs/features/route-map.md` RM2 底图表增加一行。
+
+### DS2-4 抓取记录（2026-10-06，Claude 在 Product Owner 本机执行）
+
+- 小规模验证：`--stations CYS01,LGU01 --max-routes-per-station 1 --new-run`，然后不加限制再运行一次。两站各 2 条 Route；续跑正确；Station 间隔 15 秒；双重验证、summary 正常；没有 429 / 5xx / session 问题；已恢复原 Station。
+- 全量：`--stations DEN01,CYS01,ABQ01,FMN01,SAF01,SLC01,TWF01,IDA01,LGU01,BIL01 --new-run`。10 个 Station 全部 `completed`，完整性检查全部通过；共 73 条 Route（新抓 69 条，cache 跳过 4 条）；1,426 个 `/prod-api/` 请求（上限 2,406）；用时 548 秒；定位全部为 L1；没有缺失的 Route；没有 429 / 5xx / session 问题；已恢复 SFO01。
+
+### DS2-5 验收标准
+
+- **DS2-AC1** 两个 District 同时存在，切换正确，各自只显示自己的 Station，顺序为配置顺序。
+- **DS2-AC2** 边界库加载两个区域文件；合并、重复检测、范围规则、错误码符合 DS2-2；北加州片区的结果不变（355 / 366）。
+- **DS2-AC3** 丹佛片区地图：片区总览和站点细看与北加州一致；296 个 ZIP 上图，3 个 `no_zcta`；`mountain` 底图可以显示。
+- **DS2-AC4** Route Profile / Map 记住 District + Station（例如 丹佛片区 + SLC01）。
+- **DS2-AC5** `npm test` 和 `git diff --check` 通过；1440 / 390；没有第三方请求。
+
+## DS2 实现记录（Implementation Notes，2026-10-06，Codex）
+
+- 本轮仅实现 DS2-2 / DS2-3 和 brief 指定文档、测试。边界 store 按文件名排序扫描全部 meta，逐文件复用 `validateBoundaries`，拒绝跨文件重复 ZIP 和 dataset / vintage 不一致；范围取并集。meta 引用文件缺失返回 `boundary_invalid`，没有 meta（包括目录不存在）返回 `boundary_not_found`。
+- 保留成功默认读取的 Promise 缓存、失败后重试和注入 fileOps 时不缓存；fileOps 增加 `readdir` 操作。`meta` 保留排序后首个文件的元数据，调用方使用的 dataset / vintage 不变；`geojson` 合并 features，`byZip` 合并几何索引。保守限制 `boundary_file` 为 geo 目录内的 GeoJSON 文件名，禁止路径跳出。
+- server API / store 白名单加入 `mountain`；前端顺序为 us → norcal → mountain → ops，mountain 使用 spec 的 z10 / bounds，保持高精度 ops 在上。缺失降级、CSP、RM5 / District 前端行为未改。
+- 修改文件：`server/src/store/{boundaries-file,basemap-file}.js`、`server/src/api/basemap.js`、`web/map-view.js`、`server/test/{boundaries-file,basemap-file,route-map-api,route-map-web}.test.js`、`geo/README.md`、`docs/features/route-map.md` 和本实现记录。保留已有未提交 District 工作，没有修改边界数据或 District 配置。
+- Node v24.19.0，`npm.cmd test` 406/406 通过，0 failed / skipped，日志 `.handoff/DS2-tests.log`。新增合成多区域合并、排序、范围并集、重复、来源一致性、文件缺失、错误码、缓存测试；mountain 合成 archive Range 206 / 内容验证；前端图层顺序 / zoom / bounds 断言。原公开 Census 文件校验随合并更新为 4,542 个 ZIP。中间测试失败为新增 fixture 引用文件名、测试标识符和旧错误码断言，已修复。没有 lint / build scripts，没有运行 lint / build。
+- 使用已有 Playwright / Chromium 与临时合成 9 站数据运行 1440 / 390 回归：两页选择、地图总览 / focus、搜索、难度模式和描边检查通过；0 console / page error、0 第三方请求。底图缺失用模拟响应，未读取真实 runtime / archive。日志 `.handoff/DS2-browser.log`，脚本 `.handoff/DS2-browser-check.mjs`，截图 `.handoff/DS2-{profile,map}-{1440,390}.png`。临时 server / browser 已关闭，合成目录已清理。
+- 验收边界：DS2-AC2 多文件合并 / 错误码 / 范围通过；真实北加 355 / 366 未读取验证。AC3 mountain 接入及降级通过，丹佛真实 296 / 3 与真实道路显示待本机验证。AC5 自动测试与合成 1440 / 390 / 无第三方请求通过。AC1 / AC4 为已有 District 功能，本轮不改，丹佛真实切换 / 保存留待 Claude 本机复核。Product Owner 预览签字未完成。
+- 无新增依赖、DMS 访问、凭据写入、cache schema 变化、commit、push 或部署。legacy 页面未修改，本轮未做其浏览器回归。

@@ -282,9 +282,10 @@ server/test/route-map.test.js           组装逻辑、API、颜色函数、静�
   |---|---|---|---|
   | `us.pmtiles` | 美国本土 | 0–6 | 4.7 MB |
   | `norcal.pmtiles` | 北加 + Reno + Medford | 0–10 | 11.6 MB |
+  | `mountain.pmtiles` | CO / WY / ID / UT / NM / MT 区域；bbox `-116.5,34.0,-103.0,47.0`；构建 `20261002` | 0–10 | 33.8 MB |
   | `ops.pmtiles` | SFO01 运营区 | 0–14 | 125.2 MB |
 
-  合计约 141 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
+  合计约 175 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
 - 更新：需要更新底图（例如几个月一次，或新增运营区）时，换成新的构建日期重新执行上面的命令，并更新本表。新增 Station 时扩大或新增 `ops` 层的 bbox。
 
 目标：把 RM1 的“深色背景 + polygon”升级为带地理参照的运营地图。**不扩展数据层，不新增 DMS 抓取**；RM1 的 join / coverage / missing / 冲突校验保持在 server 端不变。

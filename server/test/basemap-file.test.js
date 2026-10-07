@@ -12,6 +12,7 @@ async function fixture(t) {
   const basemapDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nc-basemap-mock-'));
   t.after(() => fs.rm(basemapDir, { recursive: true, force: true }));
   await fs.writeFile(path.join(basemapDir, 'us.pmtiles'), bytes);
+  await fs.writeFile(path.join(basemapDir, 'mountain.pmtiles'), bytes);
   return basemapDir;
 }
 
@@ -59,6 +60,10 @@ test('basemap API streams full files, supports single ranges and preserves secur
     const response = await fetch(url + '/basemap/us.pmtiles', { method });
     assert.equal(response.status, 405); assert.equal(response.headers.get('allow'), 'GET');
   }
+  const mountain = await fetch(url + '/basemap/mountain.pmtiles', { headers: { Range: 'bytes=0-7' } });
+  assert.equal(mountain.status, 206);
+  assert.equal(mountain.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
+  assert.deepEqual(Buffer.from(await mountain.arrayBuffer()), bytes.subarray(0, 8));
   let response = await fetch(url + '/basemap/ops.pmtiles');
   assert.equal(response.status, 404); assert.deepEqual(await response.json(), { error: 'basemap_not_found' });
   await fs.writeFile(path.join(basemapDir, 'ops.pmtiles'), 'invalid');

@@ -6,6 +6,12 @@
       "name_zh": "北加州片区",
       "name_en": "North Cal District",
       "stations": ["SFO01", "OAR01", "SMF01", "SCK01", "RNO01", "RDG01", "RDG02", "MOD01", "MFR01"]
+    },
+    {
+      "id": "denver",
+      "name_zh": "丹佛片区",
+      "name_en": "Denver District",
+      "stations": ["DEN01", "CYS01", "GJT01", "ABQ01", "FMN01", "SAF01", "SLC01", "PIH01", "TWF01", "IDA01", "LGU01", "BIL01", "BZN01"]
     }
   ]
 }

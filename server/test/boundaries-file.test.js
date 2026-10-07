@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readBoundaries, validateBoundaries, BoundaryInvalidError, BoundaryNotFoundError } from '../src/store/boundaries-file.js';
 import { rawBoundaries as boundaries } from './route-map-fixtures.js';
 
-const read = data => readBoundaries({ geoDir: 'unused', fileOps: { readFile: async filename =>
+const read = data => readBoundaries({ geoDir: 'unused', fileOps: { readdir: async () => ['zcta2020_ca_nv_or.meta.json'], readFile: async filename =>
   JSON.stringify(filename.endsWith('.geojson') ? data.geojson : data.meta) } });
 
 test('boundary reader validates Polygon and MultiPolygon without changing source data', async () => {
@@ -53,20 +53,74 @@ for (const [name, mutate] of [
 });
 
 test('boundary file errors and malformed JSON are sanitized', async () => {
-  for (const [code, expected] of [['ENOENT', BoundaryNotFoundError], ['EACCES', BoundaryInvalidError]]) {
-    await assert.rejects(readBoundaries({ geoDir: 'private-path', fileOps: { readFile: async () => {
+  for (const [code, expected] of [['ENOENT', BoundaryInvalidError], ['EACCES', BoundaryInvalidError]]) {
+    await assert.rejects(readBoundaries({ geoDir: 'private-path', fileOps: { readdir: async () => ['zcta2020_ca_nv_or.meta.json'], readFile: async () => {
       throw Object.assign(new Error('private-path secret stack'), { code });
     } } }), error => { assert.ok(error instanceof expected); assert.doesNotMatch(error.message, /private|secret|stack/); return true; });
   }
-  await assert.rejects(readBoundaries({ geoDir: 'unused', fileOps: { readFile: async () => '{' } }), BoundaryInvalidError);
+  await assert.rejects(readBoundaries({ geoDir: 'unused', fileOps: { readdir: async () => ['zcta2020_ca_nv_or.meta.json'], readFile: async () => '{' } }), BoundaryInvalidError);
   assert.throws(() => validateBoundaries(null, null), BoundaryInvalidError);
 });
 
 test('checked-in public Census boundary files satisfy the boundary contract', async () => {
   const result = await readBoundaries({ geoDir: fileURLToPath(new URL('../../geo/', import.meta.url)) });
-  assert.equal(result.geojson.features.length, 2519);
-  assert.equal(result.byZip.size, 2519);
+  assert.equal(result.geojson.features.length, 4542);
+  assert.equal(result.byZip.size, 4542);
   assert.ok(result.inScope('95812')); assert.ok(!result.inScope('10001'));
   assert.equal(result.byZip.get('95814').type, 'Polygon');
   assert.equal(await readBoundaries({ geoDir: fileURLToPath(new URL('../../geo/', import.meta.url)) }), result);
+});
+
+const readRegions = entries => readBoundaries({ geoDir: 'synthetic-only', fileOps: {
+  readdir: async () => Object.keys(entries).reverse(),
+  readFile: async filename => {
+    const name = filename.split(/[\\/]/).at(-1);
+    if (!(name in entries)) throw Object.assign(new Error('private missing path'), { code: 'ENOENT' });
+    return JSON.stringify(entries[name]);
+  },
+} });
+const regions = () => {
+  const a = boundaries(), b = boundaries();
+  a.meta.boundary_file = 'a.geojson';
+  b.meta.boundary_file = 'b.geojson'; b.meta.scope.postal_code_pattern = '^8';
+  b.geojson.features.forEach((feature, i) => feature.properties.postal_code = '8000' + i);
+  return { 'a.meta.json': a.meta, 'a.geojson': a.geojson, 'b.meta.json': b.meta, 'b.geojson': b.geojson };
+};
+test('multiple regions merge in filename order and union scope including absent ZIPs', async () => {
+  const data = regions(), result = await readRegions(data);
+  assert.deepEqual([...result.byZip.keys()], ['00123', '00002', '00009', '80000', '80001', '80002']);
+  assert.equal(result.geojson.features.length, 6);
+  assert.equal(result.meta.dataset, 'mock-census'); assert.equal(result.meta.vintage, 2020);
+  for (const zip of ['00004', '80099']) assert.equal(result.inScope(zip), true);
+  assert.equal(result.inScope('90000'), false);
+});
+for (const [name, mutate] of [
+  ['duplicate ZIP across regions', d => { d['b.geojson'].features[0].properties.postal_code = '00123'; d['b.meta.json'].scope.postal_code_pattern = '^(8|00123)'; }],
+  ['different dataset', d => d['b.meta.json'].dataset = 'other'],
+  ['different vintage', d => d['b.meta.json'].vintage = 2010],
+  ['missing referenced file', d => delete d['b.geojson']],
+  ['missing boundary_file', d => delete d['b.meta.json'].boundary_file],
+  ['path outside geo directory', d => d['b.meta.json'].boundary_file = '../b.geojson'],
+]) test('multiple regions reject ' + name, async () => {
+  const data = regions(); mutate(data); await assert.rejects(readRegions(data), BoundaryInvalidError);
+});
+test('no metadata and missing directory return not found; directory errors are sanitized', async () => {
+  await assert.rejects(readRegions({ 'ignored.geojson': {} }), BoundaryNotFoundError);
+  for (const [code, type] of [['ENOENT', BoundaryNotFoundError], ['EACCES', BoundaryInvalidError]]) {
+    await assert.rejects(readBoundaries({ geoDir: 'unused', fileOps: { readdir: async () => {
+      throw Object.assign(new Error('private path'), { code });
+    } } }), type);
+  }
+});
+test('successful default reads cache; failed reads retry; injected operations bypass cache', async t => {
+  const fs = await import('node:fs/promises'), os = await import('node:os'), path = await import('node:path');
+  const geoDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nc-boundary-mock-'));
+  t.after(() => fs.rm(geoDir, { recursive: true, force: true }));
+  await assert.rejects(readBoundaries({ geoDir }), BoundaryNotFoundError);
+  const data = regions();
+  for (const [name, value] of Object.entries(data)) await fs.writeFile(path.join(geoDir, name), JSON.stringify(value));
+  const result = await readBoundaries({ geoDir });
+  await fs.writeFile(path.join(geoDir, 'a.meta.json'), '{');
+  assert.equal(await readBoundaries({ geoDir }), result);
+  assert.notEqual(await readRegions(data), await readRegions(data));
 });

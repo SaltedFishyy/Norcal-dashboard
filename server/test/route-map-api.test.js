@@ -144,7 +144,10 @@ test('route-map API maps snapshot, postal-code, conflict and boundary failures t
   const invalidBoundary = await fixture(t);
   await fs.writeFile(invalidBoundary.metaFile, '{');
   await json(invalidBoundary.url, '/api/route-map?station=MOCKA', 500, { error: 'boundary_invalid' });
+  await fs.writeFile(invalidBoundary.metaFile, JSON.stringify(boundaries().meta));
   await fs.unlink(invalidBoundary.geoFile);
+  await json(invalidBoundary.url, '/api/route-map?station=MOCKA', 500, { error: 'boundary_invalid' });
+  await fs.unlink(invalidBoundary.metaFile);
   await json(invalidBoundary.url, '/api/route-map?station=MOCKA', 500, { error: 'boundary_not_found' });
 });
 

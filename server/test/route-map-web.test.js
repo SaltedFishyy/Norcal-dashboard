@@ -307,12 +307,13 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   assert.equal(map.options.maxBounds, undefined);
   assert.deepEqual(map.zoomTitles, { zoomInTitle: '放大', zoomOutTitle: '缩小' });
   assert.equal(e['map-missing-title'].textContent, '缺少边界的邮编 (2)');
-  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 14]);
+  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 14]);
   assert.ok(baselayers.every(layer => layer.options.flavor === 'light'));
-  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/ops.pmtiles']);
+  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/ops.pmtiles']);
   assert.equal(baselayers[0].options.bounds, undefined);
   assert.deepEqual(baselayers[1].options.bounds, [[35.5, -124.6], [42.5, -119.0]]);
-  assert.deepEqual(baselayers[2].options.bounds, [[36.43, -123.16], [39.01, -121.06]]);
+  assert.deepEqual(baselayers[2].options.bounds, [[34.0, -116.5], [47.0, -103.0]]);
+  assert.deepEqual(baselayers[3].options.bounds, [[36.43, -123.16], [39.01, -121.06]]);
   const search = e['map-search']; search.value = ' mock-a '; search.listeners.input();
   assert.equal(e['map-routes'].children.length, 1);
   search.listeners.keydown({ key: 'Enter', preventDefault() {} });

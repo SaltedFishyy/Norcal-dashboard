@@ -1,0 +1,12 @@
+{
+  "dataset": "cb_2020_us_zcta520_500k",
+  "vintage": 2020,
+  "source_url": "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+  "generated_at": "2026-10-07T00:29:54.000Z",
+  "boundary_file": "zcta2020_mountain.geojson",
+  "scope": {
+    "description": "All 2020 ZCTAs whose ZIP prefix is CO (80-81), WY (820-831), ID (832-838), UT (840-847), NM (870-884) or MT (59)",
+    "postal_code_pattern": "^(80|81|82|83[0-8]|84[0-7]|87|88[0-4]|59)"
+  },
+  "feature_count": 2023
+}

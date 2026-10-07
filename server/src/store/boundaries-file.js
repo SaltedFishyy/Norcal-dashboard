@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 export class BoundaryInvalidError extends Error {
@@ -43,21 +43,42 @@ export async function readBoundaries({ geoDir, fileOps }) {
   if (fileOps) return loadBoundaries(geoDir, fileOps);
   const key = path.resolve(geoDir);
   if (!cache.has(key)) {
-    const pending = loadBoundaries(key, { readFile }).catch(error => { cache.delete(key); throw error; });
+    const pending = loadBoundaries(key, { readFile, readdir }).catch(error => { cache.delete(key); throw error; });
     cache.set(key, pending);
   }
   return cache.get(key);
 }
 
 async function loadBoundaries(geoDir, fileOps) {
-  let texts;
+  let filenames;
   try {
-    texts = await Promise.all(['zcta2020_ca_nv_or.geojson', 'zcta2020_ca_nv_or.meta.json']
-      .map(filename => fileOps.readFile(path.join(geoDir, filename), 'utf8')));
+    filenames = (await fileOps.readdir(geoDir)).filter(name => name.endsWith('.meta.json')).sort();
   } catch (error) {
     if (error?.code === 'ENOENT') throw new BoundaryNotFoundError();
     throw new BoundaryInvalidError();
   }
-  try { return validateBoundaries(...texts.map(text => JSON.parse(text))); }
+  if (!filenames.length) throw new BoundaryNotFoundError();
+  try {
+    const regions = [];
+    const byZip = new Map();
+    for (const filename of filenames) {
+      const meta = JSON.parse(await fileOps.readFile(path.join(geoDir, filename), 'utf8'));
+      // Metadata may only reference a GeoJSON file in this boundary directory.
+      if (typeof meta?.boundary_file !== 'string' || !/^[^/\\]+\.geojson$/.test(meta.boundary_file)
+        || meta.boundary_file.includes(':')) throw new BoundaryInvalidError();
+      const geojson = JSON.parse(await fileOps.readFile(path.join(geoDir, meta.boundary_file), 'utf8'));
+      const region = validateBoundaries(geojson, meta);
+      if (regions.length && (meta.dataset !== regions[0].meta.dataset || meta.vintage !== regions[0].meta.vintage)) {
+        throw new BoundaryInvalidError();
+      }
+      for (const [zip, geometry] of region.byZip) {
+        if (byZip.has(zip)) throw new BoundaryInvalidError();
+        byZip.set(zip, geometry);
+      }
+      regions.push(region);
+    }
+    return { meta: regions[0].meta, byZip, inScope: zip => regions.some(region => region.inScope(zip)),
+      geojson: { type: 'FeatureCollection', features: regions.flatMap(region => region.geojson.features) } };
+  }
   catch { throw new BoundaryInvalidError(); }
 }
