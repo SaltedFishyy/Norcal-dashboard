@@ -2,7 +2,7 @@ import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatNumber, formatUpdated, formatValue } from './format.js';
 import { routeColor } from './route-colors.js';
 import { searchRoutes, classifyQuery, clearSelection } from './map-state.js';
-import { routeDifficultyText, zipDifficultyText, mapText as t } from './map-text.js';
+import { routeDifficultyText, mapText as t } from './map-text.js';
 
 export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   const element = id => doc.getElementById(`map-${id}`);
@@ -12,6 +12,11 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     return node;
   };
   const entry = (label, value) => { const node = text('div', ''); node.append(text('dt', label), text('dd', formatValue(value))); return node; };
+  const difficultyEntry = (label, value) => {
+    const node = entry(label, routeDifficultyText(value));
+    if (difficultyLevel(value)) { node.children[1].className = 'difficulty system-difficulty'; node.children[1].style.backgroundColor = difficultyColor(difficultyLevel(value)); node.children[1].style.color = '#ffffff'; }
+    return node;
+  };
   let data, selection = clearSelection(), colorMode = 'route', focusStation = null;
   const search = element('search');
   function renderRoutes() {
@@ -28,7 +33,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
       const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : routeColor(route.route_id);
-      button.append(swatch, text('span', query ? route.station + ' · ' + route.route_name : route.route_name));
+      button.append(swatch, text('span', query && !focusStation ? route.station + ' · ' + route.route_name : route.route_name));
       if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
       button.append(text('span', `${route.zip_count} ZIP`));
       button.addEventListener('click', () => onRoute(route.route_id)); element('routes').append(button);
@@ -43,45 +48,44 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   function applySelection(next) {
     selection = next; renderRoutes();
     element('clear').disabled = !next.route && !next.zip;
-    const current = text('dl', '');
-    current.append(entry(t.station, next.route?.station || next.station), entry(t.route, next.route?.route_name));
-    const zipEntry = entry(t.zip, next.zip?.postal_code);
-    if (next.zip) zipEntry.children[1].append(text('span', t.statuses[next.zip.status], 'map-badge'));
-    current.append(zipEntry); element('current').replaceChildren(current);
+    element(next.zip ? 'zip-heading' : 'summary-heading').append(element('clear'));
     element('summary').replaceChildren();
     element('summary-panel').hidden = !next.route;
     const route = next.route && (data?.routes.find(row => row.route_id === next.route.route_id) || next.route);
     if (route) {
       const name = text('h3', formatValue(route.route_name), 'map-route-name');
-      const owner = text('p', `${t.station} ${formatValue(route.station)} · DSP ${formatValue(route.dsp_name)}`);
+      const owner = text('p', `${t.station} ${formatValue(route.station)} · ${t.dsp} ${formatValue(route.dsp_name)}`);
       const metrics = text('dl', '', 'map-summary-metrics');
       const count = entry(t.zipCount, formatNumber(route.zip_count, 0));
       count.append(text('small', t.mapped(formatValue(route.mapped_count))));
-      metrics.append(count, entry('Pickup Volume', formatNumber(route.pickup_volume, 0)), entry('PPH', formatNumber(route.pph, 2, 2)));
-      element('summary').append(name, owner, metrics, text('p', `${t.updated} ${formatUpdated(next.zip?.fetched_at || (data?.stations?.find(station => station.code === route.station)?.fetched_at || data?.fetched_at))}`));
+      metrics.append(count, entry(t.pickupVolume, formatNumber(route.pickup_volume, 0)), entry(t.pph, formatNumber(route.pph, 2, 2)), difficultyEntry(t.routeDifficulty, route.route_difficulty));
+      element('summary').append(name, owner, metrics);
       if (route.mapped_count === 0) element('summary').append(text('p', t.noMapped));
-      const difficulty = text('dl', ''); difficulty.append(entry(t.routeDifficulty, routeDifficultyText(route.route_difficulty)));
-      element('summary').append(difficulty);
       if (colorMode === 'difficulty') {
         element('summary').append(text('p', route.zip_detail?.status === 'available'
           ? t.detailAvailable(route.zip_detail.zip_count, route.zip_detail.fetched_at) : t.missingDetail));
-        if (route.zip_detail?.status !== 'available') element('summary').append(text('p', t.detailCommand(route.station), 'snapshot'));
       }
-      element('snapshot-source').textContent = t.source;
-    } else element('snapshot-source').textContent = '';
+      element('summary').append(text('p', `${t.updated} ${formatUpdated(next.zip?.fetched_at || (data?.stations?.find(station => station.code === route.station)?.fetched_at || data?.fetched_at))}`, 'map-summary-updated'));
+    }
     element('selection').replaceChildren();
     element('zip-panel').hidden = !next.zip;
     if (next.zip) {
-      const dl = text('dl', ''); dl.append(entry('ZIP', next.zip.postal_code));
-      dl.append(text('span', t.statuses[next.zip.status], 'map-badge'));
-      if (next.route) {
-        dl.append(entry(t.station, next.station), entry(t.route, next.route.route_name));
-        if (next.zip.status === 'covered' && (colorMode === 'difficulty' || next.zip.zip_detail_status === 'available')) dl.append(entry(t.zipDifficulty, zipDifficultyText(next.zip, route?.zip_detail)));
+      const zip = next.zip;
+      const heading = text('div', '', 'map-zip-title');
+      heading.append(text('strong', formatValue(zip.postal_code), 'map-zip-number'), text('span', t.statuses[zip.status], 'map-badge'));
+      if (zip.status === 'covered_no_boundary') heading.append(text('span', t.statuses.no_boundary, 'map-badge'));
+      const metrics = text('dl', '', 'map-zip-metrics');
+      metrics.append(entry(t.experiencedPph, formatNumber(zip.experienced_pph, 2, 2)), entry(t.pickupDaily, formatNumber(zip.pickup_volume_daily, 0)), entry(t.dsp, zip.dsp_name), difficultyEntry(t.zipDifficulty, zip.zip_difficulty));
+      const info = text('dl', '', 'map-zip-info');
+      info.append(entry(t.station, zip.station));
+      element('selection').append(heading, metrics, info);
+      if (zip.status === 'multi_station') {
+        const owners = text('ul', '', 'map-zip-owners');
+        for (const owner of zip.owners) owners.append(text('li', owner.station + ' · ' + owner.route_name));
+        element('selection').append(owners);
       }
-      if (next.zip.status === 'multi_station') {
-        for (const owner of next.zip.owners) dl.append(entry(t.station, owner.station), entry(t.route, owner.route_name));
-      }
-      element('selection').append(dl, text('p', t.zipNotes[next.zip.status]));
+      if (t.zipNotes[zip.status]) element('selection').append(text('p', t.zipNotes[zip.status], 'snapshot'));
+
     }
   }
   function searchStatus(state, value = '') {

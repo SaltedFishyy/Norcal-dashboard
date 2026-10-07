@@ -49,9 +49,10 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .map-heading label { display: flex; align-items: center; gap: 8px; }
 .map-heading select { background: #161f33; color: #e9eef9; border: 1px solid #8592ad; padding: 8px; max-width: 100%; }
 #map-message { color: #a0adc5; overflow-wrap: anywhere; }
-.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 20px; }
+.map-page { padding-left: 16px; padding-right: 16px; }
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; }
 #route-map { height: 70vh; min-height: 420px; background: #f8f4f0; border: 1px solid #263149; border-radius: 8px; }
-.map-sidebar { min-width: 0; display: grid; align-content: start; gap: 14px; }
+.map-sidebar { min-width: 0; display: grid; align-content: start; gap: 10px; }
 .map-sidebar input { width: 100%; min-width: 0; padding: 8px; margin: 8px 0; background: #161f33; color: #e9eef9; border: 1px solid #8592ad; border-radius: 4px; }
 .map-routes { max-height: 240px; overflow-y: auto; margin-bottom: 12px; }
 .map-route { width: 100%; display: flex; gap: 8px; align-items: center; text-align: left; margin: 0 0 4px; padding: 8px; font: inherit; font-size: 13px; }
@@ -65,8 +66,8 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .map-sidebar details[open] summary { margin-bottom: 12px; }
 .map-fit button { margin: 0; background: #101828; }
 .map-page .leaflet-control-attribution a { color: #65dace; }
-.map-sidebar .panel { padding: 16px; }
-.map-sidebar h2 { margin: 0 0 12px; font-size: 17px; }
+.map-sidebar .panel { padding: 12px; }
+.map-sidebar h2 { margin: 0 0 8px; font-size: 14px; }
 .map-sidebar p, .map-sidebar dd { font-size: 13px; overflow-wrap: anywhere; }
 .map-sidebar dl, .leaflet-tooltip dl { margin: 0; }
 .map-sidebar dl > div, .leaflet-tooltip dl > div { margin-bottom: 8px; }
@@ -90,9 +91,9 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 
 .map-page #map-message.map-error, .map-page .map-error { color: #ffb1b1; border-left: 3px solid #e26981; padding-left: 10px; }
 .map-badge { display: inline-block; margin-left: 6px; padding: 2px 6px; border: 1px solid #8592ad; border-radius: 4px; color: #e9eef9; font-size: 11px; }
-.map-sidebar .map-route-name { font-size: 26px; margin: 0; overflow-wrap: anywhere; }
-.map-summary-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.map-sidebar .map-summary-metrics dd { font-size: 24px; line-height: 1.25; }
+.map-sidebar .map-route-name { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.map-summary-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.map-sidebar .map-summary-metrics dd { font-size: 17px; line-height: 1.25; }
 .map-summary-metrics dt { font-size: 11px; }
 .map-summary-metrics small { font-size: 11px; color: #a0adc5; }
 
@@ -105,6 +106,25 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .map-legend > div { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
 .map-level { flex-shrink: 0; }
 .map-sidebar .snapshot { overflow-wrap: anywhere; }
-.map-page .leaflet-tooltip dl.map-difficulty-details > div { white-space: normal; }
-.map-page .leaflet-tooltip dl.map-difficulty-details dd { max-width: 240px; white-space: normal; overflow-wrap: anywhere; }
 .map-page #map-message.map-warning { color: #ffe396; }
+
+.map-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.map-card-heading h2 { margin: 0; }
+.map-card-heading button { margin: 0; padding: 3px 6px; font-size: 11px; flex-shrink: 0; background: transparent; border-color: #35415a; color: #a0adc5; }
+.map-zip-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.map-zip-number { font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.map-zip-title .map-badge { margin: 0; border-color: #35415a; background: #202c42; }
+.map-zip-metrics, .map-zip-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.map-sidebar .map-zip-metrics dd { font-size: 26px; line-height: 1.2; }
+.map-sidebar .map-zip-metrics > div:nth-child(3) dd { font-size: 18px; font-weight: 700; }
+.map-sidebar .map-zip-metrics .difficulty { font-size: 15px; font-weight: 700; padding: 4px 8px; line-height: 1.4; }
+.map-sidebar .map-zip-info > div { display: flex; align-items: baseline; gap: 8px; margin-bottom: 0; }
+.map-sidebar .map-zip-info dd { color: #a0adc5; font-size: 12px; }
+.map-sidebar .map-summary-updated { color: #a0adc5; font-size: 11px; border-top: 1px solid #263149; padding-top: 8px; }
+@media (max-width: 600px) { .map-page { padding-left: 12px; padding-right: 12px; } }
+.map-sidebar dt { font-size: 11px; margin-bottom: 4px; }
+.map-sidebar p { margin: 8px 0 0; }
+.map-sidebar p:empty { display: none; }
+.map-zip-owners { padding-left: 16px; margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+#map-zip-panel { border-color: #426276; }
+#map-summary-panel { background: #0e1625; }

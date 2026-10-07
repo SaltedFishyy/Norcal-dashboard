@@ -1,6 +1,6 @@
 import { difficultyColor } from './difficulty.js';
 import { polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles } from './map-state.js';
-import { routeDifficultyText, zipDifficultyText, mapText as t } from './map-text.js';
+import { mapText as t } from './map-text.js';
 
 export const BASEMAP_FLAVOR = 'light';
 export const basemaps = [
@@ -12,16 +12,9 @@ export const basemaps = [
 
 export function zipDetails(doc, properties, selection = clearSelection(), colorMode = 'route', detail) {
   const node = doc.createElement('dl');
-  if (colorMode === 'difficulty') node.className = 'map-difficulty-details';
-  for (const [label, value] of [['ZIP', properties.postal_code], [t.route, properties.route_name], [t.station, properties.station]]) {
+  for (const [label, value] of [[t.zipLabel, properties.postal_code], [t.route, properties.route_name], [t.dsp, properties.dsp_name]]) {
     const entry = doc.createElement('div'), dt = doc.createElement('dt'), dd = doc.createElement('dd');
-    dt.textContent = label; dd.textContent = value; entry.append(dt, dd); node.append(entry);
-  }
-  if (colorMode === 'difficulty') {
-    const selected = selection.route?.route_id === properties.route_id;
-    const entry = doc.createElement('div'), dt = doc.createElement('dt'), dd = doc.createElement('dd');
-    dt.textContent = selected ? t.zipDifficulty : t.routeDifficulty;
-    dd.textContent = selected ? zipDifficultyText(properties, detail) : routeDifficultyText(properties.route_difficulty);
+    dt.textContent = label; dd.textContent = value ?? '—';
     entry.append(dt, dd); node.append(entry);
   }
   return node;

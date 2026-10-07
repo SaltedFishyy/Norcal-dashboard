@@ -34,7 +34,9 @@ const detailFor = (details, row, station) => {
 };
 const difficultyProperties = (row, detail, postalCode) => {
   const zip = detail?.zips.find(zip => zip.postal_code === postalCode);
-  return { route_difficulty: row.route_difficulty ?? null, zip_difficulty: zip?.postal_code_difficulty ?? null,
+  return { dsp_name: row.dsp_name ?? null, experienced_pph: zip?.experienced_pph ?? null,
+    pickup_volume_daily: zip?.pickup_volume_daily ?? null,
+    route_difficulty: row.route_difficulty ?? null, zip_difficulty: zip?.postal_code_difficulty ?? null,
     zip_detail_status: !detail ? 'missing' : zip ? 'available' : 'not_in_detail' };
 };
 const summary = (row, boundaries, mappedCount = row.postal_codes.filter(zip => boundaries.byZip.has(zip)).length, detail = null) => ({ route_id: row.route_id, route_name: row.route_name,

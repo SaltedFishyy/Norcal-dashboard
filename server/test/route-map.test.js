@@ -67,7 +67,7 @@ test('route map joins, classifies missing ZIPs, sorts and preserves inputs with 
   ]);
   assert.equal(result.features.type, 'FeatureCollection');
   assert.deepEqual(result.features.features.map(f => f.properties), ['00002', '00123'].map(postal_code =>
-    ({ postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA', route_difficulty: null, zip_difficulty: null, zip_detail_status: 'missing' })));
+    ({ postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA', dsp_name: null, experienced_pph: null, pickup_volume_daily: null, route_difficulty: null, zip_difficulty: null, zip_detail_status: 'missing' })));
   assert.deepEqual(result.features.features[0].geometry, boundary.geojson.features[1].geometry);
   assert.doesNotMatch(JSON.stringify(result), /color|raw|source_url/);
 });
@@ -158,4 +158,27 @@ test('RM5 detail join is exact by route, Station and ZIP, without inference or i
   data.stations.MOCKB.rows.push({ ...data.stations.MOCKB.rows[0], route_id: 4 });
   assert.doesNotThrow(() => build(data));
   assert.throws(() => buildRouteMap({ profiles: data, station: 'MOCKB', boundaries: boundary }), RouteZipConflictError);
+});
+
+test('RM6 projects profile DSP and exact ZIP metrics, preserving zeros and null fallbacks', async () => {
+  const { details } = await import('./route-map-fixtures.js');
+  const source = profiles(), cache = details(), boundary = boundaries();
+  source.stations.MOCKA.rows[1].dsp_name = 'Mock DSP';
+  Object.assign(cache.routes['1'].zips[0], { experienced_pph: 0, pickup_volume_daily: 125.5 });
+  for (const detail of [cache, undefined, { status: 'none' }, { status: 'invalid' }]) {
+    const args = { profiles: source, boundaries: boundary, details: detail };
+    const map = buildRouteMap({ ...args, station: 'MOCKA' });
+    for (const feature of map.features.features) {
+      const p = feature.properties, found = detail === cache && p.postal_code === '00002';
+      assert.equal(p.dsp_name, 'Mock DSP'); assert.equal(p.experienced_pph, found ? 0 : null);
+      assert.equal(p.pickup_volume_daily, found ? 125.5 : null);
+      const lookup = lookupZip({ ...args, postalCode: p.postal_code });
+      for (const key of Object.keys(p)) assert.equal(lookup[key], p[key]);
+    }
+  }
+  for (const key of ['station', 'route_id']) {
+    const other = structuredClone(cache); other.routes['1'][key] = key === 'station' ? 'MOCKB' : 2;
+    const result = lookupZip({ profiles: source, boundaries: boundary, details: other, postalCode: '00002' });
+    assert.equal(result.experienced_pph, null); assert.equal(result.pickup_volume_daily, null);
+  }
 });

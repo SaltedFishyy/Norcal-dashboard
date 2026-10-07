@@ -220,9 +220,10 @@ test('RM5 map and ZIP APIs tolerate missing, malformed and structurally invalid 
   const { url, root } = await fixture(t);
   const { details } = await import('./route-map-fixtures.js');
   const filename = path.join(root, 'mock-runtime', 'route-details.json');
+  const cache = details(); Object.assign(cache.routes['1'].zips[0], { experienced_pph: 21.5, pickup_volume_daily: 0 });
   const original = buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
   for (const [contents, status] of [[null, 'none'], ['{', 'invalid'], ['{}', 'invalid'],
-    [JSON.stringify({ schema_version: 1, routes: details().routes }), 'ok']]) {
+    [JSON.stringify({ schema_version: 1, routes: cache.routes }), 'ok']]) {
     if (contents !== null) await fs.writeFile(filename, contents);
     const response = await fetch(url + '/api/route-map?station=MOCKA');
     assert.equal(response.status, 200);
@@ -238,6 +239,12 @@ test('RM5 map and ZIP APIs tolerate missing, malformed and structurally invalid 
     assert.equal(zip.zip_detail_status, status === 'ok' ? 'available' : 'missing');
     assert.equal(zip.zip_difficulty, status === 'ok' ? 'A级 难' : null);
     assert.equal(zip.route_difficulty, null);
+    for (const value of [zip, data.features.features[0].properties]) {
+      assert.equal(value.dsp_name, null); assert.equal(value.experienced_pph, status === 'ok' ? 21.5 : null);
+      assert.equal(value.pickup_volume_daily, status === 'ok' ? 0 : null);
+    }
+    const absent = await (await fetch(url + '/api/route-map/zip?postal_code=00123')).json();
+    assert.equal(absent.experienced_pph, null); assert.equal(absent.pickup_volume_daily, null);
     if (contents !== null) assert.equal(await fs.readFile(filename, 'utf8'), contents);
   }
 });

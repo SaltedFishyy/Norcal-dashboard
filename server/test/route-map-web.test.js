@@ -28,10 +28,9 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
     const result = lookupZip({ profiles: data, boundaries: boundary, postalCode });
     replies.push(reply(200, result)); const beforeFits = map.fits.length;
     e['map-search'].value = postalCode; await e['map-search'].listeners.input();
-    const current = e['map-current'].children[0];
-    assert.deepEqual(current.children.map(row => row.children[0].textContent), ['站点', '线路', '邮编']);
-    assert.equal(current.children[2].children[1].textContent, postalCode);
-    assert.equal(current.children[2].children[1].children[0].textContent, badge);
+    const current = e['map-selection'].children[0];
+    assert.equal(current.children[0].textContent, postalCode);
+    assert.equal(current.children[1].textContent, badge);
     assert.equal(e['map-zip-panel'].hidden, false);
     assert.equal(e['map-summary-panel'].hidden, !status.startsWith('covered'));
     assert.equal(map.fits.length, beforeFits + (result.geometry ? 1 : 0));
@@ -45,8 +44,8 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
         assert.equal(groups[0].layers[0].styles.at(-1).fillOpacity, 0.5);
       }
     }
-    if (status === 'no_boundary') assert.match(e['map-selection'].children[1].textContent, /PO Box \/ 机构 ZIP/);
-    if (status === 'covered_no_boundary') assert.match(e['map-selection'].children[1].textContent, /有线路覆盖 · 该 ZIP 暂无可用边界数据/);
+    if (status === 'no_boundary') assert.match(allText(e['map-selection']), /暂无可用边界数据/);
+    if (status === 'covered_no_boundary') assert.match(allText(e['map-selection']), /有线路覆盖.*暂无可用边界数据/);
   }
   e['map-search'].value = '023'; await e['map-search'].listeners.input();
   assert.equal(e['map-search-hint'].hidden, false);
@@ -54,7 +53,7 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
   replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00009' })));
   await e['map-search'].listeners.keydown({ key: 'Enter', preventDefault() {} });
   assert.equal(e['map-station'].value, 'MOCKA'); assert.equal(e['map-search'].value, '00009');
-  assert.equal(e['map-current'].children[0].children[1].children[1].textContent, 'Mock-C');
+  assert.equal(e['map-summary'].children[0].textContent, 'Mock-C');
   // An owned ZIP without geometry leaves the viewport and selected Station unchanged.
   data.stations.MOCKA.rows[0].postal_codes.push('00024');
   const beforeFits = map.fits.length;
@@ -62,7 +61,7 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
   await page.searchQuery('00024', true);
   assert.equal(e['map-station'].value, 'MOCKA');
   assert.equal(map.fits.length, beforeFits);
-  assert.match(e['map-selection'].children[1].textContent, /该 ZIP 暂无可用边界数据/);
+  assert.match(allText(e['map-selection']), /暂无可用边界数据/);
 });
 
 test('ZIP errors are separate from no-boundary results and stale replies cannot replace newer choices', async () => {
@@ -91,14 +90,19 @@ test('ZIP errors are separate from no-boundary results and stale replies cannot 
       await page.searchQuery('10001', true);
     }
     release(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' }))); await pending;
-    const current = e['map-current'].children[0].children[2].children[1].textContent;
+    const current = e['map-selection'].children[0]?.children[0].textContent ?? '—';
     assert.equal(current, action === 'new-search' ? '10001' : '—');
   }
 });
 
 class Element {
   constructor(tag = 'div') { this.tagName = tag; this.children = []; this.textContent = ''; this.listeners = {}; this.attributes = {}; this.style = {}; }
-  append(...children) { this.children.push(...children); }
+  append(...children) {
+    for (const child of children) {
+      if (child.parentNode) child.parentNode.children = child.parentNode.children.filter(node => node !== child);
+      child.parentNode = this; this.children.push(child);
+    }
+  }
   replaceChildren(...children) { this.children = children; this.textContent = ''; }
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; delete this[name]; }
@@ -108,7 +112,7 @@ class Element {
 async function fixture(search = '', basemapStatus = 206, storage = null) {
   const { createMapPage } = await import('../../web/map.js');
   const ids = ['route-map', ...['district', 'station', 'message', 'retry', 'content', 'selection', 'coverage',
-    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'snapshot-source', 'basemap-message', 'current', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
+    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag) };
   const map = { panes: {}, createPane(name) { return this.panes[name] = { style: {} }; }, listeners: {}, fits: [], removed: [], attributionControl: {
@@ -206,8 +210,8 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   const originalEvent = {}; layer.listeners.click({ originalEvent });
   assert.equal(originalEvent.stopped, true);
   const panel = e['map-selection'].children[0];
-  assert.equal(panel.children[0].children[1].textContent, '00002');
-  assert.equal(e['map-selection'].children[1].textContent.includes('有线路覆盖'), true);
+  assert.equal(panel.children[0].textContent, '00002');
+  assert.match(allText(e['map-selection']), /有线路覆盖/);
   assert.equal(sameRoute.styles.at(-1).weight, 3);
   map.listeners.click();
   assert.equal(e['map-zip-panel'].hidden, true);
@@ -325,7 +329,6 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   const values = Object.fromEntries(summary[2].children.map(row => row.children.slice(0, 2).map(node => node.textContent)));
   assert.equal(values['ZIP 数'], '2'); assert.equal(summary[2].children[0].children[2].textContent, '已上图 2');
   assert.equal(values['Pickup Volume'], '12,345'); assert.equal(values.PPH, '12.35');
-  assert.equal(e['map-snapshot-source'].textContent, 'Source: DMS snapshot');
   assert.match(summary[3].textContent, /^更新时间 /);
   assert.equal(e['map-zip-panel'].hidden, true);
   controls[0].children[0].listeners.click(); assert.equal(map.fits.length, 3);
@@ -335,7 +338,7 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   search.listeners.keydown({ key: 'Enter', preventDefault() {} }); assert.equal(map.fits.length, 3);
   e['map-routes'].children[1].listeners.click();
   assert.equal(map.fits.length, 3); // Route B has no mapped polygons.
-  assert.match(e['map-summary'].children[4].textContent, /暂无已上图边界/);
+  assert.match(e['map-summary'].children[3].textContent, /暂无已上图边界/);
   assert.equal(e['map-summary'].children[2].children[1].children[1].textContent, '—');
   e['map-clear'].listeners.click(); assert.equal(e['map-clear'].disabled, true);
   groups[0].layers[0].listeners.click({}); assert.equal(e['map-zip-panel'].hidden, false);
@@ -438,16 +441,16 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据']);
   assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('B'));
-  assert.match(allText(groups[0].layers[0].tooltip), /线路难度 B级 中/);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 3);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[2].textContent), ['B', 'D']);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[0].style.backgroundColor), [difficultyColor('B'), difficultyColor('D')]);
   assert.equal(map.fits.length, fits); assert.equal(requests.length, calls); assert.equal(groups.length, count);
   groups[0].layers[0].listeners.click({});
-  const selected = allText(e['map-current']), selectedFits = map.fits.length, selectedGroups = groups.length;
+  const selected = allText(e['map-selection']), selectedFits = map.fits.length, selectedGroups = groups.length;
   assert.equal(legend.children[0].textContent, '颜色：Mock-A 的 ZIP 难度');
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('A'));
   assert.equal(groups[0].layers[1].styles.at(-1).fillColor, difficultyColor(null));
-  assert.match(allText(groups[0].layers[1].tooltip), /该 ZIP 不在线路详情中，详情更新于/);
+  assert.equal(groups[0].layers[1].tooltip.children.length, 3);
   assert.match(allText(e['map-summary']), /已有 1 个 ZIP/); // Cache row count, not profile ZIP count.
   assert.match(allText(e['map-selection']), /ZIP 难度 A级 难/);
   const highlight = groups.filter(group => !group.options.pane).at(-1).layers[0];
@@ -457,7 +460,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.equal(highlight.styles.at(-1).fillColor, routeColor(1));
   assert.equal(highlight.tooltip.children.length, 3);
   mode.children[1].listeners.click();
-  assert.equal(allText(e['map-current']), selected); assert.equal(map.fits.length, selectedFits);
+  assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
   assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'true']);
   groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, '#ffffff');
@@ -475,9 +478,9 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.equal(e['map-message'].className, 'map-warning');
   controls[1].children[1].listeners.click(); e['map-routes'].children[0].listeners.click();
   assert.match(allText(e['map-summary']), /暂无 ZIP 难度数据/);
-  assert.match(allText(e['map-summary']), /npm run dms:scrape-route-details -- --station MOCKA/);
+  assert.doesNotMatch(allText(e['map-summary']), /npm run/);
   assert.ok(groups[0].layers.every(layer => layer.styles.at(-1).fillColor === '#9ca3af'));
-  assert.match(allText(groups[0].layers[0].tooltip), /暂无 ZIP 难度数据/);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 3);
   const { details } = await import('./route-map-fixtures.js');
   const cache = details(); cache.routes['1'].zips[0].postal_code_difficulty = null;
   const updated = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
@@ -485,10 +488,10 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.doesNotMatch(e['map-message'].textContent, /文件无效/);
   const current = groups.at(-1).layers;
   current[0].listeners.click({});
-  assert.match(allText(current[0].tooltip), /ZIP 难度 —（DMS 无数据）/);
-  assert.match(allText(e['map-selection']), /DMS 无数据/);
+  assert.equal(current[0].tooltip.children.length, 3);
+  assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
   current[1].listeners.click({});
-  assert.match(allText(e['map-selection']), /该 ZIP 不在线路详情中，详情更新于/);
+  assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
 });
 
 test('RM5 ZIP search highlight uses the same difficulty fields as polygon clicks and preserves uncovered styles', async () => {
@@ -527,8 +530,8 @@ test('MS-T2 warnings collapse, multi-Station ZIP keeps Station and highlights on
   await page.searchQuery('00002', true);
   assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(requests.length, before + 1); assert.equal(map.fits.length, fits + 1);
   assert.equal(e['map-summary-panel'].hidden, true);
-  assert.ok(e['map-selection'].children[0].children.some(row => row.children?.[1]?.textContent === 'MOCKA'));
-  assert.ok(e['map-selection'].children[0].children.some(row => row.children?.[1]?.textContent === 'MOCKB'));
+  assert.match(allText(e['map-selection'].children[3]), /MOCKA/);
+  assert.match(allText(e['map-selection'].children[3]), /MOCKB/);
   const outlines = groups.filter(group => group.options.pane && !map.removed.includes(group));
   assert.equal(outlines.length, 2); assert.ok(outlines.every(group => group.layers.length === 1));
   replies.push(reply(200, payload())); await page.loadStation();
@@ -562,7 +565,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
   assert.equal(controls[0].children[0].textContent, '定位站点');
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
-  assert.equal(e['map-routes'].children[0].children[1].textContent, 'MOCKB · Mock-C');
+  assert.equal(e['map-routes'].children[0].children[1].textContent, 'Mock-C');
   const fits = map.fits.length; const requestCount = requests.length;
   await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits + 1); assert.equal(requests.length, requestCount);
   assert.equal(e['map-station'].value, 'MOCKA');
@@ -579,4 +582,38 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   assert.deepEqual(JSON.parse(values.get('nc-ops-console.selection')), { district: 'other', station: 'OTHER' });
   const restored = await fixture('', 206, storage); restored.replies.push(restored.reply(200, { districts }), restored.reply(200, data));
   await restored.page.start(); assert.equal(restored.elements['map-district'].value, 'other'); assert.equal(restored.elements['map-station'].value, 'OTHER');
+});
+
+test('RM6 compact ZIP fields, badges, safe three-row tooltips and shared clear button', async () => {
+  const { elements: e, page, replies, reply, groups, controls } = await fixture();
+  const { details } = await import('./route-map-fixtures.js');
+  const source = profiles(), cache = details();
+  source.stations.MOCKA.rows[1].dsp_name = '<Mock DSP>';
+  Object.assign(cache.routes['1'].zips[0], { experienced_pph: 0, pickup_volume_daily: 1234 });
+  const data = buildRouteMap({ profiles: source, station: 'MOCKA', boundaries: boundaries(), details: cache });
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
+  e['map-routes'].children[0].listeners.click();
+  assert.equal(e['map-clear'].parentNode, e['map-summary-heading']);
+  for (const mode of [0, 1]) {
+    controls[1].children[mode].listeners.click();
+    const tooltip = groups[0].layers[0].tooltip;
+    assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>']]);
+  }
+  groups[0].layers[0].listeners.click({});
+  assert.equal(e['map-clear'].parentNode, e['map-zip-heading']);
+  const nodes = e['map-selection'].children;
+  assert.equal(nodes[0].children[0].textContent, '00002');
+  assert.deepEqual(nodes[1].children.map(row => row.children.map(n => n.textContent)), [['熟手 PPH', '0.00'], ['领件量（日均）', '1,234'], ['DSP', '<Mock DSP>'], ['ZIP 难度', 'A级 难']]);
+  assert.deepEqual(nodes[2].children.map(row => row.children.map(n => n.textContent)), [['站点', 'MOCKA']]);
+  assert.equal(nodes[1].children[3].children[1].style.backgroundColor, '#dc2626');
+  assert.doesNotMatch(allText(e['map-selection']), /地图已定位|DMS 无数据|该 ZIP 不在线路详情/);
+  e['map-clear'].listeners.click(); assert.equal(e['map-zip-panel'].hidden, true); assert.equal(e['map-summary-panel'].hidden, true);
+  groups[0].layers[1].listeners.click({});
+  assert.equal(e['map-selection'].children[1].children[0].children[1].textContent, '—');
+  assert.equal(e['map-selection'].children[1].children[1].children[1].textContent, '—');
+  assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
+  const html = await fs.readFile(new URL('../../web/map.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /map-current|当前选择|<style/);
+  assert.ok(html.indexOf('id="map-zip-panel"') < html.indexOf('id="map-summary-panel"'));
+  assert.equal((html.match(/id="map-clear"/g) || []).length, 1);
 });

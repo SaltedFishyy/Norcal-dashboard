@@ -43,3 +43,16 @@ test('DS default nine Stations preserve configured order and distinct route colo
   const { polygonStyle, clearSelection } = await import('../../web/map-state.js');
   for (const feature of map.features.features) assert.equal(polygonStyle(feature.properties, clearSelection(), 'route').fillColor, routeColor(feature.properties.route_id));
 });
+
+test('RM6 district features carry exact ZIP metrics and profile DSP with null fallbacks', () => {
+  const source = profiles(), cache = details(); source.stations.MOCKA.rows[1].dsp_name = 'Mock DSP';
+  Object.assign(cache.routes['1'].zips[0], { experienced_pph: 24.5, pickup_volume_daily: 0 });
+  for (const detail of [cache, undefined]) {
+    const map = buildDistrictMap({ profiles: source, details: detail, boundaries: boundaries(), districts, district: 'mock' });
+    for (const { properties: p } of map.features.features) {
+      const found = detail && p.station === 'MOCKA' && p.postal_code === '00002';
+      assert.equal(p.dsp_name, p.station === 'MOCKA' ? 'Mock DSP' : null);
+      assert.equal(p.experienced_pph, found ? 24.5 : null); assert.equal(p.pickup_volume_daily, found ? 0 : null);
+    }
+  }
+});

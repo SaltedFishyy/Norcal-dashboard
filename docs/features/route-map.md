@@ -784,3 +784,72 @@ RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
 
 - **RM5b 选中描边 — 2026-10-05（Codex）**：按 RM5b task brief 将选中边框改为深色 `#0b1220` 外层 + 白色 `#ffffff` 内层；Route 为 3.5 / 1.5，ZIP 为 5 / 3，无覆盖 ZIP 的外层实线、内层 `8 6` 虚线，浅粉填充不变。数值集中在 `SELECTION_OUTLINE`。基础多边形改用中性边框，保留原有填充、透明度、hover 加粗规则、选择、搜索、tooltip 和视野行为。独立 Leaflet pane 在填充层上方，使用 CSSOM 设置 pointer-events:none；描边 fill:false、interactive:false、bubblingMouseEvents:false，选中 ZIP 最后绘制。选择变化重建描边，清除 / Station 切换移除，颜色模式切换复用既有描边，无残留或重复。
 - RM5b 检查：`npm.cmd test` 320/320 通过（日志 `.handoff/RM5b-tests.log`），`git diff --check` 通过；项目没有 lint / build scripts。新增 doubles 测试覆盖线宽 / 顺序、无覆盖虚线、非交互、模式复用、清除、Station 切换和 hover。临时合成数据 HTTP server + 已安装 Playwright / Chromium 在 1440 / 390 验证实际 SVG 线宽与顺序、pointer-events、模式切换、Esc 清除、无横向溢出、无 JavaScript / CSP 错误；server 和 browser 已关闭。首次浏览器检查因 PowerShell 管道中文按钮名编码为问号导致 locator 超时，改用 CSS selector 后通过。未新增依赖、未修改数据或需求 / 验收标准、未访问 DMS / credentials / 真实 runtime，未 commit / push / 部署。真实运营底图观感和 Product Owner 预览签字仍待确认；legacy 页面本轮未修改或做浏览器回归。
+
+---
+
+## RM6 — 地图选中信息与侧栏整理（**Approved**，Product Owner 2026-10-07）
+
+只调整 UI / 展示层；District → Station → Route → ZIP、选中逻辑、RM5 / RM5b 颜色和描边、hover / click / tap、Coverage、Missing ZIP、搜索、localStorage 记忆、API / cache 数据含义都**不变**。
+
+### RM6-1 Tooltip（hover）
+
+- 两种颜色模式下都只显示 3 行：`ZIP`、`线路`、`DSP`。删除“站点”和“线路难度 / ZIP 难度”行。缺失时显示 `—`。
+
+### RM6-2 数据（server 端组装，只新增字段，Claude 设计）
+
+- `/api/route-map`、`/api/route-map/district`、`/api/route-map/zip` 返回的每个有线路的 ZIP（feature properties 和 ZIP 查询结果）增加：
+  - `dsp_name`：来自该 Route 的 profile 行；
+  - `experienced_pph`、`pickup_volume_daily`：来自 route-details 中同一个 ZIP（与 `zip_difficulty` 使用同样的 join 条件）；没有详情或该 ZIP 不在详情里时为 null。
+- 原有字段不变。前端不做 Route-ZIP join（W5）。
+
+### RM6-3 侧栏结构（从上到下）
+
+1. **当前邮编**（主要信息；选中 ZIP 时显示）：
+   - 头部：大号 `ZIP`；状态做成小 badge（如“有线路覆盖”“当前无线路覆盖”“多个站点”），只在必要时显示；右侧放「清除选择」小按钮。
+   - 主要数字（大号，并排）：`熟手 PPH`、`领件量（日均）`（来自 `pickup_volume_daily`，不是百分比）。
+   - 辅助信息（小号，一行或两列）：`站点`、`DSP`、`ZIP 难度`（沿用五色标签）。
+   - 缺失一律显示 `—`。删除原来的长说明文案（如“该 ZIP 有线路覆盖，地图已定位并高亮”）。无线路 / 无边界 / 超出范围 / 多站点等情况只用 badge 加最短的一行文字表示。
+2. **线路概览**（次级信息，视觉权重低于当前邮编；选中 Route 或 ZIP 时显示）：`Route`、`站点`、`DSP`、`ZIP 数`（含已上图数）、`Pickup Volume`、`PPH`、`线路难度`、更新时间。难易度模式下的“ZIP 难度：已有 N 个 ZIP / 暂无 ZIP 难度数据”保留为一行小字。只选中 Route、没有选中 ZIP 时，「清除选择」放在线路概览的头部。
+3. **线路**（搜索和线路列表）。
+4. **地图覆盖率**、**缺少边界的邮编**（折叠）、跨站重叠提示、ZCTA 说明：保持现有内容，样式统一并收紧。
+
+- **删除“当前选择”卡片**；它显示的站点 / 线路 / 邮编已经被以上卡片覆盖。
+- 不重复显示相同字段；卡片的间距、标题字号、badge、数字排版统一；整体更紧凑，像运营 dashboard。
+
+### RM6-4 布局
+
+- 1440 宽度：侧栏从 `minmax(280px, 360px)` 缩窄到约 `300px` 的固定宽度（可在 280–320 之间微调），地图获得剩余宽度；地图高度不变或略增。目标是地图在 1440 下明显变宽。
+- 390 宽度：仍为单列（地图在上，侧栏在下），不能有横向滚动；数字和标签在窄屏下可读。
+
+### RM6-5 验收标准
+
+- **RM6-AC1** Tooltip 只有 ZIP / 线路 / DSP（两种模式下都是）。
+- **RM6-AC2** 选中 ZIP 后，当前邮编显示 ZIP、站点、DSP、ZIP 难度、熟手 PPH、领件量（日均），缺失为 `—`；清除选择正常工作。
+- **RM6-AC3** 没有“当前选择”卡片；线路概览在当前邮编下方，显示当前 Route，且视觉层级较低。
+- **RM6-AC4** 选中逻辑、RM5 / RM5b、搜索、District / Station 记忆、Coverage / Missing 没有回归。
+- **RM6-AC5** 1440 下地图比 RM5 时明显更宽；390 下没有横向滚动。
+- **RM6-AC6** 新增的 API 字段符合 RM6-2，原有字段不变；`npm test` 和 `git diff --check` 通过；没有第三方请求，console 没有 error。
+
+### RM6 实现记录（Implementation Notes）
+
+- 2026-10-07，Codex：保留工作区已有 RM5 / RM5b / MS / DS 改动，只修改 RM6 涉及的展示、地图字段投影及测试。未访问 DMS、凭据或真实 runtime；未新增依赖、修改缓存 schema、提交、推送或部署。
+- 服务端复用已有 `difficultyProperties` 中按 Route + Station + ZIP 的 detail join，向 Station / District feature properties 和有线路的 ZIP lookup 新增 `dsp_name`、`experienced_pph`、`pickup_volume_daily`。DSP 来自 profile，两个 ZIP 指标来自详情；保留零值，缺失详情 / ZIP 为 null，不改变原字段或 coverage / missing。
+- 两种模式的 tooltip 固定为 ZIP / 线路 / DSP 三行。删除当前选择卡片；ZIP 卡片展示大号 ZIP、状态 badge、熟手 PPH / 日均领件量、站点 / DSP / 五色 ZIP 难度，缺失为 `—`；无边界另加 badge，多站点保留紧凑 owners 列表，超范围保留支持范围一行。共用同一个原生清除按钮，ZIP 选中时移入 ZIP 头部，仅 Route 选中时移入线路概览头部，沿用原 `onClear`。
+- 线路概览保留原指标、更新时间和难易度模式详情状态小字，删除批量抓取命令和重复 snapshot 来源文字；ZIP 信息视觉权重高于 Route。桌面侧栏固定 300px，窄屏单列；样式均在 styles.css，文案集中在 map-text.js，没有 inline style 标签或 CSP 调整。
+- 既有测试断言调整逐项：五种 ZIP 状态、跨站 ZIP、过期响应及模式切换的 `map-current` 断言改查 ZIP 卡片 / Route 概览；原 ZIP dl 索引改查新标题和指标区域；PO Box / 长无边界说明改查 badge；重复 snapshot 来源断言删除；RM5 tooltip 的 Route / ZIP 难度与降级文字断言改查固定三行，ZIP null / not_in_detail 改查 `—`；抓取命令断言改为不存在；多站点 owner 断言改查紧凑列表。颜色、填充、描边、视野、请求数量、搜索、District / Station 记忆、Coverage / Missing 回归断言保留。完整 feature properties 预期仅补入新增字段。DOM doubles 增加头部节点并模拟 append 的真实移动语义。
+- 检查：`npm.cmd test`（即 npm test）409/409 通过，0 failed / skipped；`git diff --check` 通过（仅既有 LF/CRLF 提示）。没有 lint / build scripts。新增合成数据测试覆盖准确匹配、零值、null、无详情 / 不在详情中、lookup、District、API 原字段保留、六个 ZIP 字段、tooltip 安全三行和清除按钮位置 / 功能。测试日志：`.handoff/RM6-tests.log`。
+- 使用已安装 Playwright / Chromium 和临时 loopback HTTP handler 注入合成 profiles / details / boundaries，不读取任何运营 runtime。1440px 下侧栏 300px、地图 1072px（原 360px 侧栏时为 1012px）；390px 下地图 / 侧栏 366px，document scrollWidth 为 390px。真实 polygon click / touch tap、两种模式 tooltip、ZIP 指标、清除和展开 Missing 表通过；无外部请求、JavaScript / CSP 错误。Mock 未安装底图，预期 basemap 404 和提示保留，未验证实际 PMTiles 底图。初次检查 hover 到被选中高亮层覆盖的原图层超时，随后改查顶层；tooltip locator 改为最后一个实际 tooltip 后通过。临时 server / browser 已关闭。
+- 预览截图：`.handoff/RM6-1440.png`、`.handoff/RM6-390.png`；浏览器结果：`.handoff/RM6-browser.log`。RM6-AC1 / AC2 / AC3 / AC4 / AC5 / AC6 在上述合成数据测试及浏览器范围内通过；真实运营数据与底图观感、Product Owner 预览签字仍待完成。本次未修改或浏览器回归 legacy 页面。
+
+- **RM6b — 2026-10-07（Codex）**：仅调整 `web/map-panel.js`、`web/styles.css` 及相关 DOM 断言。当前 ZIP 改为 2×2 指标（熟手 PPH / 日均领件量、DSP / ZIP 难度），DSP 加粗、五色 badge 放大，站点降为辅助文字；清除按钮采用小号次级样式。侧栏 280px，桌面左右留白 16px、栏间距 16px，顶部控件分行规则不变。线路难度并入概览的紧凑指标组，更新时间移到底部并弱化。站点细看搜索结果不添加 Station 前缀，片区总览仍保留分组 / 搜索前缀；搜索筛选及选择逻辑不变。
+- RM6b 检查：指定 `node --test server/test/route-map-web.test.js server/test/map-state.test.js` 24/24 通过；`git diff --check` 通过（既有 LF/CRLF 提示）。没有 lint / build scripts，按 brief 未运行完整 npm test。DOM 断言逐项调整：ZIP 难度由辅助区移至主指标第四项（含无数据断言）；主指标预期补入 DSP / ZIP 难度，辅助区仅剩站点；无边界说明因更新时间移到底部而更新索引；站点细看搜索结果预期删除 Station 前缀。既有交互回归断言保留。初次临时编辑命令因系统 Python 无法运行而失败，改用 Node 完成；初次测试的四项旧排版断言随后更新并通过。
+- RM6b 浏览器：已安装 Playwright / Chromium + 临时本地 HTTP 页面，注入合成数据直接执行真实 panel 模块 / CSS；1440 下侧栏 280px、地图容器 1112px（RM6 为 1072px），390 下地图 / 侧栏 366px、scrollWidth 390px；两列指标、15px ZIP 难度 badge、更新时间位于末尾及无 pageerror 通过。截图 `.handoff/RM6b-1440.png`、`.handoff/RM6b-390.png`。该检查仅验证排版，没有启动真实 API、地图渲染或底图，也没有完整 Network / console / CSP 回归；地图交互由指定测试验证。临时 server / browser 已关闭；未访问 DMS / credentials / 真实 runtime、未新增依赖、未 commit / push / 部署。真实地图观感与 Product Owner 预览签字仍待完成。
+
+### RM6b — UI 微调（Product Owner 2026-10-07）
+
+只改 CSS、UI 和排版；数据、API、cache、选中 / 搜索 / localStorage、RM5 配色、hover / click / tap、Coverage 都不变。
+
+- **当前邮编**：顶部是大号 ZIP（右上角放小号次级的「清除选择」）。下面是 2×2 主要指标：第一行为 `熟手 PPH`、`领件量（日均）`（大号数字）；第二行为 `DSP`（加粗、醒目）、`ZIP 难度`（五色 badge，比现在更大更醒目）。`站点`降为辅助信息（小字）。缺失为 `—`。
+- **布局**：1440 下侧栏约 280px，页面左右留白适当减少，让地图明显变宽。顶部控件保持现有分行，不强行压成一行。390 保持单列，不出现横向滚动。
+- **线路列表**：站点细看时只显示 Route 名（如 `SMF01-001`），不加 Station 前缀；片区总览时保留按 Station 分组或前缀。
+- **线路概览**：`ZIP 数`、`Pickup Volume`、`PPH`、`线路难度` 放在同一组紧凑指标中；更新时间放在底部并弱化显示。

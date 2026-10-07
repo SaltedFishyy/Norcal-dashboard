@@ -25,11 +25,8 @@
     <div class="map-layout" id="map-content" aria-busy="true">
       <div id="route-map" role="region" aria-label="线路邮编覆盖地图"></div>
       <aside class="map-sidebar">
-        <section class="panel"><h2 data-map-text="current">当前选择</h2><div id="map-current" aria-live="polite"></div>
-          <button id="map-clear" type="button" disabled data-map-text="clear">清除选择</button>
-        </section>
-        <section class="panel" id="map-zip-panel" hidden><h2 data-map-text="currentZip">当前邮编</h2><div id="map-selection" aria-live="polite"></div></section>
-        <section class="panel" id="map-summary-panel" hidden><h2 data-map-text="summary">线路概览</h2><div id="map-summary" aria-live="polite"></div><p id="map-snapshot-source" class="snapshot"></p></section>
+        <section class="panel" id="map-zip-panel" hidden><div class="map-card-heading" id="map-zip-heading"><h2 data-map-text="currentZip">当前邮编</h2><button id="map-clear" type="button" disabled data-map-text="clear">清除选择</button></div><div id="map-selection" aria-live="polite"></div></section>
+        <section class="panel" id="map-summary-panel" hidden><div class="map-card-heading" id="map-summary-heading"><h2 data-map-text="summary">线路概览</h2></div><div id="map-summary" aria-live="polite"></div></section>
         <section class="panel"><h2 data-map-text="route">线路</h2>
           <label for="map-search" data-map-text="search">搜索线路或邮编</label><input id="map-search" type="search" placeholder="搜索线路或邮编" disabled>
           <p id="map-search-hint" class="snapshot" data-map-text="zipHint" hidden>输入完整 5 位邮编可搜索邮编</p>
