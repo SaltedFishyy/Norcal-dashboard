@@ -31,3 +31,4 @@ dms-state.json
 
 # Local Claude Code settings (per-machine permissions)
 .claude/settings.local.json
+.claude/settings.json

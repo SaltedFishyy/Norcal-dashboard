@@ -126,3 +126,12 @@ DMS / browser automation → transform / normalization → store → API → fro
 - Python、Node、Git Bash、Codex CLI 等是否可用，需要时实际检测，不做长期假设。
 - 本地预览：在 `nc-ops-console-main/` 下启动静态服务器（如 `npx http-server -p 8000` 或 `python -m http.server 8000`），打开 `http://localhost:8000/`。`npx http-server` 作为临时预览工具不需要每次单独请求批准，但不能因此修改 `package.json` 或增加永久 dependency。
 - `.sh` 脚本在 PowerShell 中不能直接运行，需要 `bash scripts/<name>.sh`。
+
+### 7.1 Bash 命令写法（Product Owner 2026-10-07）
+
+1. Claude 会话默认从仓库根目录启动，命令在仓库根目录执行。
+2. 仓库内的 Bash 命令直接用相对路径，例如 `grep ... server/src/...`、`npm test`、`git status`、`git diff`。
+3. 不要为了运行普通命令先写 `cd <repo> && ...`：路径解析器无法确认后续相对路径仍在工作目录内，会触发 `permissions.blockReadsOutsideWorkingDirectories`，即使 Bash 已在 Allow 中也会弹确认。
+4. 只有确实需要访问仓库外的文件（如 `%LOCALAPPDATA%` 下的 runtime 目录）时才用绝对路径。
+5. 不要关闭 `permissions.blockReadsOutsideWorkingDirectories`，保留这层安全保护。
+6. 仓库内的普通 Bash 命令继续按现有权限自动执行，不制造不必要的确认提示。
