@@ -1,5 +1,17 @@
 import { difficultyLevel } from './difficulty.js';
 
+// Preserve API order for ties and missing values without changing source rows.
+export function sortRows(rows, sort) {
+  if (!['pickup_volume', 'pph'].includes(sort.key)) return [...rows];
+  const valid = value => typeof value === 'number' && Number.isFinite(value);
+  return rows.map((row, index) => ({ row, index })).sort((a, b) => {
+    const av = a.row[sort.key], bv = b.row[sort.key];
+    if (valid(av) !== valid(bv)) return valid(av) ? -1 : 1;
+    if (!valid(av) || av === bv) return a.index - b.index;
+    return (av < bv ? -1 : 1) * (sort.dir === 'asc' ? 1 : -1);
+  }).map(item => item.row);
+}
+
 // Lightweight user-facing text shared by the profile page and detail modal.
 export const profileText = {
   loading: '加载中…', networkError: '无法连接本地服务器。',

@@ -1,7 +1,7 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatNumber, formatUpdated, formatValue } from './format.js';
 import { routeColor } from './route-colors.js';
-import { searchRoutes, classifyQuery, clearSelection } from './map-state.js';
+import { filteredRoutes, classifyQuery, clearSelection } from './map-state.js';
 import { routeDifficultyText, mapText as t } from './map-text.js';
 
 export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
@@ -17,11 +17,11 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     if (difficultyLevel(value)) { node.children[1].className = 'difficulty system-difficulty'; node.children[1].style.backgroundColor = difficultyColor(difficultyLevel(value)); node.children[1].style.color = '#ffffff'; }
     return node;
   };
-  let data, selection = clearSelection(), colorMode = 'route', focusStation = null;
+  let data, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   const search = element('search');
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
-    const { matches } = searchRoutes((data?.routes || []).filter(route => (query && classified.kind !== 'zip') || !focusStation || route.station === focusStation), classified.kind === 'zip' ? '' : query);
+    const { matches } = filteredRoutes(data?.routes || [], query, focusStation, dsp);
     element('routes').replaceChildren();
     element('no-match').hidden = matches.length !== 0;
     element('search-hint').hidden = !classified.zipHint;
@@ -94,7 +94,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('search-message').setAttribute('role', state === 'error' ? 'alert' : 'status');
   }
   function clear() {
-    data = null; search.value = ''; search.disabled = true;
+    data = null; search.disabled = true;
     element('conflicts-details').hidden = true; element('conflicts-details').open = false; element('conflicts').replaceChildren();
     applySelection(clearSelection());
     element('no-match').hidden = true; searchStatus('success');
@@ -132,5 +132,6 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('missing-empty').hidden = missing.length !== 0; renderRoutes();
   }
   function setColorMode(mode) { colorMode = mode; applySelection(selection); }
-  return { render, clear, applySelection, searchStatus, setColorMode };
+  function setDsp(value) { dsp = value; renderRoutes(); }
+  return { render, clear, applySelection, searchStatus, setColorMode, setDsp };
 }

@@ -853,3 +853,158 @@ RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
 - **布局**：1440 下侧栏约 280px，页面左右留白适当减少，让地图明显变宽。顶部控件保持现有分行，不强行压成一行。390 保持单列，不出现横向滚动。
 - **线路列表**：站点细看时只显示 Route 名（如 `SMF01-001`），不加 Station 前缀；片区总览时保留按 Station 分组或前缀。
 - **线路概览**：`ZIP 数`、`Pickup Volume`、`PPH`、`线路难度` 放在同一组紧凑指标中；更新时间放在底部并弱化显示。
+
+---
+
+## RM7 — 地图 DSP 筛选（**Approved**，Product Owner 2026-10-08）
+
+在地图右上角现有的“片区 / 站点”筛选器旁边，新增 DSP 筛选器。**只在前端控制视觉强调和线路列表的过滤**，不改数据、API、cache、scraper、DB，也不改 RM5 / RM5b 的颜色和描边、Coverage、Missing ZIP、跨站冲突、边界逻辑。
+
+### RM7-1 数据来源（Claude 检查后确认：不需要新增 API）
+
+- `/api/route-map/district` 返回的 `routes[]` 和 `features[].properties` 中已经有 `dsp_name`（来自 Route Profile 的 `fleetName`）。
+- 选项由前端从**当前已加载的** `routes` 生成：
+  - 只取当前范围内的 Route：站点细看时只取该 Station；片区总览时取该 District 的全部 Route；
+  - `dsp_name` 去掉首尾空格后，只保留非空字符串；null、undefined、空字符串都不生成选项；
+  - 去重；
+  - 按码点（code point）比较排序，与 `route-map.js` 中的 `compare` 规则一致，保证顺序稳定；
+  - 第一项固定为“全部 DSP”（值为空字符串）。
+
+### RM7-2 状态规则
+
+- 状态：`dsp`，取值为 null（全部）或某个 DSP 名称。默认为 null。
+- **只在当前页面会话中有效**，不写入 localStorage，也不放进 URL。
+  - 理由：DSP 选项随 District / Station 变化。如果要记住上一次的 DSP，就得在恢复时再判断它在新范围里是否还有效，这会增加状态的复杂度。刷新页面后回到“全部 DSP”，行为最容易理解。
+- 切换 District 或 Station、重新加载数据后，重新生成选项。如果当前的 `dsp` 不在新选项中，就自动回到“全部 DSP”。
+
+### RM7-3 地图表现（复用现有的淡化逻辑）
+
+- `polygonStyle` 增加一个 `dsp` 参数。
+- **没有选中 Route 时**，满足以下任一条件的多边形就淡化，使用现有的 `fillOpacity 0.12 / opacity 0.35`：
+  - 不属于当前聚焦的 Station（现有规则）；
+  - 设置了 `dsp`，并且 `properties.dsp_name !== dsp`（新增规则）。
+- **有选中 Route 时**：规则不变（只有选中的 Route 正常显示，其他都淡化）。也就是说，选中的 Route 优先于 DSP 筛选。
+- 颜色（按线路 / 按难易度）、描边、hover 加粗规则都不变；hover 结束时恢复样式，也要把 `dsp` 传进去。
+- “定位”（fit）按钮的行为不变。
+
+### RM7-4 线路列表和搜索
+
+- 设置了 `dsp` 时，线路列表只显示 `dsp_name === dsp` 的 Route。DSP 条件**叠加**在现有列表逻辑上，现有逻辑本身不变：没有搜索词时按聚焦的 Station 过滤；输入线路搜索词时可以跨 Station 搜索（现有行为，见 `route-map-web.test.js` 中“聚焦 MOCKA 时仍可搜索 MOCKB 的线路”）。没有匹配时，显示现有的“未找到匹配线路”。（2026-10-08 澄清：RM7-T1 时 Codex 指出原来的写法与现有的跨 Station 搜索冲突；Product Owner 没有要求改变搜索范围，所以保留现状。）
+- 在搜索框输入线路名后按 Enter：只在**已经按 DSP 筛选过**的 Route 中查找，与列表保持一致。
+- ZIP 搜索：**不受 DSP 筛选影响**，ZIP 归属仍然以 API 返回的结果为准。
+
+### RM7-5 切换 DSP 时，已选中的 Route / ZIP 怎么处理
+
+| 当前选中的内容 | 切换到某个具体 DSP 时 | 切换到“全部 DSP”时 |
+|---|---|---|
+| 没有选中 | 不变 | 不变 |
+| 选中的 Route（或者选中的、已被 Route 覆盖的 ZIP）属于新 DSP | **保留** | 保留 |
+| 选中的 Route（或者已被 Route 覆盖的 ZIP）**不属于**新 DSP | **清除选中**（回到当前 Station / District 的聚焦状态，和按 Esc 的效果相同） | 保留 |
+| 选中的 ZIP 不属于任何 Route（uncovered、no_boundary、out_of_range、multi_station） | 保留（DSP 与它无关） | 保留 |
+
+- 理由：用户切换 DSP，说明想看这个 DSP。如果还留着别的 DSP 的 Route，“选中优先”的规则会让新 DSP 的线路全部被淡化，看起来就像 DSP 筛选没有生效。
+- **DSP 筛选开着时，用户在地图上点了别的 DSP 的多边形，或者 ZIP 搜索的结果属于别的 DSP**：允许选中，正常显示，DSP 筛选保持不变。这是用户明确的操作，按“选中优先”显示；清除选中后，又回到按 DSP 强调的状态。
+
+### RM7-6 UI
+
+- `map.html` 的 header 中，“站点”下拉框后面加一个“DSP”下拉框，`id="map-dsp"`，样式与现有的两个下拉框一致。数据加载完成前为 disabled。
+- 390 宽度下不能出现横向滚动；1440 宽度下与现有的两个筛选器排在一行，或者沿用现有的换行规则。
+
+### RM7-7 验收标准
+
+- **RM7-AC1** 选项：站点细看时只有该 Station 的 DSP；片区总览时是该 District 全部的 DSP；去重；顺序稳定；没有空白、null 之类的选项；第一项是“全部 DSP”；默认为全部。
+- **RM7-AC2** 切换 Station 或 District 后，如果原来的 DSP 在新范围中不存在，自动回到全部；如果仍然存在，就保留。
+- **RM7-AC3** 地图：选择 DSP 后，其他 DSP 的多边形淡化，透明度数值与现有的聚焦淡化相同；选择全部后恢复。两种颜色模式下颜色都不变。选中 Route 时仍然按现有规则显示。
+- **RM7-AC4** 线路列表只显示所选 DSP 的 Route（叠加在现有的 Station 范围和跨 Station 搜索逻辑上，现有逻辑不变）；按 Enter 搜索时只在“现有逻辑 + DSP”筛选过的 Route 中查找。
+- **RM7-AC5** 切换 DSP 时，已选中内容的处理符合 RM7-5 的表格；在地图上点击、或 ZIP 搜索到别的 DSP 时，可以正常选中，DSP 筛选保持不变；ZIP 归属不变。
+- **RM7-AC6** RM5 / RM5b / RM6 的颜色、描边、tooltip、Coverage、Missing、跨站冲突、District / Station 记忆都没有回归；DSP 不写入 localStorage。
+- **RM7-AC7** 1440 / 390 宽度下没有横向滚动，console 没有 error；`npm test` 全部通过，现有断言除了因为新增参数必须调整的地方以外都不改，调整的地方要逐条说明；`git diff --check` 通过；没有新增依赖。
+
+### RM7 Codex 任务
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| RM7-T1 | 按 RM7-1 至 RM7-7 实现 DSP 筛选器和测试 | 待 review |
+
+### RM7 实现记录（Implementation Notes，2026-10-08）
+
+- 新增 `dspOptions`，按当前 Station / District 生成去重、trim 后非空、稳定排序的选项；DSP 仅保存在页面内存，重新加载范围时保留有效值或回到全部。
+- 新增 `filteredRoutes`，列表和 Enter 共用现有 Station / 跨 Station 搜索规则，再叠加 DSP 条件；ZIP 查询与归属逻辑不变。
+- `polygonStyle` 的可选第五参数控制未选中时的 DSP 淡化；所有地图样式调用均传入 DSP，`view.setDsp` 复用 `refreshStyles`，选中描边与颜色逻辑不变。
+- DSP 切换时按已加载的完整 Route 判断归属，必要时复用 `deselect`；不属于任何 Route 的 ZIP 保留。下拉框加载期间禁用，选项使用 DOM / textContent 创建；header 增加必要的宽度约束。
+- 新增 4 项测试；现有测试断言没有修改，仅 DOM fixture 增加 `map-dsp` 元素。
+- 检查：定向测试 28/28；`npm.cmd test` 478/478（PowerShell 阻止 npm.ps1，改用 npm.cmd）；无 lint / build script。`git diff --check` 退出 0，无空白问题（Git 提示 LF 将转换为 CRLF）。
+- 浏览器：已安装 Playwright / Chromium，临时本地静态 HTTP 服务和合成 API 数据；未启动真实 API、未访问 DMS、未安装依赖。1440 / 390 无横向滚动、无 console / page error、无外部请求。截图 `.handoff/RM7-1440.png`、`.handoff/RM7-390.png`；复核脚本 `.handoff/RM7-browser-check.mjs`，测试日志 `.handoff/RM7-tests.log`。
+- RM7-AC1 至 RM7-AC7 技术检查通过；仍待 Claude review 和 Product Owner 预览签收。仓库原有其他未提交改动保留。
+
+---
+
+## RM8 — 搜索框内容不因切换筛选而清空（**Approved**，Product Owner 2026-10-08）
+
+### RM8-1 原因（Claude 检查代码）
+
+- 切换 Station 或 District 时会调用 `loadStation()`，它先执行 `clear()` → `panel.clear()`，其中有 `search.value = ''`，所以输入的内容被清空了。
+- `loadStation` 有一个 `preserveSearch` 选项，但目前没有任何调用方使用它，而且它同时控制“切换后不重新定位地图”（`fitToStation: !preserveSearch`），把“保留搜索文本”和“地图视野”绑在了一起。
+- 切换 DSP 只会调用 `deselect()`，按代码看不会清空输入框；用测试确认这一点。
+
+### RM8-2 规则
+
+- **搜索框的文字与片区、站点、DSP 的筛选状态分开**：切换片区、站点、DSP，以及加载失败后点“重试”时，**都保留**输入框的内容。
+- 只有以下情况会清空输入框：用户自己删除（包括浏览器 search 输入框自带的清除按钮），或者整页重新加载（重新加载后搜索框为空，与现在一致）。
+- “清除选择”按钮和 Esc 只清除地图上的选中，不清空输入框（现有行为，保持不变）。
+- 地图视野按现有规则处理：切换站点或片区后，仍然定位到新的范围。这和是否保留搜索文本无关。
+- 切换后的选中规则不变：切换站点或片区时，仍然清除已选中的 Route / ZIP（现有行为）；切换 DSP 时按 RM7-5 处理。保留下来的搜索文本**不会**自动重新执行 ZIP 查询，也不会自动选中任何东西。
+- **新范围下的结果显示：**
+  - 输入的是线路搜索词：线路列表按现有规则和 DSP 条件过滤；没有匹配时显示现有的“未找到匹配线路”。
+  - 输入的是完整的 5 位 ZIP：线路列表按现有规则显示（ZIP 不参与线路过滤）。搜索提示行显示“已保留 ZIP <zip>，按 Enter 在当前范围重新查询”。按 Enter 后，走现有的 ZIP 查询逻辑；如果 ZIP 不属于当前片区，显示现有的“该 ZIP 属于 …”提示。
+- 正在进行中的 ZIP 查询，在切换范围时作废（现有的 `zipSequence` 机制），不会把旧的结果应用到新范围上。
+
+### RM8-3 验收
+
+- **RM8-AC1** 输入 ZIP 或线路名后，切换站点、片区、DSP，输入框的内容都不变；“重试”也不清空。
+- **RM8-AC2** 新范围中线路搜索没有匹配时，显示“未找到匹配线路”，输入保留；保留的是 ZIP 时显示约定的提示。
+- **RM8-AC3** 用户清空输入框后，列表恢复，提示消失；按 Enter 搜索线路和 ZIP 都正常；切换范围前发出的 ZIP 查询，结果不会应用到新范围。
+- **RM8-AC4** 切换后的地图定位、选中清除、RM5 / RM5b / RM6 / RM7 都没有回归；`npm test` 全部通过，因为这项改动而必须调整的现有断言要逐条说明。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| RM8-PS1-T1 | 实现 RM8 搜索文本保留与 PS1 排序 | 待 review |
+
+### RM8 / PS1 实现记录（Implementation Notes，2026-10-08）
+
+- RM8：panel.clear 仅清理数据和状态，不清空搜索文本。删除无调用方、无测试引用的 preserveSearch；范围加载始终 fitToStation，zipSequence 不再恢复。站点 / 片区 / DSP 切换使旧 ZIP 查询失效；加载成功及 DSP 切换显示 map-text.js 中的保留 ZIP 提示，不自动查询。原有 input / Enter 查询及清除选择逻辑保留。
+- PS1：复用已在静态白名单中的 format.js，导出 sortRows；严格有限 number 判断，缺失值末尾，原始下标打破平局，返回新数组。app.js 仅内存保存排序，点击表头不请求、不写 localStorage；按 route_id 重建定位映射，排序时保留已有线路高亮。
+- 两个表头使用原生 button、aria-sort、箭头和 focus 样式。切换站点 / 片区及 ZIP 自动定位沿用现有路径，不重置排序。
+- 新增 profile-sort.test.js 并注册 index.js；在原有地图 / PZ1 DOM 夹具中增加 RM8 / PS1 测试。没有修改现有测试断言；画像页夹具仅增加排序表头节点。初轮新增夹具重复初始化导致全局 fetch 恢复错误，已拆成独立 fresh-page 测试修正隔离；临时脚本字符编码问题也已修正。
+- 浏览器复核使用已安装 Playwright / Chromium、本地临时 HTTP 服务和合成数据。两页 1440 / 390 宽度无页面横向滚动，无 console / page error，无外部请求；地图底图使用预期不可用的合成响应，边界与交互正常。画像页手机截图在既有表格滚动区内滚动至 active 箭头。脚本和日志：.handoff/RM8-PS1-browser-check.mjs、RM8-PS1-browser.log；截图：RM8-PS1-profile-1440.png、RM8-PS1-profile-390.png、RM8-PS1-map-1440.png、RM8-PS1-map-390.png（均位于 .handoff/）。已查看要求的三张截图。
+- 无数据 / schema 改动，无新增依赖；未改后端 / API / scraper / DB / P3，未访问真实 DMS，未写凭据，未 commit / push / 部署。工作区已有改动保留。项目没有 lint / build scripts。
+- 技术实现待 review，UI 仍待 Product Owner 预览签收。
+
+- 最终检查：npm.cmd test 494/494 通过（原基线 487，新增 7 项）；日志 .handoff/RM8-PS1-tests.log。git -c core.safecrlf=false diff --check 无输出、退出码 0（仅此命令关闭原有 LF/CRLF 提示）。RM8-AC1 至 AC4、PS1-AC1 至 AC4 技术检查通过。
+
+---
+
+## RM9 — 地图视觉层级、尺寸与 Route 编号（**Approved**，Product Owner 2026-10-09 / 2026-10-13）
+
+本节记录地图 UX audit 之后的三轮改动。**与 RM4 / RM5 / RM5b / RM7 中“保持原有颜色、描边”的约束冲突时，以本节为准。** 数据、API、选择和淡化的**判定逻辑**、颜色**语义**（线路色按 `routeColor` 的槽位、难度色按 RM5-6 表）都不变。
+
+### RM9-1 Product Owner 决定
+
+| # | 决定 |
+|---|---|
+| M1 | （MAP-R1，2026-10-09）渲染：SVG 渲染器的 padding 改为可配置常量（polygon、highlight、selection-outline 三类图层都生效）；底图区域层设置 minZoom（`us` 不设 maxZoom，因为南加州、Yuma、夏威夷只有 `us` 覆盖）；所有底图使用 `updateWhenZooming: false`；点击 ZIP 后不显示浏览器焦点框。 |
+| M2 | （MAP-R1）视觉层级为 **选中 > 悬停 > 普通 > 淡化**；数值集中在 `web/map-state.js` 的 `POLYGON_STYLE` 常量中。悬停不再使用白色描边。**取代 RM5-AC1 中“地图样式与 RM4 完全相同”和 RM7 中“不改描边”的要求。** |
+| M3 | （2026-10-09）Product Owner 本人把淡化描边的不透明度调为 0.23（`POLYGON_STYLE.dimmed.opacity`）。 |
+| M4 | （MAP-R1b，2026-10-09）地图页的地图更大、字更大：只在 `web/styles.css` 末尾的 `MAP-R1b` 区块中覆盖，范围限定为 `.map-page`。 |
+| M5 | （MAP-R2a，2026-10-13）**线路颜色在地图上饱和度更高、更容易分区**：只对地图 polygon 的填充色做 HSL 变换（色相不变，饱和度 ×1.4、亮度 −0.06）。`routeColor` 的调色板、右侧栏色块、线路画像页都不变；难度色不变。数值来自 Claude 在真实 Chrome 中的预览（普通填充 0.34、描边 `#334155` 0.5 / 0.8px；选中线路 0.62；淡化 0.14 / 描边 0.3，在 M3 的基础上按同一方向加深）。 |
+| M6 | （MAP-R2a）新增 **focused** 状态：没有选中线路时，站点聚焦或 DSP 过滤中**匹配**的 ZIP 比普通状态更突出（填充 0.42、描边 0.65）。**取代 RM7-3 中“匹配项保持原样式”的表述**；淡化的判定不变。 |
+| M7 | （MAP-R2a）**地图直接显示 Route 编号**：不需要开关，不限着色模式。每条 Route 只显示一次尾号（`SFO01-021` → `021`）；锚点在主要覆盖区域内（面积加权质心，不在线路内时改用最近成员 ZIP 的内部点）；缩放 ≥ 11 时显示，缩远时隐藏（选中线路从 9 开始显示，并且更突出）；按优先级避让其他标签和仓库 marker；标签不响应鼠标，不影响任何现有交互。 |
+
+### RM9-2 约束
+
+- 正式 3000 会直接读取 `web/` 文件，并且服务端的静态白名单是固定的：本节的改动**不新增 web 文件，也不新增 import 路径**（见 WH-FIX1）。`map-view.js` 因此会变长，已记入 `docs/tech-debt.md`。
+- 标签和颜色只是前端呈现，不改 `/api/route-map*` 的返回结构。
+
+### RM9-3 验收
+
+见 `.handoff/briefs/MAP-R1-rendering.md`、`MAP-R1b-scale.md`、`MAP-R2a-vivid-labels.md` 中的 AC。浏览器实测结果记录在本节的实现记录中。

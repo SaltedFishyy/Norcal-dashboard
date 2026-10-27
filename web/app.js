@@ -1,5 +1,5 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
-import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from './format.js';
+import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone, sortRows } from './format.js';
 import { openRouteDetail } from './route-detail.js';
 import { chooseSelection, readSelection, saveSelection, populateDistricts, populateStations } from './station-preference.js';
 
@@ -13,6 +13,32 @@ const profiles = document.getElementById('profiles');
 const stationSelect = document.getElementById('profile-station');
 const districtSelect = document.getElementById('profile-district');
 let districts = [], selected = {}, stationsLoaded = false, sequence = 0;
+let renderedData, pendingLoad, renderedRows = new Map(), zipSequence = 0;
+const zipForm = document.getElementById('profile-zip-form');
+const zipInput = document.getElementById('profile-zip');
+const zipResult = document.getElementById('profile-zip-result');
+const zipButton = zipForm?.querySelector('button');
+let sort = { key: null, dir: 'desc' };
+const sortControls = ['pickup_volume', 'pph'].map(key => ({ key, button: document.getElementById('sort-' + key) }));
+function updateSortHeaders() {
+  for (const { key, button } of sortControls) {
+    if (!button) continue;
+    const active = sort.key === key;
+    button.parentNode.setAttribute('aria-sort', active ? (sort.dir === 'desc' ? 'descending' : 'ascending') : 'none');
+    button.className = active ? 'sort-button active' : 'sort-button';
+    button.querySelector('span').textContent = active ? (sort.dir === 'desc' ? '↓' : '↑') : '↕';
+  }
+}
+for (const { key, button } of sortControls) button?.addEventListener('click', () => {
+  sort = sort.key !== key ? { key, dir: 'desc' } : sort.dir === 'desc' ? { key, dir: 'asc' } : { key: null, dir: 'desc' };
+  updateSortHeaders();
+  if (renderedData) {
+    const highlighted = [...renderedRows].find(([, target]) => target.tr.className === 'zip-target-row')?.[0];
+    render(pageState({ status: 200, data: renderedData }), renderedData);
+    if (highlighted) renderedRows.get(highlighted).tr.className = 'zip-target-row';
+  }
+});
+updateSortHeaders();
 const columns = [
   ['route_name'], ['dsp_name'], ['pickup_volume', 'numeric', 0], ['pph', 'numeric', 2],
   ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'], ['route_difficulty_manual', 'difficulty'],
@@ -24,6 +50,7 @@ function render(result, data) {
   retry.hidden = result.state !== 'error' && result.state !== 'empty';
   table.hidden = result.state !== 'success';
   rows.replaceChildren();
+  renderedData = undefined; renderedRows = new Map();
   updated.textContent = '—';
   updated.removeAttribute('title');
   total.textContent = '—';
@@ -32,9 +59,12 @@ function render(result, data) {
   if (updated.textContent !== '—') updated.title = data.fetched_at;
   total.textContent = formatNumber(data.total);
   if (result.state !== 'success') return;
+  renderedData = data;
   const fragment = document.createDocumentFragment();
-  for (const row of data.rows) {
+  for (const row of sortRows(data.rows, sort)) {
     const tr = document.createElement('tr');
+    tr.setAttribute('data-route-id', String(row.route_id));
+    renderedRows.set(String(row.route_id), { row, tr });
     for (const [field, style, digits] of columns) {
       const td = document.createElement('td');
       const value = row?.[field];
@@ -44,6 +74,7 @@ function render(result, data) {
       const content = isRoute ? document.createElement('button') : hasDifficulty ? document.createElement('span') : td;
       if (isRoute) {
         content.type = 'button'; content.className = 'route-link';
+        renderedRows.get(String(row.route_id)).button = content;
         content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at)); td.append(content);
       }
       if (hasDifficulty) {
@@ -63,14 +94,21 @@ function render(result, data) {
   rows.append(fragment);
 }
 
-async function load() {
+function load() {
+  pendingLoad = loadProfiles();
+  return pendingLoad;
+}
+async function loadProfiles() {
   const current = ++sequence;
   render(pageState({ loading: true }));
   if (!selected.station) { render({ state: 'empty', message: '暂无数据：该片区没有站点快照。' }); return; }
   try {
     const response = await fetch(`/api/route-profiles?station=${encodeURIComponent(stationSelect.value)}`, { cache: 'no-store' });
     const data = await response.json();
-    if (current === sequence) render(pageState({ status: response.status, data }), data);
+    if (current === sequence) {
+      render(pageState({ status: response.status, data }), data);
+      return renderedData;
+    }
   } catch {
     if (current === sequence) render(pageState({ failed: true }));
   }
@@ -93,19 +131,104 @@ async function start() {
     await load();
   } catch { if (current === sequence) render(pageState({ failed: true })); }
 }
-stationSelect.addEventListener('change', () => {
-  selected.station = stationSelect.value;
-  saveSelection(undefined, selected);
-  const dialog = document.getElementById('route-detail');
-  if (dialog?.open) dialog.close();
-  return load();
-});
-districtSelect.addEventListener('change', () => {
-  selected = chooseSelection({ districts, urlDistrict: districtSelect.value, saved: selected });
+async function switchTo({ district, station }) {
+  selected = station === undefined
+    ? chooseSelection({ districts, urlDistrict: district, saved: selected })
+    : { district, station };
+  districtSelect.value = selected.district;
   populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
   saveSelection(undefined, selected);
   const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
   return load();
+}
+function invalidateZip() {
+  zipSequence++;
+  if (zipButton) zipButton.disabled = false;
+  if (zipResult) { zipResult.replaceChildren(); zipResult.className = ''; }
+}
+stationSelect.addEventListener('change', () => {
+  invalidateZip();
+  return switchTo({ district: selected.district, station: stationSelect.value });
+});
+districtSelect.addEventListener('change', () => {
+  invalidateZip();
+  return switchTo({ district: districtSelect.value });
+});
+
+function zipFeedback(text, error = false) {
+  zipResult.textContent = text;
+  zipResult.className = error ? 'zip-error' : '';
+}
+function clearZipHighlight() {
+  for (const { tr } of renderedRows.values()) tr.className = '';
+}
+async function locateZip(owner, data, zip, current) {
+  if (current !== zipSequence) return;
+  const district = districts.find(item => item.stations.some(item => item.code === owner.station));
+  if (!district) { zipFeedback(`该 ZIP 属于 ${owner.station}，但当前片区配置中没有这个站点`); return; }
+  if (selected.district !== district.id || selected.station !== owner.station) {
+    await switchTo({ district: district.id, station: owner.station });
+  } else await pendingLoad;
+  if (current !== zipSequence) return;
+  const target = renderedRows.get(String(owner.route_id));
+  if (!target) { zipFeedback('当前快照中找不到该线路'); return; }
+  clearZipHighlight();
+  target.tr.className = 'zip-target-row';
+  target.tr.scrollIntoView({ block: 'center' });
+  const parts = [`ZIP ${zip}`];
+  for (const [label, value] of [['站点', owner.station], ['线路', owner.route_name], ['DSP', data.route?.dsp_name || data.dsp_name]]) {
+    if (value !== null && value !== undefined && value !== '') parts.push(`${label} ${value}`);
+  }
+  if (data.status === 'covered_no_boundary') parts.push('有线路归属，但无地图边界');
+  zipFeedback(parts.join(' · '));
+  const detail = await openRouteDetail(target.row, target.button, renderedData.fetched_at, {
+    highlightZip: zip, isCurrent: () => current === zipSequence,
+  });
+  if (current === zipSequence && detail?.highlightFound === false) {
+    zipFeedback(`${parts.join(' · ')} · 该线路的 ZIP 明细中没有这个 ZIP`);
+  }
+}
+zipForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const current = ++zipSequence, zip = zipInput.value.trim();
+  clearZipHighlight();
+  const dialog = document.getElementById('route-detail');
+  if (dialog?.open) dialog.close();
+  zipButton.disabled = false;
+  if (!/^\d{5}$/.test(zip)) { zipFeedback('请输入 5 位 ZIP', true); return; }
+  zipButton.disabled = true; zipFeedback('查询中…');
+  try {
+    const response = await fetch(`/api/route-map/zip?postal_code=${encodeURIComponent(zip)}`, { cache: 'no-store' });
+    if (current !== zipSequence) return;
+    if (response.status !== 200) throw new Error('zip_query_failed');
+    const data = await response.json();
+    if (current !== zipSequence) return;
+    if (data.status === 'covered' || data.status === 'covered_no_boundary') await locateZip(data, data, zip, current);
+    else if (data.status === 'multi_station') {
+      zipFeedback('请选择站点和线路：');
+      for (const owner of data.owners) {
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = [owner.station, owner.route_name].filter(value => value !== null && value !== undefined && value !== '').join(' · ');
+        button.addEventListener('click', async () => {
+          if (current !== zipSequence) return;
+          // Selecting an owner is a new intent; older in-flight locations cannot win.
+          const choice = ++zipSequence;
+          try { await locateZip(owner, data, zip, choice); }
+          catch { if (choice === zipSequence) zipFeedback('ZIP 查询失败，请稍后重试', true); }
+        });
+        zipResult.append(button);
+      }
+    } else {
+      const notices = {
+        uncovered: '当前数据中未找到该 ZIP 的线路归属',
+        no_boundary: '当前数据中未找到该 ZIP 的线路归属（该 ZIP 也没有地图边界）',
+        out_of_range: '该 ZIP 不在当前数据覆盖的州范围内，未找到线路归属',
+      };
+      if (!Object.hasOwn(notices, data.status)) throw new Error('zip_query_failed');
+      zipFeedback(notices[data.status]);
+    }
+  } catch { if (current === zipSequence) zipFeedback('ZIP 查询失败，请稍后重试', true); }
+  finally { if (current === zipSequence) zipButton.disabled = false; }
 });
 retry.addEventListener('click', () => stationsLoaded && selected.station ? load() : start());
 void start();

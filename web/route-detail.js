@@ -46,7 +46,8 @@ function basicInfo(row, fetchedAt, data) {
   }
   return metrics;
 }
-function renderDetail(content, data, row, fetchedAt) {
+function renderDetail(content, data, row, fetchedAt, highlightZip) {
+  let target;
   const metrics = basicInfo(row, fetchedAt, data);
   const scroll = element('div', undefined, 'detail-table-scroll');
   scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', t.zipTable);
@@ -65,6 +66,9 @@ function renderDetail(content, data, row, fetchedAt) {
   });
   for (const zip of sortedZips) {
     const tr = element('tr');
+    if (highlightZip !== undefined && zip.postal_code === highlightZip) {
+      tr.className = 'zip-target'; target ??= tr;
+    }
     for (const [, field, kind] of columns) {
       const td = element('td');
       if (kind === 'difficulty') {
@@ -80,9 +84,11 @@ function renderDetail(content, data, row, fetchedAt) {
   }
   table.append(head, body); scroll.append(table);
   content.replaceChildren(metrics, scroll, element('p', t.firstMileNote, 'detail-note'));
+  target?.scrollIntoView({ block: 'center' });
+  return { highlightFound: Boolean(target) };
 }
 
-export async function openRouteDetail(row, source = document.activeElement, fetchedAt) {
+export async function openRouteDetail(row, source = document.activeElement, fetchedAt, options = {}) {
   const dialog = document.getElementById('route-detail');
   const content = document.getElementById('detail-content');
   trigger = source; activeDialog = dialog;
@@ -110,8 +116,8 @@ export async function openRouteDetail(row, source = document.activeElement, fetc
   try {
     const response = await fetch(`/api/route-details?route_id=${encodeURIComponent(row.route_id)}`, { cache: 'no-store' });
     const data = await response.json();
-    if (current !== sequence) return;
-    if (response.status === 200 && Array.isArray(data?.zips)) renderDetail(content, data, row, fetchedAt);
+    if (current !== sequence || options.isCurrent?.() === false) return;
+    if (response.status === 200 && Array.isArray(data?.zips)) return renderDetail(content, data, row, fetchedAt, options.highlightZip);
     else if (response.status === 404 && data?.error === 'route_detail_not_found') {
       showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(row.station), 'detail-note'));
     } else {

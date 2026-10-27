@@ -1,19 +1,22 @@
 import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
-import { clearSelection, selectRoute, selectZip, classifyQuery, searchRoutes } from './map-state.js';
-import { mapText as t, localizeMap } from './map-text.js';
+import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, dspOptions } from './map-state.js';
+import { mapText as t, warehouseText, localizeMap } from './map-text.js';
 import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
 
 const knownErrors = new Set(['district_config_invalid', 'district_not_found', 'invalid_district', 'invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
 
 export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.protomapsL,
-  document: doc = document, fetch: request = fetch, search = location.search, storage } = {}) {
+  document: doc = document, fetch: request = fetch, search = location.search, storage,
+  loadWarehouseModules = () => Promise.all([import('./warehouse-layer.js'), import('./warehouse-panel.js')]) } = {}) {
   const element = id => doc.getElementById(`map-${id}`);
   localizeMap(doc);
   const districtSelect = element('district'), stationSelect = element('station'), message = element('message'), retry = element('retry');
   let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData, colorMode = 'route';
-  let districts = [], selected = {}, scope = readMapScope(storage);
+  let districts = [], selected = {}, scope = readMapScope(storage), dsp = null;
+  const dspSelect = element('dsp');
+  dspSelect.disabled = true;
   const focus = () => scope === 'station' ? stationSelect.value || null : null;
   const currentDistrict = () => districts.find(item => item.id === districtSelect.value);
   const updateSelection = next => { selection = next; view.applySelection(selection); panel.applySelection(selection); };
@@ -35,7 +38,65 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     view.fitRoute(routeId);
   };
   const panel = createMapPanel({ document: doc, onClear: deselect, onRoute: chooseRoute, onSearch: searchQuery });
-  function clear() { zipSequence++; stationData = null; selection = clearSelection(focus()); view.clear(); panel.clear(); }
+  let warehouseDistrict, warehouseSequence = 0, warehouseLoading = Promise.resolve(false);
+  const noopWarehouse = { load: () => Promise.resolve(false), clear() {}, focus() {}, isOpen: () => false };
+  let warehouseLayer = noopWarehouse, warehousePanel = noopWarehouse;
+  element('warehouses').hidden = true;
+  element('warehouses').disabled = true;
+  function loadWarehouses(district) {
+    const current = ++warehouseSequence;
+    warehouseLoading = Promise.resolve().then(() => warehouseLayer.load(district)).then(loaded => {
+      if (current !== warehouseSequence || districtSelect.value !== district) return false;
+      if (loaded) warehouseDistrict = district;
+      return loaded;
+    }).catch(() => {
+      if (current === warehouseSequence && districtSelect.value === district)
+        element('warehouse-message').textContent = warehouseText.loadError;
+      return false;
+    });
+    return warehouseLoading;
+  }
+  async function initializeWarehouses() {
+    let layer, initializationFailed = false;
+    try {
+      const [{ createWarehouseLayer }, { createWarehousePanel }] = await loadWarehouseModules();
+      layer = createWarehouseLayer({ leaflet, map: view.map, document: doc, fetch: request,
+        onError: value => { if (!initializationFailed) element('warehouse-message').textContent = value; } });
+      warehouseLayer = layer;
+      if (stationData) void loadWarehouses(districtSelect.value);
+      let writable = false;
+      try {
+        const response = await request('/api/capabilities');
+        writable = response.ok && (await response.json()).warehouse_write === true;
+      } catch { /* Read-only is normal when capabilities are unavailable. */ }
+      if (!writable) return;
+      const management = createWarehousePanel({ document: doc, fetch: request,
+        getDistricts: () => districts, getCurrentDistrict: () => districtSelect.value,
+        onSaved: async ({ warehouse }) => {
+          const district = districtSelect.value;
+          await loadWarehouses(district);
+          if (warehouse?.district_id === district && districtSelect.value === district) warehouseLayer.focus(warehouse.id);
+        },
+        onDeleted: () => loadWarehouses(districtSelect.value),
+        onView: async warehouse => {
+          if (!districts.some(d => d.id === warehouse.district_id)) return;
+          districtSelect.value = warehouse.district_id;
+          await changeDistrict();
+          await warehouseLoading;
+          if (districtSelect.value === warehouse.district_id) warehouseLayer.focus(warehouse.id);
+        } });
+      warehousePanel = management;
+      element('warehouses').hidden = false;
+      element('warehouses').disabled = false;
+    } catch {
+      initializationFailed = true;
+      warehouseLayer = noopWarehouse;
+      try { layer?.clear(); } catch { /* Optional cleanup must not affect the route map. */ }
+      element('warehouses').hidden = true;
+      element('warehouse-message').textContent = warehouseText.loadError;
+    }
+  }
+  function clear() { dspSelect.disabled = true; zipSequence++; stationData = null; selection = clearSelection(focus()); view.clear(); panel.clear(); }
   function status(state, value) {
     message.textContent = value;
     message.className = state === 'error' ? 'map-error' : '';
@@ -54,7 +115,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     panel.searchStatus('success');
     if (classified.kind !== 'zip') {
       if (enter) {
-        const { exact, matches } = searchRoutes(stationData?.routes || [], query);
+        const { exact, matches } = filteredRoutes(stationData?.routes || [], query, focus(), dsp);
         const route = exact || (matches.length === 1 ? matches[0] : undefined);
         if (route) chooseRoute(route.route_id);
       }
@@ -79,23 +140,35 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       if (current === zipSequence) panel.searchStatus('error', t.zipError('network_error'));
     }
   }
-  async function loadStation({ preserveSearch = false } = {}) {
+  async function loadStation() {
     const current = ++sequence, station = focus(), district = districtSelect.value;
-    const savedQuery = element('search').value, savedZipSequence = zipSequence;
+    if (warehouseDistrict !== district) { warehouseSequence++; warehouseLayer.clear(); warehouseDistrict = undefined; }
     clear();
-    if (preserveSearch) { zipSequence = savedZipSequence; element('search').value = savedQuery; }
     status('loading', t.loadingStation(station || currentDistrict()?.name_zh));
     try {
       const response = await request(`/api/route-map/district?district=${encodeURIComponent(district)}`, { cache: 'no-store' });
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
-      stationData = data; panel.render(data, { focusStation: station }); view.render(data, { fitToStation: !preserveSearch, focusStation: station }); updateSelection(clearSelection(station));
+      stationData = data; panel.render(data, { focusStation: station }); view.render(data, { fitToStation: true, focusStation: station }); updateSelection(clearSelection(station));
+      const options = dspOptions(data.routes, station);
+      if (!options.includes(dsp)) dsp = null;
+      dspSelect.replaceChildren();
+      for (const name of ['', ...options]) {
+        const option = doc.createElement('option'); option.value = name; option.textContent = name || t.allDsp;
+        dspSelect.append(option);
+      }
+      dspSelect.value = dsp || ''; dspSelect.disabled = false;
+      view.setDsp(dsp); panel.setDsp(dsp);
+      retainedZipHint();
       const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
       status('success', routes.length === 0 ? t.noRoutes
         : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
       if (data.details_status === 'invalid') {
         message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
+      }
+      if (warehouseDistrict !== district) {
+        void loadWarehouses(district);
       }
       return true;
     } catch {
@@ -121,22 +194,38 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       await loadStation();
     } catch { status('error', t.stationsError); }
   }
+  function retainedZipHint() {
+    const query = element('search').value || '';
+    if (classifyQuery(query).kind === 'zip') panel.searchStatus('success', t.retainedZip(query.trim()));
+  }
+  dspSelect.addEventListener('change', () => {
+    zipSequence++;
+    dsp = dspSelect.value || null;
+    const route = selection.route && stationData?.routes.find(row => row.route_id === selection.route.route_id);
+    if (dsp !== null && selection.route && route?.dsp_name !== dsp) deselect();
+    view.setDsp(dsp); panel.setDsp(dsp);
+    retainedZipHint();
+  });
   stationSelect.addEventListener('change', () => {
     scope = stationSelect.value ? 'station' : 'district';
     if (stationSelect.value) selected.station = stationSelect.value;
     saveSelection(storage, selected); saveMapScope(storage, scope);
     return loadStation();
   });
-  districtSelect.addEventListener('change', () => {
+  async function changeDistrict() {
+    element('warehouse-notice').replaceChildren();
     selected = chooseSelection({ districts, urlDistrict: districtSelect.value, saved: selected });
     populateStations(doc, stationSelect, currentDistrict(), true);
     if (!selected.station) scope = 'district';
     stationSelect.value = scope === 'district' ? '' : selected.station || '';
     saveSelection(storage, selected); saveMapScope(storage, scope);
+    if (warehousePanel.isOpen()) void warehousePanel.load();
     return loadStation();
-  });
+  }
+  districtSelect.addEventListener('change', changeDistrict);
   retry.addEventListener('click', () => stationsLoaded ? loadStation() : start());
-  doc.addEventListener('keydown', event => { if (event.key === 'Escape') deselect(); });
+  doc.addEventListener('keydown', event => { if (event.key === 'Escape' && !warehousePanel.isOpen()) deselect(); });
+  void initializeWarehouses();
   const basemapReady = view.loadBasemaps();
   return { start, loadStation, searchQuery, map: view.map, basemapReady };
 }

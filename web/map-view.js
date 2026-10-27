@@ -1,13 +1,19 @@
 import { difficultyColor } from './difficulty.js';
-import { polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles } from './map-state.js';
+import { polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
+
+export const MAP_RENDER = Object.freeze({ svgPadding: 0.5 });
+export const ROUTE_LABEL = Object.freeze({ minZoom: 11, selectedZoomOffset: 2,
+  characterWidth: 8, widthPadding: 10, height: 18, selectedCharacterWidth: 10, selectedWidthPadding: 12, selectedHeight: 22 });
+
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
 export const BASEMAP_FLAVOR = 'light';
 export const basemaps = [
   { name: 'us', maxDataZoom: 6 },
-  { name: 'norcal', maxDataZoom: 10, bounds: [[35.5, -124.6], [42.5, -119.0]] },
-  { name: 'mountain', maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] },
-  { name: 'ops', maxDataZoom: 14, bounds: [[36.43, -123.16], [39.01, -121.06]] },
+  { name: 'norcal', minZoom: 7, maxDataZoom: 10, bounds: [[35.5, -124.6], [42.5, -119.0]] },
+  { name: 'mountain', minZoom: 7, maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] },
+  { name: 'ops', minZoom: 10, maxDataZoom: 14, bounds: [[36.43, -123.16], [39.01, -121.06]] },
 ];
 
 export function zipDetails(doc, properties, selection = clearSelection(), colorMode = 'route', detail) {
@@ -30,8 +36,15 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   const outlinePane = map.createPane('selection-outline');
   outlinePane.style.zIndex = '450';
   outlinePane.style.pointerEvents = 'none';
+  const labelPane = map.createPane('route-labels');
+  labelPane.style.zIndex = '610';
+  labelPane.style.pointerEvents = 'none';
+  const routeLabels = [];
+  let zooming = false;
+  const renderer = L.svg({ padding: MAP_RENDER.svgPadding });
+  const outlineRenderer = L.svg({ pane: 'selection-outline', padding: MAP_RENDER.svgPadding });
   const outlines = [];
-  let polygons, highlight, selection = clearSelection(), colorMode = 'route', focusStation = null;
+  let polygons, highlight, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   let routeDetails = new Map();
   const highlightLayers = [];
   const layers = [];
@@ -88,16 +101,82 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     legendTitle.textContent = selection.route ? t.legendZip(selection.route.route_name) : t.legendRoute;
   }
   const tooltip = properties => zipDetails(doc, properties, selection, colorMode, routeDetails.get(properties.route_id));
+  function labelPriority(label) {
+    if (selection.route?.route_id === label.anchor.route_id) return 0;
+    const styles = label.members.map(p => polygonStyle(p, selection, colorMode, focusStation, dsp));
+    if (styles.some(style => style.fillOpacity === POLYGON_STYLE.focused.fillOpacity)) return 1;
+    return styles.every(style => style.fillOpacity === POLYGON_STYLE.dimmed.fillOpacity) ? 3 : 2;
+  }
+  function labelRectangle(label, container) {
+    const point = map.latLngToContainerPoint(label.anchor.latlng);
+    const selected = label.priority === 0, c = ROUTE_LABEL;
+    const width = label.anchor.text.length * (selected ? c.selectedCharacterWidth : c.characterWidth)
+      + (selected ? c.selectedWidthPadding : c.widthPadding);
+    const height = selected ? c.selectedHeight : c.height;
+    return { left: container.left + point.x - width / 2, right: container.left + point.x + width / 2,
+      top: container.top + point.y - height / 2, bottom: container.top + point.y + height / 2 };
+  }
+  function layoutRouteLabels() {
+    if (zooming || !routeLabels.length) return;
+    const container = map.getContainer().getBoundingClientRect(), zoom = map.getZoom();
+    const warehouses = [...map.getContainer().querySelectorAll('.warehouse-marker')]
+      .map(node => node.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
+    const placed = [];
+    for (const label of routeLabels) label.priority = labelPriority(label);
+    for (const label of routeLabels.toSorted((a, b) => a.priority - b.priority || b.anchor.weight - a.anchor.weight)) {
+      const node = label.marker.getElement();
+      node.classList.toggle('route-label--selected', label.priority === 0);
+      node.classList.toggle('route-label--dimmed', label.priority === 3);
+      const rect = labelRectangle(label, container);
+      const visible = zoom >= ROUTE_LABEL.minZoom - (label.priority === 0 ? ROUTE_LABEL.selectedZoomOffset : 0)
+        && rect.left >= container.left && rect.right <= container.right
+        && rect.top >= container.top && rect.bottom <= container.bottom
+        && ![...warehouses, ...placed].some(other => overlaps(rect, other));
+      if (visible) placed.push(rect);
+      node.classList.toggle('route-label--hidden', !visible);
+    }
+  }
+  function clearRouteLabels() {
+    routeLabels.forEach(label => map.removeLayer(label.marker));
+    routeLabels.length = 0;
+  }
+  function buildRouteLabels(features) {
+    const members = new Map();
+    for (const { properties: p } of features) {
+      if (!members.has(p.route_id)) members.set(p.route_id, []);
+      members.get(p.route_id).push(p);
+    }
+    // Geometry is computed only here; viewport events reuse these cached anchors.
+    for (const anchor of routeLabelAnchors(features)) {
+      const text = doc.createElement('span'); text.textContent = anchor.text;
+      const marker = L.marker(anchor.latlng, { pane: 'route-labels', interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'route-label route-label--hidden', html: text, iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map);
+      routeLabels.push({ anchor, marker, members: members.get(anchor.route_id) });
+    }
+  }
+  map.on('zoomstart', () => { zooming = true; });
+  map.on('zoomend', () => { zooming = false; layoutRouteLabels(); });
+  map.on('moveend', layoutRouteLabels);
+  // Warehouses load asynchronously; react to their DOM arrival without importing the warehouse module.
+  const Observer = doc.defaultView?.MutationObserver;
+  if (Observer) {
+    const observer = new Observer(records => {
+      if (records.some(record => [...record.addedNodes, ...record.removedNodes]
+        .some(node => node.matches?.('.warehouse-marker') || node.querySelector?.('.warehouse-marker')))) layoutRouteLabels();
+    });
+    observer.observe(map.getContainer(), { childList: true, subtree: true });
+  }
   function refreshStyles() {
     layers.forEach(layer => {
-      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation));
+      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp));
       layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     highlightLayers.forEach(layer => {
-      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation));
+      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp));
       if (selection.route) layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     updateLegend();
+    layoutRouteLabels();
   }
   function setColorMode(mode) {
     colorMode = mode;
@@ -129,7 +208,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
             onBasemapError(); return undefined;
           }
         };
-        const layer = protomaps.leafletLayer({ url: archive, ...options, flavor: BASEMAP_FLAVOR, noWrap: true });
+        const layer = protomaps.leafletLayer({ url: archive, ...options, flavor: BASEMAP_FLAVOR, noWrap: true, updateWhenZooming: false });
         layer.on('tileerror', onBasemapError); layer.addTo(map);
       } catch { onBasemapError(); }
     }
@@ -145,7 +224,8 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (geometry) {
       const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id ?? feature?.properties.route_id };
       highlight = L.geoJSON({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties }] }, {
-        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation),
+        renderer,
+        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation, dsp),
         onEachFeature(_, layer) {
           highlightLayers.push(layer);
           layer.options.bubblingMouseEvents = false;
@@ -170,7 +250,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       if (!features.length) return;
       for (const style of selectionOutlineStyles(options)) {
         outlines.push(L.geoJSON({ type: 'FeatureCollection', features }, {
-          ...style, pane: 'selection-outline', style: () => style,
+          ...style, pane: 'selection-outline', renderer: outlineRenderer, style: () => style,
         }).addTo(map));
       }
     };
@@ -180,6 +260,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (geometry) draw([{ type: 'Feature', geometry, properties: {} }], { zip: true, uncovered: zip.status === 'uncovered' });
   }
   function clear() {
+    clearRouteLabels();
     clearOutlines();
     if (highlight) map.removeLayer(highlight);
     highlight = null; highlightLayers.length = 0;
@@ -191,17 +272,18 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     focusStation = focus; fitButton.textContent = focus ? t.fit : '定位片区';
     routeDetails = new Map(data.routes.map(route => [route.route_id, route.zip_detail]));
     polygons = L.geoJSON(data.features, {
-      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation),
+      renderer,
+      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation, dsp),
       onEachFeature(feature, layer) {
         layers.push(layer);
         layer.bindTooltip(tooltip(feature.properties), { direction: 'auto', sticky: true });
         layer.options.bubblingMouseEvents = false;
         layer.on({
           mouseover: () => {
-            const style = polygonStyle(feature.properties, selection, colorMode, focusStation);
-            layer.setStyle({ weight: style.weight + 2, color: '#ffffff', opacity: 1 });
+            const style = polygonStyle(feature.properties, selection, colorMode, focusStation, dsp);
+            layer.setStyle(hoverStyle(style));
           },
-          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode, focusStation)),
+          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode, focusStation, dsp)),
           click: event => {
             if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
             onZip(feature.properties);
@@ -209,7 +291,10 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
         });
       },
     }).addTo(map);
+    buildRouteLabels(data.features.features);
     if (fitToStation) fitStation();
+    layoutRouteLabels();
   }
-  return { map, render, clear, applySelection, fitStation, fitRoute, fitZip, loadBasemaps, setColorMode };
+  function setDsp(value) { dsp = value; refreshStyles(); }
+  return { map, render, clear, applySelection, fitStation, fitRoute, fitZip, loadBasemaps, setColorMode, setDsp };
 }

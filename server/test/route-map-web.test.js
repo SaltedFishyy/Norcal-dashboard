@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import { POLYGON_STYLE, hoverStyle, uncoveredZipStyle, vividRouteColor } from '../../web/map-state.js';
+import { MAP_RENDER, basemaps, createMapView, ROUTE_LABEL } from '../../web/map-view.js';
 import { routeColor, palette } from '../../web/route-colors.js';
 import { buildRouteMap, lookupZip } from '../src/route-map/route-map.js';
 import { profiles, boundaries } from './route-map-fixtures.js';
@@ -37,11 +39,11 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
     if (result.geometry) {
       const highlighted = groups.filter(group => !group.options.pane).at(-2); // Last group is the geometry used solely to compute fit bounds.
       assert.equal(highlighted.front, true);
-      assert.equal(highlighted.layers[0].styles[0].weight, 5);
+      assert.equal(highlighted.layers[0].styles[0].weight, status === 'uncovered' ? uncoveredZipStyle().weight : POLYGON_STYLE.selectedZip.weight);
       assert.equal(highlighted.layers[0].styles[0].color, '#334155');
       if (status === 'uncovered') {
         assert.equal(highlighted.layers[0].styles[0].dashArray, '8 6');
-        assert.equal(groups[0].layers[0].styles.at(-1).fillOpacity, 0.5);
+        assert.equal(groups[0].layers[0].styles.at(-1).fillOpacity, POLYGON_STYLE.focused.fillOpacity);
       }
     }
     if (status === 'no_boundary') assert.match(allText(e['map-selection']), /暂无可用边界数据/);
@@ -95,7 +97,7 @@ test('ZIP errors are separate from no-boundary results and stale replies cannot 
   }
 });
 
-class Element {
+export class Element {
   constructor(tag = 'div') { this.tagName = tag; this.children = []; this.textContent = ''; this.listeners = {}; this.attributes = {}; this.style = {}; }
   append(...children) {
     for (const child of children) {
@@ -107,21 +109,34 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; delete this[name]; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
+  focus() { this.focused = true; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
 }
 
-async function fixture(search = '', basemapStatus = 206, storage = null) {
+export async function fixture(search = '', basemapStatus = 206, storage = null, warehouseOptions = {}) {
   const { createMapPage } = await import('../../web/map.js');
-  const ids = ['route-map', ...['district', 'station', 'message', 'retry', 'content', 'selection', 'coverage',
+  const warehouseModules = await Promise.all([import('../../web/warehouse-layer.js'), import('../../web/warehouse-panel.js')]);
+  const ids = ['route-map', ...['district', 'station', 'dsp', 'message', 'retry', 'content', 'selection', 'coverage',
     'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
+  ids.push('map-warehouses', 'map-warehouse-message', 'map-warehouse-notice');
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag) };
+  elements['route-map'].getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 });
+  elements['route-map'].querySelectorAll = () => [];
+  doc.body = new Element('body');
   const map = { panes: {}, createPane(name) { return this.panes[name] = { style: {} }; }, listeners: {}, fits: [], removed: [], attributionControl: {
     setPrefix(value) { this.prefix = value; }, addAttribution(value) { this.text = value; },
   }, setView() {}, on(name, fn) { this.listeners[name] = fn; }, removeLayer(layer) { this.removed.push(layer); },
   fitBounds(bounds, options) { this.fits.push({ bounds, options }); } };
+  map.zoom = 11;
+  map.getZoom = () => map.zoom;
+  map.getContainer = () => elements['route-map'];
+  map.projections = 0;
+  map.latLngToContainerPoint = ([lat, lng]) => { map.projections++; return { x: 200 + lng * 10, y: 200 + lat * 10 }; };
   const groups = [];
-  const controls = [], baselayers = [];
-  const leaflet = { control: () => ({ addTo() { controls.push(this.onAdd()); } }),
+  const controls = [], baselayers = [], renderers = [];
+  const leaflet = { svg: options => { const renderer = { options }; renderers.push(renderer); return renderer; }, control: () => ({ addTo() { controls.push(this.onAdd()); } }),
     featureGroup: layers => ({ getBounds: () => ({ isValid: () => layers.length > 0 }) }),
     map: (element, options) => { map.options = options; return map; }, DomEvent: { disableClickPropagation() {}, stopPropagation(event) { event.stopped = true; } },
     geoJSON(features, options = {}) {
@@ -138,13 +153,44 @@ async function fixture(search = '', basemapStatus = 206, storage = null) {
       groups.push(group); return group;
     } };
   leaflet.control.zoom = options => ({ addTo() { map.zoomTitles = options; } });
-  const requests = [], replies = [];
-  const page = createMapPage({ document: doc, leaflet, search, storage, protomaps: {
+  let initialCapabilities = true;
+  const requests = [], replies = [], warehouseRequests = [], warehouseReplies = [], markers = [], routeMarkers = [];
+  map.flyTo = (point, zoom) => { map.flight = { point, zoom }; };
+  leaflet.divIcon = options => ({ ...options, createIcon: () => new Element() });
+  leaflet.marker = (point, options) => {
+    const node = new Element();
+    node.className = options.icon.className + ' leaflet-marker-icon leaflet-zoom-animated';
+    const classes = () => new Set(node.className.split(/\s+/));
+    node.classList = {
+      add(name) { const values = classes(); values.add(name); node.className = [...values].join(' '); },
+      remove(name) { const values = classes(); values.delete(name); node.className = [...values].join(' '); },
+      contains: name => classes().has(name),
+      toggle(name, enabled) { this[enabled ? 'add' : 'remove'](name); },
+    };
+    const marker = { point, options, node, bindPopup(value) { this.popup = value; return this; },
+      addTo() { (options.pane === 'route-labels' ? routeMarkers : markers).push(this); return this; }, getLatLng: () => point, getElement: () => node,
+      openPopup() { this.popupOpen = true; } };
+    return marker;
+  };
+  const page = createMapPage({ document: doc, leaflet, search, storage,
+    loadWarehouseModules: () => Promise.resolve(warehouseModules), ...warehouseOptions, protomaps: {
     PmtilesSource: class { constructor(url) { this.p = { url, getZxy: async () => { throw new Error('mock archive unavailable'); } }; } },
     leafletLayer(options) {
     const layer = { options, on(name, fn) { this.error = fn; }, addTo() { baselayers.push(this); return this; } }; return layer;
   } }, fetch: async (url, options) => {
     if (url.startsWith('/basemap/')) return { status: basemapStatus, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+    if (url === '/api/capabilities' && initialCapabilities) {
+      initialCapabilities = false;
+      const reply = warehouseOptions.capabilityReply;
+      if (reply instanceof Error) throw reply;
+      return typeof reply === 'function' ? reply() : reply ?? { ok: true, status: 200, json: async () => ({ warehouse_write: true }) };
+    }
+    if (url.startsWith('/api/warehouses') || url === '/api/capabilities') {
+      warehouseRequests.push({ url, options });
+      const response = warehouseReplies.shift();
+      if (response instanceof Error) throw response;
+      return typeof response === 'function' ? response() : response || { ok: true, status: 200, json: async () => url === '/api/capabilities' ? { warehouse_write: true } : { warehouses: [] } };
+    }
     requests.push({ url, options });
     const reply = replies.shift();
     if (reply instanceof Error) throw reply;
@@ -156,7 +202,7 @@ async function fixture(search = '', basemapStatus = 206, storage = null) {
     return data;
   } });
   await page.basemapReady;
-  return { doc, controls, baselayers, elements, map, groups, page, requests, replies, reply };
+  return { doc, leaflet, controls, baselayers, renderers, elements, map, groups, page, requests, replies, reply, warehouseRequests, warehouseReplies, markers, routeMarkers };
 }
 const payload = () => buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
 
@@ -203,23 +249,24 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   assert.ok(layer.tooltip instanceof Element);
   assert.deepEqual(layer.tooltipOptions, { direction: 'auto', sticky: true });
   assert.equal(layer.tooltip.children[1].children[1].textContent, malicious);
-  assert.equal(layer.styles[0].fillColor, routeColor(layer.feature.properties.route_id));
+  assert.equal(layer.styles[0].fillColor, vividRouteColor(routeColor(layer.feature.properties.route_id)));
   assert.equal(layer.options.bubblingMouseEvents, false);
-  layer.listeners.mouseover(); assert.equal(layer.styles.at(-1).weight, 3);
-  layer.listeners.mouseout(); assert.equal(layer.styles.at(-1).weight, 1);
+  layer.listeners.mouseover(); assert.equal(layer.styles.at(-1).weight, POLYGON_STYLE.hover.weight);
+  layer.listeners.mouseout(); assert.equal(layer.styles.at(-1).weight, POLYGON_STYLE.normal.weight);
   const originalEvent = {}; layer.listeners.click({ originalEvent });
   assert.equal(originalEvent.stopped, true);
   const panel = e['map-selection'].children[0];
   assert.equal(panel.children[0].textContent, '00002');
   assert.match(allText(e['map-selection']), /有线路覆盖/);
-  assert.equal(sameRoute.styles.at(-1).weight, 3);
+  assert.equal(sameRoute.styles.at(-1).weight, POLYGON_STYLE.selectedRoute.weight);
   map.listeners.click();
   assert.equal(e['map-zip-panel'].hidden, true);
-  assert.equal(layer.styles.at(-1).weight, 1);
+  assert.equal(layer.styles.at(-1).weight, POLYGON_STYLE.normal.weight);
   replies.push(reply(200, { ...payload(), station: 'MOCKB' })); e['map-station'].value = 'MOCKB';
   await e['map-station'].listeners.change();
   assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
-  assert.equal(map.removed.length, 6);
+  assert.equal(map.removed.filter(layer => layer.options?.pane !== 'route-labels').length, 6);
+  assert.equal(map.removed.filter(layer => layer.options?.pane === 'route-labels').length, 1);
 });
 
 test('map page loading, no data, known errors, retries and network failures clear stale data', async () => {
@@ -404,8 +451,8 @@ test('RM5b outlines stack dark/white route and ZIP strokes, pass events through 
   const before = active(), fits = map.fits.length, calls = requests.length;
   for (const mode of [1, 0, 1]) controls[1].children[mode].listeners.click();
   assert.deepEqual(active(), before); assert.equal(map.fits.length, fits); assert.equal(requests.length, calls);
-  const polygon = groups[0].layers[0]; polygon.listeners.mouseover();
-  assert.deepEqual(polygon.styles.at(-1), { weight: 7, color: '#ffffff', opacity: 1 });
+  const polygon = groups[0].layers[0], baseStyle = polygon.styles.at(-1); polygon.listeners.mouseover();
+  assert.deepEqual(polygon.styles.at(-1), hoverStyle(baseStyle));
   polygon.listeners.mouseout(); assert.equal(polygon.styles.at(-1).color, '#334155');
   doc.listeners.keydown({ key: 'Escape' }); assert.equal(active().length, 0);
   e['map-routes'].children[0].listeners.click();
@@ -457,14 +504,14 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.equal(highlight.styles[0].fillColor, difficultyColor('A')); assert.equal(highlight.styles[0].color, '#334155');
   mode.children[0].listeners.click();
   assert.equal(legend.hidden, true);
-  assert.equal(highlight.styles.at(-1).fillColor, routeColor(1));
+  assert.equal(highlight.styles.at(-1).fillColor, vividRouteColor(routeColor(1)));
   assert.equal(highlight.tooltip.children.length, 3);
   mode.children[1].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
   assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'true']);
-  groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, '#ffffff');
-  groups[0].layers[0].listeners.mouseout(); assert.equal(groups[0].layers[0].styles.at(-1).color, '#334155');
+  groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.hover.color);
+  groups[0].layers[0].listeners.mouseout(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.selectedZip.color);
   doc.listeners.keydown({ key: 'Escape' }); assert.equal(legend.children[0].textContent, '颜色：线路难度');
 });
 
@@ -551,7 +598,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   assert.equal(e['map-station'].children[3].disabled, true); assert.equal(writes.length, 0);
   assert.equal(e['map-station'].value, 'MOCKA');
   const initial = groups[0];
-  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, 0.12);
+  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
   assert.equal(e['map-coverage-count'].textContent, '2 / 4 ZIP 已上图');
   assert.equal(e['map-missing'].children[0].children[1].textContent, 'MOCKA');
   e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
@@ -570,7 +617,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits + 1); assert.equal(requests.length, requestCount);
   assert.equal(e['map-station'].value, 'MOCKA');
   const active = groups.filter(group => !map.removed.includes(group) && !group.options.pane && group.layers.length > 1).at(-1);
-  assert.equal(active.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles.at(-1).fillOpacity, 0.65);
+  assert.equal(active.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles.at(-1).fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
   const saved = values.get('nc-ops-console.selection');
   replies.push(reply(200, { ...lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' }), station: 'OTHER' }));
   const beforeOutside = map.fits.length; await page.searchQuery('00009', true);
@@ -616,4 +663,274 @@ test('RM6 compact ZIP fields, badges, safe three-row tooltips and shared clear b
   assert.doesNotMatch(html, /map-current|当前选择|<style/);
   assert.ok(html.indexOf('id="map-zip-panel"') < html.indexOf('id="map-summary-panel"'));
   assert.equal((html.match(/id="map-clear"/g) || []).length, 1);
+});
+
+test('RM7 DSP options, selection table, map clicks, ZIP lookup and session-only state', async () => {
+  const writes = [];
+  const f = await fixture('', 206, { getItem: () => null, setItem: (...args) => writes.push(args) });
+  const { elements: e, page, replies, reply, groups, doc } = f;
+  const data = payload();
+  data.routes.forEach((r, i) => r.dsp_name = i ? 'Beta' : 'Alpha');
+  data.features.features.forEach(feature => feature.properties.dsp_name = data.routes.find(r => r.route_id === feature.properties.route_id).dsp_name);
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data));
+  assert.equal(e['map-dsp'].disabled, true);
+  await page.start();
+  assert.deepEqual(e['map-dsp'].children.map(o => [o.value, o.textContent]), [['', '全部 DSP'], ['Alpha', 'Alpha'], ['Beta', 'Beta']]);
+  assert.equal(e['map-dsp'].value, ''); assert.equal(e['map-dsp'].disabled, false);
+  const change = value => { e['map-dsp'].value = value; e['map-dsp'].listeners.change(); };
+  change('Alpha'); assert.equal(e['map-routes'].children.length, 1);
+  const layer = groups[0].layers[0];
+  const owner = layer.feature.properties.dsp_name, other = owner === 'Alpha' ? 'Beta' : 'Alpha';
+  change(other); assert.equal(layer.styles.at(-1).fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
+  layer.listeners.mouseover(); layer.listeners.mouseout(); assert.equal(layer.styles.at(-1).fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
+  layer.listeners.click({}); assert.equal(layer.styles.at(-1).fillOpacity, POLYGON_STYLE.selectedZip.fillOpacity);
+  assert.equal(e['map-dsp'].value, other);
+  change(''); assert.equal(e['map-zip-panel'].hidden, false);
+  change(owner); assert.equal(e['map-zip-panel'].hidden, false);
+  change(other); assert.equal(e['map-zip-panel'].hidden, true);
+  e['map-routes'].children[0].listeners.click();
+  change(other); assert.equal(e['map-summary-panel'].hidden, false);
+  change(owner); assert.equal(e['map-summary-panel'].hidden, true);
+  replies.push(reply(200, { postal_code: '00002', station: 'MOCKA', status: 'covered', route_id: layer.feature.properties.route_id, dsp_name: other }));
+  await page.searchQuery('00002', true); assert.equal(e['map-zip-panel'].hidden, false); assert.equal(e['map-dsp'].value, owner);
+  for (const status of ['uncovered', 'no_boundary', 'out_of_range', 'multi_station']) {
+    replies.push(reply(200, { postal_code: '99999', status, owners: [] }));
+    await page.searchQuery('99999', true); change(other); change(owner);
+    assert.equal(e['map-zip-panel'].hidden, false);
+    assert.equal(e['map-selection'].children[0].children[0].textContent, '99999');
+  }
+  doc.listeners.keydown({ key: 'Escape' });
+  const excluded = data.routes.find(r => r.dsp_name !== owner);
+  e['map-search'].value = excluded.route_name; await e['map-search'].listeners.input();
+  assert.equal(e['map-no-match'].hidden, false);
+  await page.searchQuery(excluded.route_name, true); assert.equal(e['map-summary-panel'].hidden, true);
+  const included = data.routes.find(r => r.dsp_name === owner);
+  await page.searchQuery(included.route_name, true); assert.equal(e['map-summary-panel'].hidden, false);
+  replies.push(reply(200, data)); await page.loadStation(); assert.equal(e['map-dsp'].value, owner);
+  replies.push(reply(200, { ...data, routes: [] })); await page.loadStation(); assert.equal(e['map-dsp'].value, '');
+  assert.deepEqual(writes, []);
+});
+
+test('RM7 Station, overview and District changes retain only available DSPs; cross-Station search remains', async () => {
+  const { buildDistrictMap } = await import('../src/route-map/route-map.js');
+  const source = profiles();
+  source.stations.MOCKA.rows.forEach((r, i) => r.dsp_name = i ? 'Shared' : 'Only-A');
+  source.stations.MOCKB.rows[0].dsp_name = 'Shared';
+  const districts = [{ id: 'mock', name_zh: '模拟', stations: [{ code: 'MOCKA', has_snapshot: true }, { code: 'MOCKB', has_snapshot: true }] },
+    { id: 'other', name_zh: '其他', stations: [{ code: 'MOCKB', has_snapshot: true }] }];
+  const data = buildDistrictMap({ profiles: source, districts, district: 'mock', boundaries: boundaries() });
+  const { elements: e, replies, reply, page } = await fixture();
+  replies.push(reply(200, { districts }), reply(200, data)); await page.start();
+  const change = value => { e['map-dsp'].value = value; e['map-dsp'].listeners.change(); };
+  change('Shared');
+  e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.equal(e['map-dsp'].value, 'Shared');
+  e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.deepEqual(e['map-dsp'].children.map(o => o.value), ['', 'Only-A', 'Shared']);
+  change('Only-A'); e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.equal(e['map-dsp'].value, '');
+  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change(); change('Shared');
+  e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
+  assert.equal(e['map-routes'].children[0].children[1].textContent, 'Mock-C');
+  await page.searchQuery('Mock-C', true); assert.equal(e['map-summary-panel'].hidden, false);
+  e['map-district'].value = 'other'; replies.push(reply(200, buildDistrictMap({ profiles: source, districts, district: 'other', boundaries: boundaries() })));
+  await e['map-district'].listeners.change(); assert.equal(e['map-dsp'].value, 'Shared');
+  e['map-district'].value = 'mock'; replies.push(reply(200, data)); await e['map-district'].listeners.change(); change('Only-A');
+  e['map-district'].value = 'other'; replies.push(reply(200, buildDistrictMap({ profiles: source, districts, district: 'other', boundaries: boundaries() })));
+  await e['map-district'].listeners.change(); assert.equal(e['map-dsp'].value, '');
+});
+
+test('RM8 retains text, hints, filtering, viewport and invalidates old ZIPs across selectors and retry', async () => {
+  const { elements: e, page, replies, reply, map, requests, doc } = await fixture();
+  const data = payload();
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, data)); await page.start();
+  e['map-search'].value = '00002';
+  let release; replies.push(() => new Promise(resolve => { release = resolve; }));
+  const pending = page.searchQuery('00002', true);
+  const fits = map.fits.length, calls = requests.length;
+  e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.equal(e['map-search'].value, '00002'); assert.match(e['map-search-message'].textContent, /已保留 ZIP 00002，按 Enter 在当前范围重新查询/);
+  assert.equal(requests.length, calls + 1);
+  release(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' }))); await pending;
+  assert.equal(e['map-zip-panel'].hidden, true);
+  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  assert.ok(map.fits.length > fits);
+  e['map-dsp'].listeners.change(); assert.equal(e['map-search'].value, '00002');
+  e['map-district'].value = 'mock'; replies.push(reply(200, data)); await e['map-district'].listeners.change();
+  assert.equal(e['map-search'].value, '00002');
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' })));
+  await e['map-search'].listeners.keydown({ key: 'Enter', preventDefault() {} }); assert.equal(e['map-zip-panel'].hidden, false);
+  e['map-clear'].listeners.click(); doc.listeners.keydown({ key: 'Escape' }); assert.equal(e['map-search'].value, '00002');
+  e['map-search'].value = ''; await e['map-search'].listeners.input(); assert.equal(e['map-search-message'].textContent, ''); assert.ok(e['map-routes'].children.length > 0);
+  e['map-search'].value = 'absent route'; replies.push(reply(200, data)); await page.loadStation();
+  assert.equal(e['map-search'].value, 'absent route'); assert.equal(e['map-no-match'].hidden, false);
+  replies.push(reply(500, { error: 'internal_error' })); await page.loadStation();
+  replies.push(reply(200, data)); await e['map-retry'].listeners.click(); assert.equal(e['map-search'].value, 'absent route');
+  e['map-search'].value = data.routes[0].route_name; await e['map-search'].listeners.input();
+  await e['map-search'].listeners.keydown({ key: 'Enter', preventDefault() {} }); assert.equal(e['map-summary-panel'].hidden, false);
+});
+
+
+test('R1 SVG renderers share configurable padding across polygons, highlights and outlines', async () => {
+  const { page, groups, renderers, replies, reply } = await fixture();
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
+  await page.start();
+  assert.equal(renderers.length, 2);
+  assert.deepEqual(renderers.map(renderer => renderer.options), [
+    { padding: MAP_RENDER.svgPadding }, { pane: 'selection-outline', padding: MAP_RENDER.svgPadding },
+  ]);
+  assert.equal(groups[0].options.renderer, renderers[0]);
+  groups[0].layers[0].listeners.click({});
+  const highlights = groups.filter(group => !group.options.pane && group !== groups[0]);
+  assert.equal(highlights.length, 1); assert.equal(highlights[0].options.renderer, renderers[0]);
+  const outlines = groups.filter(group => group.options.pane === 'selection-outline');
+  assert.equal(outlines.length, 4);
+  for (const group of outlines) {
+    assert.equal(group.options.renderer, renderers[1]);
+    assert.equal(group.options.renderer.options.padding, MAP_RENDER.svgPadding);
+    assert.equal(group.options.renderer.options.pane, 'selection-outline');
+  }
+});
+
+test('R1 basemap zoom options retain unrestricted US coverage and deferred zoom updates', async () => {
+  const { baselayers } = await fixture();
+  assert.equal(baselayers.length, basemaps.length);
+  for (const [index, layer] of baselayers.entries()) {
+    const { name, ...options } = basemaps[index];
+    assert.equal(layer.options.updateWhenZooming, false);
+    assert.equal(layer.options.flavor, 'light'); assert.equal(layer.options.noWrap, true);
+    for (const [key, value] of Object.entries(options)) assert.deepEqual(layer.options[key], value);
+    assert.equal(layer.options.url.url, '/basemap/' + name + '.pmtiles');
+  }
+  assert.equal(Object.hasOwn(baselayers[0].options, 'minZoom'), false);
+  assert.equal(Object.hasOwn(baselayers[0].options, 'maxZoom'), false);
+  assert.deepEqual(baselayers.slice(1).map(layer => layer.options.minZoom), [7, 7, 10]);
+});
+
+test('R1 focus outline suppression is scoped to interactive map SVG paths', async () => {
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /#route-map path\.leaflet-interactive:focus\s*\{\s*outline:\s*none;\s*\}/);
+});
+
+test('R1b scale overrides stay scoped to the map with bounded responsive sizes and readable fonts', async () => {
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  const marker = '/* MAP-R1b: map page scale (PO 2026-10-09) */';
+  assert.equal(css.split(marker).length, 2, 'one appended scale block');
+  const block = css.split(marker)[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selector]) => !selector.trim().startsWith('@media'));
+  assert.ok(rules.length > 20);
+  for (const [, selectors, declarations] of rules) {
+    for (const selector of selectors.split(',')) {
+      assert.ok(selector.trim().startsWith('.map-page'), selector);
+      assert.doesNotMatch(selector, /data-dialog|warehouse-panel/);
+    }
+    for (const [, size] of declarations.matchAll(/font-size:\s*(\d+)px/g)) {
+      assert.ok(Number(size) >= 13 || (selectors.trim() === '.map-page .leaflet-control-attribution' && size === '11'));
+    }
+    assert.doesNotMatch(declarations, /(?:color|background|opacity)\s*:/);
+  }
+  assert.match(block, /\.map-page \{ max-width: 1800px; font-size: 16px;/);
+  assert.match(block, /\.map-page #route-map \{ height: 78vh; min-height: 480px;/);
+  assert.match(block, /\.map-page \.map-routes \{ max-height: 360px;/);
+  assert.match(block, /@media \(max-width: 750px\)\s*\{\s*\.map-page #route-map \{ height: 60vh; min-height: 360px;/);
+  assert.match(block, /@media \(min-width: 751px\)\s*\{\s*\.map-page > \.snapshot \{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
+  assert.match(block, /\.map-page > \.snapshot:hover, \.map-page > \.snapshot:focus-within \{ white-space: normal;/);
+  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) 280px/);
+  assert.match(block, /dd:not\(:where\(\.map-zip-metrics dd\)\)/);
+  assert.match(block, /p:not\(:where\(#map-coverage\)\)/);
+  for (const [selector, size] of [
+    ['.map-sidebar .map-route-name', 20], ['.map-sidebar .map-summary-metrics dd', 19],
+    ['.map-sidebar .map-zip-info dd', 14], ['.map-sidebar .map-summary-updated', 13],
+    ['.leaflet-tooltip dd', 15], ['.leaflet-tooltip dt', 13], ['.warehouse-popup dt', 13],
+  ]) assert.ok(block.includes(`.map-page ${selector} { font-size: ${size}px; }`), selector);
+});
+
+
+async function labelFixture() {
+  const f = await fixture();
+  f.view = createMapView({ leaflet: f.leaflet, document: f.doc, onZip() {}, onClear() {}, onColorMode() {} });
+  const square = x => ({ type: 'Polygon', coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]] });
+  f.data = { routes: [], features: { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: { route_id: 1, route_name: 'MOCK-001', station: 'A', dsp_name: 'Alpha' }, geometry: square(0) },
+    { type: 'Feature', properties: { route_id: 2, route_name: 'MOCK-002', station: 'B', dsp_name: 'Beta' }, geometry: square(10) },
+  ] } };
+  return f;
+}
+const labelVisible = marker => !marker.node.className.includes('route-label--hidden');
+
+test('R2a label zoom thresholds, classes, safe DOM content, viewport culling and pane preserve interactions', async () => {
+  const f = await labelFixture(), { view, map, data, routeMarkers } = f;
+  data.features.features[1].properties.route_name = 'X-<img src=x onerror=alert(1)>';
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 + lat * 30 });
+  map.zoom = ROUTE_LABEL.minZoom - 1; view.render(data, { fitToStation: false });
+  assert.equal(routeMarkers.length, 2); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  assert.equal(map.panes['route-labels'].style.zIndex, '610');
+  assert.equal(map.panes['route-labels'].style.pointerEvents, 'none');
+  for (const m of routeMarkers) {
+    assert.equal(m.options.interactive, false); assert.equal(m.options.keyboard, false);
+    assert.equal(m.options.pane, 'route-labels');
+    assert.ok(m.node.classList.contains('leaflet-marker-icon'));
+    assert.ok(m.node.classList.contains('leaflet-zoom-animated'));
+    assert.equal(m.options.icon.html.tagName, 'span'); assert.deepEqual(m.options.icon.html.children, []);
+  }
+  assert.equal(routeMarkers[1].options.icon.html.textContent, '<img src=x onerror=alert(1)>');
+  map.zoom = 11; map.listeners.zoomend(); assert.ok(routeMarkers.every(labelVisible));
+  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(labelVisible));
+  map.zoom = 9; view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null });
+  assert.equal(labelVisible(routeMarkers[0]), true); assert.match(routeMarkers[0].node.className, /route-label--selected/);
+  assert.equal(labelVisible(routeMarkers[1]), false);
+  map.zoom = 8; map.listeners.zoomend(); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  map.zoom = 11; map.latLngToContainerPoint = () => ({ x: -100, y: 100 }); map.listeners.moveend();
+  assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  view.clear(); assert.ok(routeMarkers.every(m => map.removed.includes(m)));
+});
+
+test('R2a greedy labels prioritize selection, focus, normal and area, and avoid warehouse DOM rectangles', async () => {
+  const { view, map, data, routeMarkers, elements } = await labelFixture();
+  map.latLngToContainerPoint = () => ({ x: 100, y: 100 });
+  // Larger second Route wins a tie in normal state.
+  data.features.features[1].geometry.coordinates[0] = [[0,0], [2,0], [2,2], [0,2], [0,0]];
+  view.render(data, { fitToStation: false });
+  assert.deepEqual(routeMarkers.map(labelVisible), [false, true]);
+  view.setDsp('Alpha'); assert.deepEqual(routeMarkers.map(labelVisible), [true, false]);
+  assert.match(routeMarkers[1].node.className, /route-label--dimmed/);
+  view.applySelection({ station: 'B', route: { route_id: 2 }, zip: null });
+  assert.deepEqual(routeMarkers.map(labelVisible), [false, true]);
+  view.applySelection({ station: null, route: null, zip: null }); view.setDsp(null);
+  view.render(data, { fitToStation: false, focusStation: 'A' });
+  assert.deepEqual(routeMarkers.slice(-2).map(labelVisible), [true, false]);
+  assert.ok(routeMarkers.slice(0, 2).every(m => map.removed.includes(m)));
+  const warehouse = { getBoundingClientRect: () => ({ left: 90, right: 110, top: 90, bottom: 110, width: 20, height: 20 }) };
+  elements['route-map'].querySelectorAll = selector => { assert.equal(selector, '.warehouse-marker'); return [warehouse]; };
+  map.listeners.moveend(); assert.ok(routeMarkers.slice(-2).every(m => !labelVisible(m)));
+});
+
+test('R2a zoom animation does not lay out labels or recalculate cached geometry', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  let geometryReads = 0;
+  for (const feature of data.features.features) {
+    const geometry = feature.geometry;
+    Object.defineProperty(feature, 'geometry', { get() { geometryReads++; return geometry; } });
+  }
+  view.render(data, { fitToStation: false });
+  const reads = geometryReads, projections = map.projections, points = routeMarkers.map(m => m.point);
+  map.listeners.zoomstart(); map.zoom = 12;
+  map.listeners.moveend(); view.setDsp('Alpha'); view.setColorMode('difficulty');
+  assert.equal(map.projections, projections); assert.equal(geometryReads, reads);
+  map.listeners.zoomend(); assert.ok(map.projections > projections);
+  assert.equal(geometryReads, reads); assert.deepEqual(routeMarkers.map(m => m.point), points);
+  const after = map.projections; map.listeners.moveend(); assert.ok(map.projections > after);
+  assert.equal(geometryReads, reads);
+  assert.equal(map.listeners.zoom, undefined); assert.equal(map.listeners.zoomanim, undefined);
+});
+
+test('R2a label CSS removes divIcon defaults, centers text and uses classes without inline style strings', async () => {
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  const source = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
+  assert.match(css, /\.route-label \{[^}]*background: transparent;[^}]*border: 0;[^}]*pointer-events: none;[^}]*font-size: 12px;/);
+  assert.match(css, /transform: translate\(-50%, -50%\)/);
+  assert.match(css, /\.route-label--selected > span \{[^}]*font-size: 15px;[^}]*color: #fff;[^}]*background: #0f172a;/);
+  assert.match(css, /\.route-label--dimmed \{ opacity: 0.45;/);
+  assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|cssText|setAttribute\(['"]style/);
 });

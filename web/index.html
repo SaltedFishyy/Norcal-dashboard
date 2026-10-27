@@ -6,20 +6,26 @@
   <title>美西线路画像</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/data-status.js"></script>
 </head>
 <body>
   <main>
     <header>
       <p class="eyebrow">NC OPS CONSOLE</p>
       <div class="profile-heading"><h1>美西线路画像</h1><small class="snapshot">West Region Route Profile</small></div>
-      <a href="/map">线路地图</a>
+      <nav class="page-nav" aria-label="页面"><a href="/" aria-current="page">线路档案</a><a href="/map">线路地图</a></nav>
       <p class="snapshot">DMS 快照，非实时数据</p>
-      <dl class="metrics">
+      <section id="data-status" class="data-status" aria-label="数据状态"></section>
+      <div class="profile-summary"><dl class="metrics">
         <div><dt><label for="profile-district">片区</label></dt><dd><select id="profile-district" disabled></select></dd></div>
         <div><dt><label for="profile-station">站点</label></dt><dd><select id="profile-station" disabled></select></dd></div>
         <div><dt>更新时间</dt><dd id="updated">—</dd></div>
         <div><dt>线路总数</dt><dd id="total">—</dd></div>
       </dl>
+      <div class="profile-zip-search">
+        <form id="profile-zip-form"><label for="profile-zip">ZIP</label><input id="profile-zip" inputmode="numeric" maxlength="5" autocomplete="off"><button type="submit">搜索</button></form>
+        <div id="profile-zip-result" role="status" aria-live="polite"></div>
+      </div></div>
     </header>
     <section class="panel" aria-label="线路画像" aria-busy="true" id="profiles">
       <div class="status" role="status" aria-live="polite">
@@ -31,7 +37,7 @@
           <caption class="sr-only">所选站点最新 DMS 快照中的线路画像</caption>
           <thead><tr>
             <th scope="col">线路名称</th><th scope="col">DSP</th>
-            <th scope="col" class="numeric">Pickup Volume</th><th scope="col" class="numeric">PPH</th>
+            <th scope="col" class="numeric" aria-sort="none"><button id="sort-pickup_volume" type="button" class="sort-button">Pickup Volume<span class="sort-arrow" aria-hidden="true">↕</span></button></th><th scope="col" class="numeric" aria-sort="none"><button id="sort-pph" type="button" class="sort-button">PPH<span class="sort-arrow" aria-hidden="true">↕</span></button></th>
             <th scope="col" class="numeric">首公里距离 (mi)</th>
             <th scope="col">线路难度</th><th scope="col">人工难度</th>
           </tr></thead>
