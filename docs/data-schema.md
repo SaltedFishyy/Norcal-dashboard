@@ -18,6 +18,18 @@
 
 “待记录”项需要在下一次涉及该数据的任务中，由 Codex 检查代码后补充，不要凭猜测填写。
 
+### PostgreSQL 存储基础设施（Central DB P2 / CD-T2）
+
+- District 数据库层（DA-T1，migration `004_districts.sql`）：`known_stations` 每个已知 Station 一行，保存 `code`、可空的 `scrape_disabled_reason` 和 `created_at`；`districts` 每个片区一行，保存 id、中英文名称及唯一 `ordinal`；`district_stations` 每个已分配 Station 一行，以 `station_code` 为主键并外键关联 Station 和 District，保存片区内 `ordinal`；`district_config_version` 为单行版本及 `updated_at`。四张表分别提供 `v_*` 视图，版本视图不暴露内部 singleton id。
+- District 种子来源为手动维护的 `config/districts.json`，通过 `db:import-districts` 一次性事务导入；补入 `stations` 中的历史代码，但不为其生成归属。任意目标表已有数据即拒绝，保留源文件。跳过原因属于 Station，不因移动或移除归属而改变。`nc_district` 只能修改归属和版本。2026-10-14 经 Product Owner 授权仅部署 migration 004，并用现有种子导入初始化 4 个片区、46 个站点归属（含 Seattle），版本为 1；应用读取来源仍是文件，尚未切换到数据库。详见 [District Management spec 第 4 节](features/district-admin.md#4-数据设计migration-004_districtssql) 和 [Seattle 执行记录](features/seattle-district.md)。
+- 已新增 schema `nc` 的建表脚本、批处理双写、一次性 JSON 导入和 DB 只读 API；正式库操作由维护者在 review 后执行。
+- 主要表：`stations`、`scrape_runs`、`scrape_run_stations`、`station_snapshots`、`snapshot_routes`、`snapshot_route_zips`、`route_detail_versions`、`route_detail_zips`、`warehouses`；`schema_migrations` 记录迁移版本。
+- `v_warehouses` 排除内部查重字段 `address_key`；reader 只读该视图，`nc_warehouse` 仅拥有仓库表的 SELECT、INSERT、DELETE、指定八列 UPDATE，以及该视图的 SELECT。详见 [Warehouse spec 第 4 节](features/warehouses.md#4-数据设计)。
+- 数据来源为 `dms-playwright`（浏览器自动化）或 `json_import`（本地 JSON 导入）。`npm run db:import-json` 以 scraper 身份只读两个 runtime JSON 文件，保留原始字段 / fetched_at，导入为 active snapshot 和 committed Detail（包括历史 Route）；整次事务提交，已有 snapshot / Detail 时拒绝，不修改源文件。
+- `DATA_SOURCE=json|db` 选择 API 数据源，默认 json；db 使用 `NC_DB_READER_URL` 连接池，只查询 `v_*` 视图，不缓存数据。两种来源共用业务逻辑和字段投影，Profile API 不返回 raw，数据库不可用返回 503 `data_source_unavailable`。边界、District 配置与底图仍来自文件。`npm run db:parity` 仅本地比较两种来源的 HTTP 状态及完整 JSON，不输出响应数据。
+- Snapshot 粒度为 Station 的一次抓取；Route 和 ZIP 属于对应 snapshot；Detail / ZIP 属于一个带版本的 Route Detail。`fetched_at` 原样保存为 text，ZIP 保留为字符串；非实时数据的新鲜度沿用源数据时间。
+- 只读角色仅查询过滤原始字段的视图；抓取角色仅有指定的 INSERT、列级 UPDATE 和 SELECT 权限。完整字段与权限见 [central-db.md 第 21 节](features/central-db.md#21-p2-详细设计product-owner-2026-10-07-授权)。
+
 ---
 
 ## 2. 核心运营指标（Core Operational Metrics，候选）
@@ -243,6 +255,12 @@ CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数�
 边界文件：Census 2020 ZCTA cb 1:500k（`cb_2020_us_zcta520_500k`），join key `ZCTA5CE20`。**ZCTA ≠ USPS 投递 ZIP 边界**；PO Box / 单一机构 / 2020 年后新设的 ZIP 可能没有 polygon（实测 SFO01-001 中 21 个 ZIP 有 6 个没有）。
 
 ## 11. District 业务配置（DS）
+
+- 2026-10-26 经 Product Owner 授权，将 SFO02 追加到北加州现有 Station 顺序末尾（第十个），配置与数据库归属一致，数据库配置版本更新为 3。仅使用现有多站点批次入口获取该站数据，来源仍为已授权 DMS browser automation，沿用既有 snapshot / Detail schema、缓存完整性校验和 freshness 时间戳。详见 [SFO02 spec](features/sfo02-station.md)。
+
+- Phoenix 配置完成后，Product Owner 于 2026-10-14 另行授权 DMS 抓取。现有浏览器自动化和 JSON/数据库 dual-write 流程已完成该片区可用站点的 snapshot / Detail 抓取及逐站激活；沿用既有字段、时间戳和缓存完整性规则，未更改 schema 或 Warehouse 数据。详见 [Phoenix capture 记录](features/phoenix-district.md#authorized-capture-continuation-2026-10-14)。
+
+- 2026-10-14 新增 `phoenix`（凤凰城片区 / Phoenix District），与北加、丹佛、南加、西雅图同级；站点顺序为 PHX01、TUC01、CGZ01、PRC01、LAS01、STG01、IFP01、FLG01。文件与数据库冲突检查均无冲突，事务追加 8 个归属后数据库配置版本为 2。应用继续使用文件读取路径；本次没有运行 DMS，也没有修改 Route / ZIP 或 Warehouse 数据。
 
 - 来源类型：人工维护的业务配置，文件为 `config/districts.json`，版本 `schema_version: 1`。配置可进 Git，不包含 DMS 运行数据或凭据。
 - 粒度：一个 District 包含一个有序 Station 代码列表；`id` 唯一，`name_zh` / `name_en` 为显示名称，`stations` 的顺序为展示顺序。配置不决定 active Route，后者仍来自 Station snapshot。

@@ -10,18 +10,18 @@ export class RouteZipConflictError extends Error {
 }
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
-function validateProfiles(profiles, station = null) {
+export function validateProfiles(profiles, station = null, { allowMissingPostalCodes = false } = {}) {
   const conflicts = [];
   for (const [key, snapshot] of Object.entries(profiles.stations)) {
     for (const row of snapshot.rows) {
-      if (!row || !Object.hasOwn(row, 'postal_codes')) throw new PostalCodesMissingError();
+      if (!row || (!Object.hasOwn(row, 'postal_codes') && !allowMissingPostalCodes)) throw new PostalCodesMissingError();
       if (!(row.route_id === null || Number.isSafeInteger(row.route_id)) || typeof row.route_name !== 'string') {
         throw new SnapshotInvalidError();
       }
-      try { validatePostalCodes(row.postal_codes, row); }
+      try { if (Object.hasOwn(row, 'postal_codes')) validatePostalCodes(row.postal_codes, row); }
       catch { throw new SnapshotInvalidError(); }
     }
-    if (station === null || station === key) conflicts.push(...findPostalCodeConflicts(snapshot.rows).map(conflict => ({ station: key, ...conflict })));
+    if (station === null || station === key) conflicts.push(...findPostalCodeConflicts(snapshot.rows.filter(row => Object.hasOwn(row, 'postal_codes'))).map(conflict => ({ station: key, ...conflict })));
   }
 
   if (conflicts.length) throw new RouteZipConflictError(conflicts);

@@ -30,18 +30,18 @@ test('DS district absent and empty results', () => {
   assert.equal(empty.coverage.total, 0); assert.deepEqual(empty.missing, []);
 });
 
-test('DS default nine Stations preserve configured order and distinct route colors across scope', async () => {
+test('DS configured ten Stations preserve order and distinct route colors across scope', async () => {
   const { readDistricts } = await import('../src/store/districts-file.js');
   const { snapshot, route } = await import('./route-map-fixtures.js');
   const { routeColor } = await import('../../web/route-colors.js');
-  const codes = ['SFO01', 'OAR01', 'SMF01', 'SCK01', 'RNO01', 'RDG01', 'RDG02', 'MOD01', 'MFR01'];
+  const codes = ['SFO01', 'OAR01', 'SMF01', 'SCK01', 'RNO01', 'RDG01', 'RDG02', 'MOD01', 'MFR01', 'SFO02'];
   const profiles = { stations: Object.fromEntries(codes.map((code, index) => [code, snapshot([{ ...route(index + 1, code + '-Mock', ['00002']), station: code }])])) };
   const districts = await readDistricts({ profiles }); assert.deepEqual(districts[0].stations.map(station => station.code), codes);
   const map = buildDistrictMap({ profiles, districts, district: 'north-cal', boundaries: boundaries() });
-  assert.equal(map.routes.length, 9); assert.equal(map.features.features.length, 9); assert.equal(map.coverage.mapped, 9);
+  assert.equal(map.routes.length, codes.length); assert.equal(map.features.features.length, codes.length); assert.equal(map.coverage.mapped, codes.length);
   assert.deepEqual(map.stations.map(station => station.code), codes);
-  const { polygonStyle, clearSelection } = await import('../../web/map-state.js');
-  for (const feature of map.features.features) assert.equal(polygonStyle(feature.properties, clearSelection(), 'route').fillColor, routeColor(feature.properties.route_id));
+  const { polygonStyle, clearSelection, vividRouteColor } = await import('../../web/map-state.js');
+  for (const feature of map.features.features) assert.equal(polygonStyle(feature.properties, clearSelection(), 'route').fillColor, vividRouteColor(routeColor(feature.properties.route_id)));
 });
 
 test('RM6 district features carry exact ZIP metrics and profile DSP with null fallbacks', () => {

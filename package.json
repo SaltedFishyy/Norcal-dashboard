@@ -7,16 +7,23 @@
   },
   "scripts": {
     "server": "node --env-file-if-exists=.env server/bin/server.js",
+    "worker": "node --env-file-if-exists=.env server/bin/worker.js",
     "dms:login": "node --env-file-if-exists=.env server/bin/dms-login.js",
     "dms:scrape": "node --env-file-if-exists=.env server/bin/dms-scrape.js",
     "dms:scrape-route-detail": "node --env-file-if-exists=.env server/bin/dms-scrape-route-detail.js",
     "dms:scrape-route-details": "node --env-file-if-exists=.env server/bin/dms-scrape-route-details.js",
     "dms:scrape-stations": "node --env-file-if-exists=.env server/bin/dms-scrape-stations.js",
     "export:tableau-route-zips": "node --env-file-if-exists=.env server/bin/export-tableau-route-zips.js",
-    "test": "node --test server/test/"
+    "db:migrate": "node --env-file-if-exists=.env server/bin/db-migrate.js",
+    "db:abandon-run": "node --env-file-if-exists=.env server/bin/db-abandon-run.js",
+    "db:import-districts": "node --env-file-if-exists=.env server/bin/db-import-districts.js",
+    "db:import-json": "node --env-file-if-exists=.env server/bin/db-import-json.js",
+    "db:parity": "node --env-file-if-exists=.env server/bin/db-parity.js",
+    "test": "node --env-file-if-exists=.env --test server/test/"
   },
   "dependencies": {
     "leaflet": "1.9.4",
+    "pg": "8.23.0",
     "playwright": "^1.58.0",
     "protomaps-leaflet": "5.1.0"
   }

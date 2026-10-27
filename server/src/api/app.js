@@ -3,11 +3,13 @@ import { isStaticPath } from './static-files.js';
 import { basemapPaths, createBasemapHandler } from './basemap.js';
 
 const profileErrors = new Map([
+  ['DataSourceUnavailableError', [503, 'data_source_unavailable']],
   ['StationNotFoundError', [404, 'station_not_found']],
   ['SnapshotNotFoundError', [404, 'snapshot_not_found']],
   ['SnapshotInvalidError', [500, 'snapshot_invalid']],
 ]);
 const detailErrors = new Map([
+  ['DataSourceUnavailableError', [503, 'data_source_unavailable']],
   ['RouteDetailNotFoundError', [404, 'route_detail_not_found']],
   ['RouteDetailInvalidError', [500, 'route_detail_invalid']],
 ]);
@@ -22,6 +24,7 @@ const mapErrors = new Map([
 ]);
 const csp = "default-src 'self'; frame-ancestors 'none'";
 const basemapErrors = new Map([['BasemapNotFoundError', [404, 'basemap_not_found']],
+  ['DataSourceUnavailableError', [503, 'data_source_unavailable']],
   ['BasemapInvalidError', [500, 'basemap_invalid']]]);
 const errorMappings = new Map([
   ['/api/route-profiles', profileErrors], ['/api/route-details', detailErrors],
@@ -30,7 +33,8 @@ const errorMappings = new Map([
   ...[...basemapPaths.keys()].map(pathname => [pathname, basemapErrors]),
 ]);
 
-export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap, log = () => {} }) {
+export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
+  capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
   const stationEndpoint = read => async ({ url, respond }) => {
@@ -42,7 +46,7 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
   };
   const profiles = stationEndpoint(async station => {
     const { fetched_at, source_as_of, total, rows } = await getSnapshot(station);
-    return { station, fetched_at, source_as_of, total, rows };
+    return { station, fetched_at, source_as_of, total, rows: rows.map(({ raw, ...row }) => row) };
   });
   const routeMap = stationEndpoint(station => getRouteMap(station));
   const zipLookup = async ({ url, respond }) => {
@@ -83,6 +87,12 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
   for (const pathname of basemapPaths.keys()) {
     handlers.set(pathname, createBasemapHandler(getBasemap, csp, record));
   }
+  handlers.set('/api/capabilities', ({ respond }) => respond(200, capabilities));
+  for (const [pathname, handler] of readHandlers) handlers.set(pathname, handler);
+  for (const [pathname, handler] of extraHandlers) {
+    if (handlers.has(pathname)) throw new Error('Extension cannot replace a read-only route');
+    handlers.set(pathname, handler);
+  }
   return (req, res) => {
     const respond = (status, body) => { sendJson(res, status, body); record(status); };
     void (async () => {
@@ -96,14 +106,17 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
         : basemapPaths.has(url.pathname) ? undefined : handlers.get(url.pathname);
       if (!handler) { respond(404, { error: 'not_found' }); return; }
       if (isStatic || basemapPaths.has(rawPath)) res.setHeader('Content-Security-Policy', csp);
-      if (req.method !== 'GET') {
-        res.setHeader('Allow', 'GET'); respond(405, { error: 'method_not_allowed' }); return;
+      const methods = extraHandlers.get(url.pathname) === handler ? handler.methods ?? ['GET'] : ['GET'];
+      if (!methods.includes(req.method)) {
+        res.setHeader('Allow', methods.join(', ')); respond(405, { error: 'method_not_allowed' }); return;
       }
       try { await handler({ url, rawPath, req, res, respond }); }
       catch (error) {
         if (res.headersSent) { res.destroy(); return; }
         const [status, code] = isStatic ? [500, 'internal_error']
-          : errorMappings.get(url.pathname)?.get(error?.name) || [500, 'internal_error'];
+          : errorMappings.get(url.pathname)?.get(error?.name)
+            || (error?.name === 'DataSourceUnavailableError' ? [503, 'data_source_unavailable']
+              : error?.name === 'DistrictConfigInvalidError' ? [500, 'district_config_invalid'] : [500, 'internal_error']);
         respond(status, { error: code });
       }
     })();

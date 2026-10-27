@@ -22,7 +22,7 @@
 |---|---|
 | D1 | 页面标题：中文“美西线路画像”，英文“West Region Route Profile” |
 | D2 | District 用可扩展配置定义，不写死在 UI 逻辑中。当前只有 **North Cal District / 北加州片区** |
-| D3 | 北加州片区的 Station 及其**固定顺序**：SFO01 → OAR01 → SMF01 → SCK01 → RNO01 → RDG01 → RDG02 → MOD01 → MFR01（Route Profile 和 Map 一致，不按字母排序） |
+| D3 | 北加州片区的 Station 及其**固定顺序**：SFO01 → OAR01 → SMF01 → SCK01 → RNO01 → RDG01 → RDG02 → MOD01 → MFR01 → SFO02（2026-10-26 经 Product Owner 授权追加 SFO02；Route Profile 和 Map 一致，不按字母排序；见 `sfo02-station.md`） |
 | D4 | Route Profile 顶部改为“片区 → 站点”两级。Station 下拉框只显示当前片区的 Station |
 | D5 | District 配置只决定 Station 属于哪个片区；Station 有哪些 active Route 仍以 DMS 当前列表（snapshot）为准 |
 | D6 | 地图选择片区 → 同时显示该片区所有 Station 的 Route，每条 Route 保持自己的 route color；片区只决定显示范围，不是给整个片区一个统一颜色 |
@@ -230,3 +230,18 @@
 - 使用已有 Playwright / Chromium 与临时合成 9 站数据运行 1440 / 390 回归：两页选择、地图总览 / focus、搜索、难度模式和描边检查通过；0 console / page error、0 第三方请求。底图缺失用模拟响应，未读取真实 runtime / archive。日志 `.handoff/DS2-browser.log`，脚本 `.handoff/DS2-browser-check.mjs`，截图 `.handoff/DS2-{profile,map}-{1440,390}.png`。临时 server / browser 已关闭，合成目录已清理。
 - 验收边界：DS2-AC2 多文件合并 / 错误码 / 范围通过；真实北加 355 / 366 未读取验证。AC3 mountain 接入及降级通过，丹佛真实 296 / 3 与真实道路显示待本机验证。AC5 自动测试与合成 1440 / 390 / 无第三方请求通过。AC1 / AC4 为已有 District 功能，本轮不改，丹佛真实切换 / 保存留待 Claude 本机复核。Product Owner 预览签字未完成。
 - 无新增依赖、DMS 访问、凭据写入、cache schema 变化、commit、push 或部署。legacy 页面未修改，本轮未做其浏览器回归。
+
+### CD-T5 实现补充（2026-10-08）
+
+District 可带可选的 `scrape_disabled` 对象：key 必须是本片区 Station，reason 仅支持 `not_in_dms_menu`、`no_permission`、`disabled`。配置不改变 Station 的归属、`schema_version: 1` 或 `/api/districts` 的现有输出。Denver 的 GJT01、BZN01 配置为 `not_in_dms_menu`；刷新范围会跳过它们。设计详见 [central-db 第 22.3 节](central-db.md#223-scrape_disabled-与刷新范围)。
+
+### 南加州片区（2026-10-09）
+
+- SC1 在配置末尾追加 `south-cal`：南加州片区 / Southern California District，保持 `schema_version: 1` 及已有两个片区的内容。
+- Station 固定顺序：CNO01 → LAX01 → LAX02 → LAX03 → SFV01 → SFV02 → VTC01 → SMX01 → BKD01 → FAT01 → PLM01 → SAN01 → YUM02 → YUM01 → HNL01。
+- 沿用配置驱动的 API、刷新范围、地图、仓库过滤和前端选择器，没有新增代码分支，也没有修改 `server/src/`、`server/bin/` 或 `web/` 产品代码。
+- 按 brief 中 Claude 已确认的当前状态，15 个 Station 都没有快照，继续显示现有“暂无数据”状态。本次没有读取正式运行数据核验，也没有抓取数据。
+- 没有配置 `scrape_disabled`；DMS 菜单待核对，见 [open questions](../open-questions.md)。
+- 新增 `server/test/district-config.test.js`，在测试索引注册。使用真实配置和合成 snapshot / mock 边界 / fake 仓库数据，覆盖 brief 的 11 组断言；Worker 只请求 GET 预览，注入禁止 spawn 的替身。Route Profile 依现有页面没有 DSP 选择器，地图测试覆盖空 DSP 状态。
+- 未修改现有测试断言或 fixture 配置；`server/test/index.js` 仅新增模块注册。未新增依赖，未运行 DMS、写正式库、重启服务、提交、推送或部署。
+- 验证：`npm.cmd test`（同一 `npm test` script）565 项通过，0 失败、0 跳过；针对性测试 34 项通过（包含复用地图测试模块的 22 项），日志为 `.handoff/SC1-tests.log` 和 `.handoff/SC1-targeted-tests.log`。`git diff --check` 通过；没有配置 lint / build scripts。未进行真实数据浏览器预览，Product Owner 预览签字仍待后续完成。

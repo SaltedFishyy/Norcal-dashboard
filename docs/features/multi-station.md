@@ -11,8 +11,8 @@
 把 Product Owner 负责的 9 个站点录入现有 dashboard / cache / map。用**一个命令、一个浏览器会话**自动串行处理所有站点，不需要逐站人工确认：
 
 ```text
-切站 → 双重验证站点 → 获取当前 Route list（= 该站 active Route）→ 写 Route Profile snapshot
-→ 逐条抓 Route Detail / ZIP Detail（跳过完整 cache）→ 完整性检查 → 保存 Station summary
+切站 → 双重验证站点 → 获取当前 Route list（= 该站 active Route）
+→ 逐条抓 Route Detail / ZIP Detail（跳过完整 cache）→ 完整性检查 → 写 Route Profile snapshot → 保存 Station summary
 → 等待 15 秒 → 自动切到下一个 Station
 ```
 
@@ -102,15 +102,15 @@ server/src/batch/station-integrity.js     新增：纯函数完整性检查
 
 1. 加载第 1 页 → 验证二 → 把这一页的 records 用 transform 的同一套规则解析为 rows（用于本页 Route 的完整性判定，包括 ZIP 集合比较）→ 按页面顺序抓这一页需要抓的 Route Detail。
 2. 点“下一页” → 验证二 → 解析 → 抓详情；依此类推（RD3-12）。
-3. **最后一页加载并验证完成后**，把所有页的 records 合并，调用 `transformRoutePortrait` + `saveStationSnapshot`（第 5.4 节），然后做完整性检查。
+3. **最后一页加载并验证完成后**，把所有页的 records 合并，调用 `transformRoutePortrait` 生成 snapshot，完整性检查通过后才调用 `saveStationSnapshot`（第 5.4 节）写入（2026-10-07 / central-db P1）。
 4. 中途停止时，该 Station 的 snapshot **不更新**（保留旧的），已写入的 Route Detail 保留；续跑时该 Station 从第 1 页重新开始，已完成的 Route 会被跳过。
-5. `total ≤ 100` 时只有 1 页，第 1 步加载后即可写 snapshot（在抓详情之前或之后均可，实现时选一种并写入实现记录）。
+5. `total ≤ 100` 时只有 1 页，仍在本次详情处理完成且完整性检查通过后才写 snapshot（2026-10-07 / central-db P1）。
 6. 第二遍分页**不允许**。如果某页在 L1–L3 都定位失败，并且 L5 不可用，按 RD3-14 停止。
 7. **L5 只能在第 1 页使用**：L5 恢复列表后会回到第 1 页，无法保证单遍分页，所以在第 2 页及以后需要 L5 时，直接停止整个批次（`SelectorError('L5 不可用于第 2 页以后')`）。在第 1 页使用 L5 后，恢复时必须确认仍在第 1 页、每页 100 条、记录与之前一致，否则停止。（当前 DMS 页面没有“路区名称”筛选框，L5 本来就不可用。2026-10-06 Claude 澄清）
 
 ### 5.4 写 Route Profile snapshot（active 列表）
 
-- 用全部页的 records 组成列表体，调用现有 `transformRoutePortrait`（会再次校验 Station、Route ID 唯一、`postal_codes` 等），然后 `saveStationSnapshot` 覆盖该 Station 的 snapshot。
+- 用全部页的 records 组成列表体，调用现有 `transformRoutePortrait`（会再次校验 Station、Route ID 唯一、`postal_codes` 等），然后执行完整性检查；仅在检查通过后调用 `saveStationSnapshot` 原子覆盖该 Station 的 snapshot。检查失败保留旧文件，已成功写入的 Route Detail 保留（2026-10-07 / central-db P1）。
 - 覆盖后，`route-profiles.json[station].rows` 就是该 Station 当前 active 的 Route。旧 snapshot 中有、但当前列表没有的 Route 从 active 中移除；它们的 Route Detail 留在 `route-details.json` 作为历史，不删除。
 - 同一 Station 内的 ZIP 冲突沿用 T3 / TBL2 规则（transform 失败 → 停止）。
 

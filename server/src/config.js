@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { parseRefreshScope } from './batch/refresh-plan.js';
 
 const pathApi = (platform) => platform === 'win32' ? path.win32 : path.posix;
 
@@ -59,6 +60,13 @@ export function parseStationBatchArgs(args) {
       options.stations = (args[++i] || '').split(',');
       if (!options.stations.every(code => /^[A-Z]{3}\d{2}$/.test(code))
         || new Set(options.stations).size !== options.stations.length) throw new Error('Invalid stations');
+    } else if (flag === '--scope') options.scope = parseRefreshScope(args[++i]);
+    else if (flag === '--trigger') {
+      options.trigger = args[++i];
+      if (!['ui', 'cli'].includes(options.trigger)) throw new Error('Invalid trigger');
+    } else if (flag === '--progress-file') {
+      options.progressFile = args[++i];
+      if (!options.progressFile || options.progressFile.startsWith('--')) throw new Error('Invalid progress file');
     } else if (flag === '--max-routes-per-station') {
       const value = args[++i];
       if (!/^[1-9]\d*$/.test(value || '') || !Number.isSafeInteger(Number(value))) throw new Error('Invalid route limit');
@@ -68,6 +76,7 @@ export function parseStationBatchArgs(args) {
     else if (flag === '--headless') options.headless = true;
     else throw new Error('Invalid batch arguments');
   }
+  if (seen.has('--scope') && seen.has('--stations')) throw new Error('Scope and stations are mutually exclusive');
   return options;
 }
 export function parseStationBatchConfig(env) {

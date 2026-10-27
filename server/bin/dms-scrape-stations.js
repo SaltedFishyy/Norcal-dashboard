@@ -13,9 +13,18 @@ import { saveStationSnapshot, readRouteProfiles, SnapshotNotFoundError } from '.
 import { readRouteDetailsForBatch, saveRouteDetail } from '../src/store/route-details-file.js';
 import { readStationBatchState, prepareStationBatchState, writeStationBatchFile } from '../src/store/station-batch-file.js';
 import { completeRouteDetail, checkStationIntegrity, IntegrityError } from '../src/batch/station-integrity.js';
+import { createJsonBatchSink } from '../src/batch/batch-sink.js';
+import { createDualBatchSink } from '../src/batch/dual-batch-sink.js';
+import { createDbBatchSink } from '../src/db/batch-db-sink.js';
+import { connectDb } from '../src/db/connection.js';
 import { writePageFailureDiagnostic } from '../src/dms/batch-diagnostics.js';
 import { readBoundaries } from '../src/store/boundaries-file.js';
 import { selectBatchRoutes } from './dms-scrape-route-details.js';
+
+import { defaultDistrictsPath, validateDistricts } from '../src/store/districts-file.js';
+import { planRefresh } from '../src/batch/refresh-plan.js';
+import { acquireScrapeLock } from '../src/batch/scrape-lock.js';
+import { writeFileAtomic } from '../src/store/atomic-file.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 export function validateStationList(body, station, { pageNumber, total } = {}) {
@@ -34,18 +43,36 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
   closeModals = closeRouteDetailModals, readDetails = readRouteDetailsForBatch, readProfiles = readRouteProfiles,
   readState = readStationBatchState, writeBatch = writeStationBatchFile, saveDetail = saveRouteDetail,
   saveSnapshot = saveStationSnapshot, switchTo = switchStation, readStation = readCurrentStation,
-  assertStation = assertCurrentStation, boundaryReader = readBoundaries, now = () => new Date(), signals = process, diagnosticFileOps = fs } = {}) {
+  assertStation = assertCurrentStation, boundaryReader = readBoundaries, now = () => new Date(), signals = process, diagnosticFileOps = fs,
+  districtsPath = defaultDistrictsPath, acquireLock = acquireScrapeLock, progressWriter = writeFileAtomic,
+  dbSinkFactory = metadata => createDbBatchSink({ ...metadata, connect: () => connectDb('NC_DB_SCRAPER_URL', { env }) }) } = {}) {
   const controller = new AbortController(), started = now();
   const interrupt = () => controller.abort();
   const checkInterrupt = () => { if (controller.signal.aborted) throw new InterruptedError(); };
-  let options, config, runtimeDir, state, current, context, original = null, restored = false;
+  let sink, jsonSink, options, config, runtimeDir, state, current, context, original = null, restored = false;
   let counts = { prodApiRequestCount: 0, listRequestCount: 0, detailRequestCount: 0 }, batchCap = 0;
   let exitCode = 0, stopReason = null, phase = 'config', currentRoute = null, snapshots = {}, details = {};
   let currentBaseline, routeWritten = false, boundaries = null, diagnosticDone = false;
   let loadedRoutes = [], completedRoutes = new Set();
+  let releaseLock, plan = null, routeIndex = 0;
   const summaries = [], resumed = [];
+  const progress = async (finished = false) => {
+    if (!options?.progressFile || !releaseLock) return;
+    const statuses = Object.entries(state?.stations || {});
+    const value = { run_id: state?.run_id ?? null, scope: plan?.scope ?? null,
+      started_at: started.toISOString(), updated_at: now().toISOString(), phase,
+      station: current?.station ?? null, district: plan?.stations.find(s => s.code === current?.station)?.district ?? null,
+      station_index: current ? options.stations.indexOf(current.station) + 1 : 0, station_total: options.stations.length,
+      route_index: routeIndex, route_total: current?.route_total ?? null,
+      completed: statuses.filter(([, s]) => s.status === 'completed').map(([code]) => code),
+      skipped: plan?.skipped ?? [], failed: statuses.filter(([, s]) => s.status === 'stopped').map(([code]) => code),
+      finished_at: finished ? now().toISOString() : null, status: finished ? (exitCode ? 'stopped' : 'completed') : 'running',
+      stop_reason: stopReason };
+    try { await progressWriter(options.progressFile, JSON.stringify(value)); }
+    catch { errorLog('进度文件写入失败。'); }
+  };
   signals.on('SIGINT', interrupt);
-  const persistState = () => writeBatch({ runtimeDir, state });
+  const persistState = () => sink.writeState(state);
   const waitBetween = (type, ms) => context.guarded(() => {
     log(`等待：${type}；${ms} ms；开始 ${now().toISOString()}`);
     return context.page.waitForTimeout(ms);
@@ -57,26 +84,36 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
     current.request_count = after.prodApiRequestCount - currentBaseline.prodApiRequestCount;
     current.list_request_count = after.listRequestCount - currentBaseline.listRequestCount;
     current.detail_request_count = after.detailRequestCount - currentBaseline.detailRequestCount;
-    const filename = await writeBatch({ runtimeDir, state, station: current.station, record: current });
+    const filename = await sink.writeStationSummary({ state, station: current.station, record: current });
     state.stations[current.station] = { status: current.status, summary_file: filename,
       completed_at: current.status === 'completed' ? end.toISOString() : null };
     await persistState(); summaries.push(current);
+    await progress();
     log(`Station ${current.station}: ${current.status}; routes ${current.route_total}; success ${current.success_count}; cached ${current.skipped_cached_count}; failed ${current.failed_count}; requests ${current.request_count}`);
   };
   const diagnose = async (page, error) => {
     if (!runtimeDir || diagnosticDone) return;
     diagnosticDone = true;
-    await writePageFailureDiagnostic({ runtimeDir, page, error, currentRoute, phase, now,
+    const diagnosticError = error.name === 'DbStoreError' ? { name: error.name, message: error.message } : error;
+    await writePageFailureDiagnostic({ runtimeDir, page, error: diagnosticError, currentRoute, phase, now,
       prefix: 'station-batch', fileOps: diagnosticFileOps, errorLog,
       fields: { station: current?.station ?? null, error_type: safeType(error) } });
   };
   try {
     options = parseStationBatchArgs(args); config = parseStationBatchConfig(env);
+    if (options.scope) {
+      plan = planRefresh({ config: validateDistricts(JSON.parse(await fs.readFile(districtsPath, 'utf8'))), scope: options.scope });
+      options.stations = plan.stations.map(station => station.code);
+      if (!options.stations.length) { errorLog('本次范围没有可抓取的 Station。'); throw new Error(); }
+    }
     const paths = { env, platform: process.platform, homedir: homedir(), repoRoot };
     const runtime = checkRuntimeDir(resolveRuntimeDir(paths), repoRoot); runtimeDir = runtime.path;
+    jsonSink = sink = createJsonBatchSink({ runtimeDir, saveDetail, saveSnapshot, writeBatch });
     const auth = checkStatePath(resolveStatePath(paths), repoRoot);
     for (const warning of [...runtime.warnings, ...auth.warnings]) log(warning);
     const baseUrl = parseBaseUrl(env.DMS_BASE_URL).href;
+    releaseLock = await acquireLock({ runtimeDir, trigger: options.trigger || 'cli', startedAt: started.toISOString() });
+    await progress();
     phase = 'session';
     try { await sessionExists(auth.path); }
     catch (error) { if (error.code !== 'ENOENT') throw error; throw Object.assign(new Error(), { name: 'NeedsLoginError' }); }
@@ -87,7 +124,11 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
     try { snapshots = (await readProfiles({ runtimeDir })).stations; }
     catch (error) { if (!(error instanceof SnapshotNotFoundError)) throw error; }
     state = prepareStationBatchState(await readState({ runtimeDir }), options.stations, { newRun: options.newRun, at: started.toISOString() });
-    await persistState(); checkInterrupt();
+    if (env.DB_DUAL_WRITE === '1') sink = createDualBatchSink(jsonSink, dbSinkFactory({ requestedStations: options.stations, trigger: options.trigger || 'cli',
+      scope: plan ? { ...plan.scope, district: plan.scope.district ?? null, skipped: plan.skipped } : null,
+      options: { refresh: options.refresh, max_routes_per_station: options.maxRoutesPerStation, new_run: options.newRun } }));
+    await progress();
+    await sink.startRun(state); checkInterrupt();
     log('请勿同时运行其他抓取命令。Station 与 Route 均串行处理。');
     phase = 'capture';
     await session({ statePath: auth.path, baseUrl, globalStationMode: true, batch: true, headless: options.headless,
@@ -101,7 +142,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
         resumed.push(...options.stations.filter(station => state.stations[station].status === 'completed'));
         for (let index = 0; index < pending.length; index++) {
           const station = pending[index];
-          currentRoute = null;
+          currentRoute = null; routeIndex = 0;
           currentBaseline = context.counts();
           loadedRoutes = []; completedRoutes = new Set();
           current = { station, status: 'in_progress', route_total: null, success_count: 0, skipped_cached_count: 0, failed_count: 0,
@@ -111,7 +152,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
             stop_reason: null, missing_routes: [] };
           state.stations[station].status = 'in_progress'; await persistState();
           context.beginStation(config.stationBase);
-          phase = 'switch'; await switchTo(context, station); await assertStation(context, station);
+          phase = 'switch'; await progress(); await switchTo(context, station); await assertStation(context, station);
           current.automatic_list_seen = context.automaticListSeen === true;
           phase = 'list';
           const listContext = await context.queryStation();
@@ -148,7 +189,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
               return result;
             };
             for (const row of rows) {
-              currentRoute = row;
+              currentRoute = row; routeIndex++; await progress();
               if (!options.refresh && completeRouteDetail(details[String(row.route_id)], row)) {
                 processed.add(row.route_id); completedRoutes.add(row.route_id); current.skipped_cached_count++; continue;
               }
@@ -167,9 +208,9 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
               if (!completeRouteDetail(route, row, { allowZipMismatch: true })) throw new IntegrityError();
               phase = 'store';
               await assertStation(context, station); checkInterrupt();
-              await saveDetail({ runtimeDir, route, fileOps: { ...fs, rename: async (...params) => {
-                await assertStation(context, station); await context.guarded(async () => checkInterrupt()); return fs.rename(...params);
-              } } });
+              await sink.writeRouteDetail({ route, beforeCommit: async () => {
+                await assertStation(context, station); await context.guarded(async () => checkInterrupt());
+              } });
               details[String(row.route_id)] = route; fresh.add(row.route_id); processed.add(row.route_id); current.success_count++;
               routeWritten = true; completedRoutes.add(row.route_id);
               lastCapture = true;
@@ -190,10 +231,6 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
               .evaluateAll(elements => elements.filter(element => element.getClientRects().length > 0).length));
             if (visible !== 1) throw new CaptureError();
           }
-          phase = 'store'; await assertStation(context, station);
-          await saveSnapshot({ runtimeDir, station, stationSnapshot, fileOps: { ...fs, rename: async (...params) => {
-            await assertStation(context, station); await context.guarded(async () => checkInterrupt()); return fs.rename(...params);
-          } } }); snapshots[station] = stationSnapshot;
           const limited = current.missing_routes.length > 0;
           phase = 'integrity';
           const integrity = checkStationIntegrity({ station, snapshot: stationSnapshot, details, successCount: current.success_count,
@@ -202,6 +239,10 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
           current.boundary_coverage = integrity.boundary_coverage;
           const { boundary_coverage, ...report } = integrity; current.integrity = report;
           if (!integrity.passed) throw new IntegrityError();
+          phase = 'store'; await assertStation(context, station);
+          await sink.activateStationSnapshot({ station, stationSnapshot, processedIds: processed, freshIds: fresh, beforeCommit: async () => {
+            await assertStation(context, station); await context.guarded(async () => checkInterrupt());
+          } }); snapshots[station] = stationSnapshot;
           current.status = limited ? 'limited' : 'completed'; await finishStation();
           if (index < pending.length - 1) {
             phase = 'station_delay'; await waitBetween('station', config.stationDelay);
@@ -232,31 +273,44 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
     errorLog(`批次停止：${stopReason}`);
     if (!context) await diagnose(null, error);
   } finally {
-    if (runtimeDir && state) {
-      if (!exitCode && Object.values(state.stations).every(item => item.status === 'completed')) state.finished_at = now().toISOString();
-      const ended = now(), completed = options.stations.filter(code => state.stations[code].status === 'completed');
-      const record = { station_total: options.stations.length, completed_count: completed.length, completed_stations: completed,
-        limited_stations: options.stations.filter(code => state.stations[code].status === 'limited'), skipped_stations: resumed,
-        unprocessed_stations: options.stations.filter(code => ['pending', 'in_progress', 'stopped'].includes(state.stations[code].status)),
-        route_total: summaries.reduce((sum, item) => sum + (item.route_total || 0), 0)
-          + resumed.reduce((sum, station) => sum + (snapshots[station]?.total || 0), 0),
-        success_count: summaries.reduce((sum, item) => sum + item.success_count, 0),
-        skipped_cached_count: summaries.reduce((sum, item) => sum + item.skipped_cached_count, 0), request_count: counts.prodApiRequestCount,
-        batch_request_cap: batchCap, duration_ms: ended - started, start_time: started.toISOString(), end_time: ended.toISOString(),
-        locate_method: Object.fromEntries(['L1', 'L2', 'L3', 'L5'].map(method => [method, summaries.reduce((sum, item) => sum + item.locate_method[method], 0)])),
-        missing_stations: options.stations.filter(code => state.stations[code].status !== 'completed'),
-        missing_routes: summaries.flatMap(item => item.missing_routes.map(route_id => ({ station: item.station, route_id }))),
-        original_station: original, original_station_restored: restored, stop_reason: stopReason, status: exitCode ? 'stopped' : 'completed' };
-      try { await persistState(); await writeBatch({ runtimeDir, state, record }); }
-      catch { exitCode ||= 1; errorLog('运行记录写入失败。'); }
-      log(`批次汇总：Station ${record.station_total}; completed ${record.completed_count}; routes ${record.route_total}; success ${record.success_count}; cached ${record.skipped_cached_count}; requests ${record.request_count}; restored ${restored}; stop ${stopReason || '无'}`);
+    try {
+      if (runtimeDir && state) {
+        if (!exitCode && Object.values(state.stations).every(item => item.status === 'completed')) state.finished_at = now().toISOString();
+        const ended = now(), completed = options.stations.filter(code => state.stations[code].status === 'completed');
+        const record = { station_total: options.stations.length, completed_count: completed.length, completed_stations: completed,
+          limited_stations: options.stations.filter(code => state.stations[code].status === 'limited'), skipped_stations: resumed,
+          unprocessed_stations: options.stations.filter(code => ['pending', 'in_progress', 'stopped'].includes(state.stations[code].status)),
+          route_total: summaries.reduce((sum, item) => sum + (item.route_total || 0), 0)
+            + resumed.reduce((sum, station) => sum + (snapshots[station]?.total || 0), 0),
+          success_count: summaries.reduce((sum, item) => sum + item.success_count, 0),
+          skipped_cached_count: summaries.reduce((sum, item) => sum + item.skipped_cached_count, 0), request_count: counts.prodApiRequestCount,
+          batch_request_cap: batchCap, duration_ms: ended - started, start_time: started.toISOString(), end_time: ended.toISOString(),
+          locate_method: Object.fromEntries(['L1', 'L2', 'L3', 'L5'].map(method => [method, summaries.reduce((sum, item) => sum + item.locate_method[method], 0)])),
+          missing_stations: options.stations.filter(code => state.stations[code].status !== 'completed'),
+          missing_routes: summaries.flatMap(item => item.missing_routes.map(route_id => ({ station: item.station, route_id }))),
+          original_station: original, original_station_restored: restored, stop_reason: stopReason, status: exitCode ? 'stopped' : 'completed' };
+        if (plan) record.skipped_by_config = plan.skipped;
+        try { await sink.finishRun({ state, record }); }
+        catch (error) {
+          exitCode ||= 1;
+          if (error.name === 'DbStoreError') {
+            stopReason = `${phase}:DbStoreError`; record.status = 'stopped'; record.stop_reason = stopReason;
+            try { await jsonSink.finishRun({ state, record }); } catch {}
+          }
+          errorLog('运行记录写入失败。');
+        }
+        log(`批次汇总：Station ${record.station_total}; completed ${record.completed_count}; routes ${record.route_total}; success ${record.success_count}; cached ${record.skipped_cached_count}; requests ${record.request_count}; restored ${restored}; stop ${stopReason || '无'}`);
+      }
+    } finally {
+      await progress(true);
+      if (releaseLock) { try { await releaseLock(); } catch { errorLog('锁文件释放失败。'); exitCode ||= 1; } }
+      signals.off('SIGINT', interrupt);
     }
-    signals.off('SIGINT', interrupt);
   }
   return exitCode;
 }
 function safeType(error) {
   return ['NeedsLoginError', 'CircuitBreakerError', 'LoadLimitError', 'InterruptedError', 'StationSwitchError', 'StationMismatchError',
-    'CaptureError', 'SelectorError', 'SchemaError', 'StoreError', 'SnapshotInvalidError', 'RouteDetailInvalidError', 'IntegrityError'].includes(error?.name) ? error.name : 'Error';
+    'CaptureError', 'SelectorError', 'SchemaError', 'StoreError', 'SnapshotInvalidError', 'RouteDetailInvalidError', 'IntegrityError', 'DbStoreError', 'LockedError'].includes(error?.name) ? error.name : 'Error';
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) process.exitCode = await runStationsBatch();

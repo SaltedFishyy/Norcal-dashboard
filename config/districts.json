@@ -5,13 +5,33 @@
       "id": "north-cal",
       "name_zh": "北加州片区",
       "name_en": "North Cal District",
-      "stations": ["SFO01", "OAR01", "SMF01", "SCK01", "RNO01", "RDG01", "RDG02", "MOD01", "MFR01"]
+      "stations": ["SFO01", "OAR01", "SMF01", "SCK01", "RNO01", "RDG01", "RDG02", "MOD01", "MFR01", "SFO02"]
     },
     {
       "id": "denver",
+      "scrape_disabled": { "GJT01": "not_in_dms_menu", "BZN01": "not_in_dms_menu" },
       "name_zh": "丹佛片区",
       "name_en": "Denver District",
       "stations": ["DEN01", "CYS01", "GJT01", "ABQ01", "FMN01", "SAF01", "SLC01", "PIH01", "TWF01", "IDA01", "LGU01", "BIL01", "BZN01"]
+    },
+    {
+      "id": "south-cal",
+      "name_zh": "南加州片区",
+      "name_en": "Southern California District",
+      "stations": ["CNO01", "LAX01", "LAX02", "LAX03", "SFV01", "SFV02", "VTC01", "SMX01", "BKD01", "FAT01", "PLM01", "SAN01", "YUM02", "YUM01", "HNL01"]
+    },
+    {
+      "id": "seattle",
+      "scrape_disabled": { "EUG02": "not_in_dms_menu" },
+      "name_zh": "西雅图片区",
+      "name_en": "Seattle District",
+      "stations": ["SEA01", "PAE01", "GEG01", "YKM01", "TRC01", "BOI01", "PDX01", "EUG01", "EUG02"]
+    },
+    {
+      "id": "phoenix",
+      "name_zh": "凤凰城片区",
+      "name_en": "Phoenix District",
+      "stations": ["PHX01", "TUC01", "CGZ01", "PRC01", "LAS01", "STG01", "IFP01", "FLG01"]
     }
   ]
 }

@@ -74,6 +74,7 @@ export function batchFixture(pageOptions = {}) {
   const h = stationPage(pageOptions), files = [], saves = [], logs = [], signals = new EventEmitter(), details = {}, snapshots = {};
   let state = null, active = 0, maxActive = 0;
   const run = overrides => runStationsBatch({ args: ['--stations', Object.keys(h.lists).join(',')], env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction' },
+    acquireLock: async () => async () => {},
     log: value => logs.push(value), errorLog: value => logs.push(value), signals, sessionExists: async () => {}, boundaryReader: async () => null,
     session: (options, callback) => withPortraitPage({ ...options, browserType: h.browserType }, callback),
     readDetails: async () => details, readProfiles: async () => ({ stations: snapshots }), readState: async () => state,

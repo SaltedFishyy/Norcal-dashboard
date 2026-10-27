@@ -20,7 +20,7 @@
 
 第一版 Q1–Q8 已于 2026-09-30 由 Product Owner 回答，结论见 `docs/features/dms-refresh.md` 第 0 节。剩余细节（详见该文件第 10 节）：
 
-- [ ] D1 Station 列表来自配置文件还是 DMS？
+- [x] D1 Station 列表 → 来自配置文件 `config/districts.json`；不可抓取的 Station 用 `scrape_disabled` 标记（Product Owner 2026-10-07，见 `docs/features/central-db.md` 第 5 节）
 - [x] D2 First-mile Distance 的单位 → mile（T2）
 - [x] D3 Address Type Distribution → 占比，10 种类型（T2）
 - [x] D4 Route Difficulty 由 DMS 直接提供（T2）
@@ -58,6 +58,55 @@
 
 - [x] RM-Q1 Route Profile 页面和 modal 的难度颜色 → **本轮统一为地图同一套五色**，只改显示颜色（Product Owner 2026-10-05）
 - [x] RM-Q2 难易度模式选中线路时 → 其他线路**保持各自的 Route 难度颜色并淡化**，不变灰（Product Owner 2026-10-05）
+
+## Central DB / Shared Dashboard
+
+见 `docs/features/central-db.md`。已确认的决定（不再作为问题）：公用电脑是唯一抓取节点；刷新范围为全部或单个 District；Station 按各自完整性检查结果生效；失败后再刷新时新建 run；使用 PostgreSQL；保留 JSON 后备（观察约 2 周或至少 10 次成功刷新后再决定）；公用电脑一直开机。
+
+- [ ] CD-Q1 刷新**运行中**意外不可用的 Station（例如菜单项消失、切站失败）：spec 的默认做法是按现有安全规则停止整个 run，确认原因后再在 `scrape_disabled` 中配置。是否接受？（2026-10-07）
+- [ ] CD-Q2 公用电脑上的 DMS 使用谁的账号登录？session 过期后由谁到公用电脑上重新登录？公司政策是否允许多人共用这个账号？（2026-10-07）
+- [ ] CD-Q3 办公室局域网中的任何人（包括访客 Wi-Fi）都可以不登录直接查看 Dashboard，是否可以接受？访客网络是否已与办公网络隔离？（2026-10-07）
+- [ ] CD-Q4 PostgreSQL 的备份方式和保存位置，以及由谁负责公用电脑的维护（重启、更新、备份检查）？（2026-10-07，P2 / P3 前确认）
+- [x] CD-Q5 → **用户登录时启动**（Product Owner 2026-10-08）；公用电脑需要开启自动登录或一直保持登录。原问题：开机启动方式：MVP 采用“当前用户登录时启动”（不需要管理员权限，有界面的浏览器可以运行），要求公用电脑设置自动登录或一直保持登录。是否需要“开机但没人登录也启动”？（需要管理员权限、保存的 Windows 密码，并且只能用无界面浏览器抓取，后者还没有在真实 DMS 上验证过）（2026-10-08）
+- [x] CD-Q6 → **这台就是公用电脑，办公网络改为 Private**（Product Owner 2026-10-08），由 Product Owner 在管理员 PowerShell 中执行。原问题：这台电脑的 Wi-Fi 当前是 **Public** 网络配置文件，而 3000 端口按要求只对 Private / Domain 开放。是否把办公网络设为 Private（需要管理员权限，并确认这是可信的办公网络）？这台电脑是否就是最终的公用电脑？（2026-10-08）
+- [x] CD-Q7 → **P3 暂不迁移 repo**，记为技术债 TD7（Product Owner 2026-10-08）。原问题：repo 目前在 OneDrive 的 Desktop 目录下。如果这台就是公用电脑，是否把 repo 迁到同步目录之外（例如 `C:\nc-ops-console`）？（2026-10-08）
+
+## 仓库管理 / Warehouse
+
+见 `docs/features/warehouses.md`。已确认的决定（D1–D13）见该文件第 2 节。
+
+- [x] WH-Q1 → **50 km，只提醒，不阻止，确认后可以保存**（Product Owner 2026-10-09）。原问题：“离 District 太远”的阈值。spec 暂定为离该片区已上图 ZIP 外包矩形超过 50 km 时要求确认（可配置常量），是否合适？（2026-10-09）
+- [x] WH-Q2 → **不为本功能新建**（Product Owner 2026-10-09），以 `docs/features/warehouses.md` 为主 spec。来源：`AGENTS.md` 第 2.2、6.1、7.1 节和 `CLAUDE.md` 第 3 节都提到维护 `REQUIREMENTS.md`，但第 6.1 节同时写明“Not all of these files exist yet. Create them when they are first needed.”，所以不是必须现在就建。原问题：`REQUIREMENTS.md` 在仓库中不存在，是否现在新建？（2026-10-09）
+- [x] WH-Q3 → **接受**。误删后手动重新添加，不做 soft delete 或 audit（Product Owner 2026-10-09）。原问题：仓库删除无法恢复且局域网无登录（D4）。中央 DB 备份方案（CD-Q4）确定前，是否接受误删只能手动重新添加？（2026-10-09）
+
+## 南加州片区 / Southern California
+
+见 `docs/features/district.md`“南加州片区（2026-10-09）”。
+
+- [ ] SC-Q1 这 15 个 Station 是否都在 DMS 的站点菜单中，当前账号是否都有权限？现有规则是：刷新过程中遇到菜单里没有的 Station，会停止整个 run；只有在 `scrape_disabled` 中配置过的 Station 才会被跳过。确认之前不预先配置 `scrape_disabled`。南加州排在配置末尾，所以“全部刷新”时，北加州和丹佛会先完成并各自生效。（2026-10-09）
+  - **第一次抓取（2026-10-09，run `87934135…`，`--scope district:south-cal --new-run`）：**
+    - CNO01 completed：41 条 Route。
+    - LAX01 completed：26 条 Route。
+    - LAX02 切站失败，诊断信息为 `Station LAX02 菜单项数量为 0`（`switch:StationSwitchError`）。run stopped，其余 12 个 Station 没有尝试。
+    - 共 1205 个请求，没有 429、5xx 或登录问题。
+    - 待 Product Owner 决定：是否给 LAX02 配置 `scrape_disabled: not_in_dms_menu`，然后继续抓取。
+  - **后续（2026-10-09）：**
+    - LAX03 同样出现 `菜单项数量为 0`。Product Owner 确认当前没有 LAX03，先跳过，不再尝试。
+    - Product Owner 要求先抓剩下的 Station。Claude 在现有 CLI 外面加了一层串行驱动：每次切站失败就新开一个 run，从下一个 Station 继续；安全节奏不变。
+    - 结果：SFV02、VTC01、SMX01、BKD01、FAT01、PLM01、SAN01、YUM02、YUM01、HNL01 全部完成（run `4373fb92…`，1457 个请求）。
+    - LAX02 和 LAX03 的 `scrape_disabled` 以后统一决定，目前没有配置。
+- [ ] SC-Q4 SFV01 的 Route `SFV01-006`（route_id 2958）在“画像详情”这一步两次都点击超时（`capture:SelectorError`，`locator.click: Timeout 1000ms exceeded`），所以 SFV01 整个 Station 没有激活，已经缓存了 13 条 Detail。Product Owner 2026-10-09 决定重试一次，失败就跳过，所以已跳过。需要查清：DMS 页面上这条 Route 是不是没有“画像详情”按钮？是否要改抓取逻辑或单独处理这条 Route？（2026-10-09）
+- [ ] SC-Q2 YUM01 / YUM02 服务的亚利桑那 ZIP（853xx）在边界库中没有 ZCTA，会进入“缺少边界的邮编”。是否要按 `geo/README.md` 的方法补一个 AZ 边界文件？这只是数据文件，不需要改代码。南加州（857 个 ZIP）和夏威夷（98 个 ZIP）已经覆盖。（2026-10-09）
+- [ ] SC-Q3 南加州、Yuma、夏威夷目前只有全美的低精度底图（`us`，z0–6），放大后会比较模糊。是否需要新增一个区域底图？需要生成 PMTiles，并在底图白名单中加一项。（2026-10-09）
+
+## 片区管理 / District Management
+
+见 `docs/features/district-admin.md`。已确认的决定（A1–A12）见该文件第 2 节。
+
+- [x] DA-Q1 → **本期不做**（PO 2026-10-09，A13）。原问题：刷新预览中，是否标注“上次不可用”的 Station（例如上一个 run 中切站失败的 LAX02、LAX03）？只作为提示，不自动跳过，跳过仍然只由 `scrape_disabled` 决定。本期默认**不做**。（2026-10-09）
+- [x] DA-Q2 → **加入 `DISTRICT_SOURCE=file|db` 开关，默认为 file**（PO 2026-10-09，A14）。原问题：部署窗口：DA-T2 把读取路径切换到数据库之后，正式服务必须在“migration 004 + 种子导入”完成后才能重启，否则选择器会因为 503 `district_config_unavailable` 而无法使用。由于服务直接从 repo 工作区运行，实现到部署之间不能重启正式服务。是否接受？还是希望 DA-T2 增加一个临时开关（例如 `DISTRICT_SOURCE=file|db`），先合入代码、部署时再切换？（2026-10-09）
+- [x] DA-Q3 → **新加入的 Station 排在片区末尾，不提供排序调整**（PO 2026-10-09，A15）。原问题：新加入片区的 Station 默认排在片区末尾，本期不提供排序调整。是否可以？（2026-10-09）
+- [x] DA-Q4 → **不做审计**（PO 2026-10-09，A16）。原问题：片区归属的变更不记录操作人和历史（与仓库功能一致，不做审计），只保留 `district_config_version` 和 `updated_at`。是否可以？（2026-10-09）
 
 ## Route Difficulty
 

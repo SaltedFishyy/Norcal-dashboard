@@ -23,3 +23,27 @@ import './difficulty.test.js';
 
 import './districts-file.test.js';
 import './district-map.test.js';
+import './batch-sink.test.js';
+import './db-schema.test.js';
+import './batch-db-sink.test.js';
+import './dual-batch-sink.test.js';
+import './json-import.test.js';
+import './db-data-source.test.js';
+import './db-parity.test.js';
+
+import './refresh-plan.test.js';
+import './scrape-lock.test.js';
+import './refresh-batch.test.js';
+import './refresh-migration.test.js';
+import './worker.test.js';
+import './freshness.test.js';
+import './readonly-server.test.js';
+
+import './warehouse-db.test.js';
+import './warehouse-rules.test.js';
+import './warehouse-geocoder.test.js';
+import './warehouse-api.test.js';
+import './warehouse-store.test.js';
+import './warehouse-setup.test.js';
+
+import './district-db.test.js';

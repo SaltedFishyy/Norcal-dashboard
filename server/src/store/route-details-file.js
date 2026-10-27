@@ -60,7 +60,10 @@ export async function getRouteDetail({ runtimeDir, routeId, fileOps = fs }) {
   }
   if (!validFile(data)) throw new RouteDetailInvalidError();
   if (!Object.hasOwn(data.routes, String(routeId))) throw new RouteDetailNotFoundError();
-  const { route_id, station, route_name, route_difficulty, fetched_at, zip_count, zips, parse_errors } = data.routes[String(routeId)];
+  return projectRouteDetail(data.routes[String(routeId)]);
+}
+
+export function projectRouteDetail({ route_id, station, route_name, route_difficulty, fetched_at, zip_count, zips, parse_errors }) {
   // Explicit field selection keeps source records and future private metadata off the API.
   return { route_id, station, route_name, route_difficulty, fetched_at, zip_count, parse_errors,
     zips: zips.map(({ postal_code, postal_code_tag, postal_code_difficulty, first_mile_distance, experienced_pph, delivery_fail_rate, dnr_rate, safety_level, pickup_volume_daily = null, parse_errors }) =>

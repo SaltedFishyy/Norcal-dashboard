@@ -229,7 +229,7 @@ test('MS failed final integrity stops before next station', async () => {
   assert.equal(await h.run({ saveDetail: async ({ route }) => { route.station = 'RNO01'; } }), 1);
   assert.equal(h.files[0].record.integrity.passed, false);
   assert.match(h.files.at(-1).record.stop_reason, /IntegrityError/);
-  assert.deepEqual(h.saves, ['SFO01']);
+  assert.deepEqual(h.saves, []);
 });
 test('MS SIGINT during station delay stops the run and marks current station stopped', async () => {
   const h = batchFixture({ waitEvent: async ms => { if (ms === 15000) h.signals.emit('SIGINT'); } });

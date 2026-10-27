@@ -5,6 +5,7 @@ const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/data-status.js', ['data-status.js', 'text/javascript']],
   ['/station-preference.js', ['station-preference.js', 'text/javascript']],
   ['/format.js', ['format.js', 'text/javascript']],
   ['/difficulty.js', ['difficulty.js', 'text/javascript']],
@@ -14,7 +15,7 @@ const files = new Map([
   ['/route-colors.js', ['route-colors.js', 'text/javascript']],
   ['/vendor/leaflet/leaflet.js', ['leaflet.js', 'text/javascript', 'leaflet']],
   ['/vendor/protomaps-leaflet/protomaps-leaflet.js', ['protomaps-leaflet.js', 'text/javascript', 'protomaps']],
-  ...['map-view', 'map-panel', 'map-state', 'map-text'].map(name => [`/${name}.js`, [`${name}.js`, 'text/javascript']]),
+  ...['map-view', 'map-panel', 'map-state', 'map-text', 'warehouse-layer', 'warehouse-panel'].map(name => [`/${name}.js`, [`${name}.js`, 'text/javascript']]),
   ['/vendor/leaflet/leaflet.css', ['leaflet.css', 'text/css', 'leaflet']],
 ]);
 

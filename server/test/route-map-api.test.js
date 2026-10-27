@@ -290,7 +290,7 @@ test('DS district APIs use injected config, ordered snapshots, scope and sanitiz
 test('DS APIs return configured unavailable stations and empty district without a snapshot file', async t => {
   const { url, profileFile } = await fixture(t); await fs.unlink(profileFile);
   const response = await fetch(url + '/api/districts'); assert.equal(response.status, 200);
-  const data = await response.json(); assert.equal(data.districts[0].stations.length, 9);
+  const data = await response.json(); assert.equal(data.districts[0].stations.length, 10);
   assert.ok(data.districts[0].stations.every(station => !station.has_snapshot));
   const mapResponse = await fetch(url + '/api/route-map/district?district=north-cal'); assert.equal(mapResponse.status, 200);
   const map = await mapResponse.json(); assert.deepEqual(map.routes, []); assert.equal(map.coverage.total, 0);
