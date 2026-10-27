@@ -99,7 +99,7 @@ spec 不清楚或与现有代码冲突时停止并说明，不要猜测。
 
 ## 4. 安全边界
 
-- 脚本、Claude 和 Codex 都不会 `git commit`、`git push`、部署或发布 GitHub Pages。
+- 脚本和 Codex 不会 `git commit`、`git push`、部署或发布 GitHub Pages。Claude review 通过后，按 `AGENTS.md` 第 2.5 节决定能否直接 commit / push，还是先请 Product Owner 确认。
 - 不向 Codex 传递任何凭据；Codex 使用本机已登录的账户。
 - gitignored 文件（如 `.env`）不会进入快照和 diff。
 - 涉及真实内部数据上公开页面时，仍需 Product Owner 按 `AGENTS.md` 第 14 节确认。

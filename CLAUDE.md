@@ -111,7 +111,11 @@ DMS / browser automation → transform / normalization → store → API → fro
 
 ## 6. 行为边界
 
-- 不 commit、不 push、不部署、不发布 GitHub Pages，除非 Product Owner 对该次操作明确同意。
+- commit / push / 部署按 `AGENTS.md` 第 2.5 节分级执行（Product Owner 2026-10-27）：
+  - 低风险改动（docs、`AGENTS.md`、`CLAUDE.md`、注释、纯文案、不影响运行逻辑的说明性配置）：`npm test` 和 `git diff --check` 通过后直接 commit + push，不再逐次确认。
+  - 代码逻辑、schema / migration、爬虫逻辑或抓取范围、权限 / 账号 / secret、部署 / 服务重启、dependency 变更、数据迁移、删除文件，以及可能影响现有功能或数据的操作：先给 Product Owner review 或明确确认。
+  - 永远不提交 `.env`、密码 / 连接串、DMS session / auth state、runtime data、日志、secrets。
+  - push 会带上所有未推送的 commit；其中如果有尚未获准 push 的高风险 commit，先问。
 - 不修改产品功能代码（`nc-ops-console-main/`），除非 Product Owner 明确要求 Claude 直接改。轻量改动也一样：Claude 判断属于 lightweight change 后，可以不建 feature spec，但仍然给 Codex 一个简短、明确的 task brief，由 Codex 修改并检查，Claude 做简要 review（`AGENTS.md` 第 7.1 节）。
 - 删除或覆盖文件前先查看目标内容。
 - 如实报告：检查失败或跳过了就说明，不夸大结果。
@@ -124,7 +128,8 @@ DMS / browser automation → transform / normalization → store → API → fro
 
 - 主要开发环境：Windows + VS Code + PowerShell。
 - Python、Node、Git Bash、Codex CLI 等是否可用，需要时实际检测，不做长期假设。
-- 本地预览：在 `nc-ops-console-main/` 下启动静态服务器（如 `npx http-server -p 8000` 或 `python -m http.server 8000`），打开 `http://localhost:8000/`。`npx http-server` 作为临时预览工具不需要每次单独请求批准，但不能因此修改 `package.json` 或增加永久 dependency。
+- 本地预览（dashboard）：`npm run server`，打开 `http://127.0.0.1:3000/`（线路画像）和 `/map`（线路地图）；仓库管理和刷新在 Worker：`npm run worker`，`http://127.0.0.1:3100/`。详见 `AGENTS.md` 第 9 节。
+- 本地预览（legacy 站点）：在 `nc-ops-console-main/` 下启动静态服务器（如 `npx http-server -p 8000`），打开 `http://localhost:8000/`。`npx http-server` 作为临时预览工具不需要每次单独请求批准，但不能因此修改 `package.json` 或增加永久 dependency。
 - `.sh` 脚本在 PowerShell 中不能直接运行，需要 `bash scripts/<name>.sh`。
 
 ### 7.1 Bash 命令写法（Product Owner 2026-10-07）

@@ -88,7 +88,32 @@ Codex should not redefine product requirements. If the spec is unclear, incomple
 * Chat can be used for discussion, but confirmed requirements must be written into project documents.
 * Agents must not independently redefine the same requirement.
 * Important implementation decisions must be documented.
-* No agent commits, pushes, deploys, or publishes to GitHub Pages without explicit Product Owner approval for that specific action.
+* Commits, pushes, deploys, and other changes follow Section 2.5.
+
+### 2.5 Change Approval (Product Owner 2026-10-27)
+
+**Low-risk changes — do it, then commit + push without waiting for confirmation**, after checking that tests / formatting pass (`npm test`, `git diff --check`):
+
+* README / docs, `AGENTS.md`, `CLAUDE.md`
+* Comments
+* Pure copy / wording changes
+* Descriptive configuration that does not affect runtime logic
+
+**Review / explicit Product Owner confirmation required before acting:**
+
+* Code logic changes
+* Database schema / migrations
+* Scraper logic or scraping scope
+* Permissions, accounts, secrets
+* Deployment, service restarts
+* Adding, upgrading, or removing dependencies
+* Data migration
+* Deleting files
+* Anything else that may affect existing features or data
+
+**Never commit, under any circumstances:** `.env`, passwords or connection strings, DMS session / auth state, runtime data, logs, secrets.
+
+When a change is simple and low-risk, finish it without asking. Stop and ask only for complex or high-risk changes; if unsure which tier applies, treat it as high-risk.
 
 ---
 
@@ -118,7 +143,7 @@ https://github.com/SaltedFishyy/Norcal-dashboard is the **primary implementation
 * Treat the current product as an **existing product, not a blank-slate project**.
 * Before designing UI, page structure, navigation, interactions, data structures, or architecture changes, inspect the existing implementation in this repository first.
 * Where reasonable, continue the existing components, layout patterns, naming conventions, interaction logic, and data structures instead of rewriting equivalent functionality.
-* Visibility and GitHub Pages deployment of this repository are tracked in `docs/open-questions.md`. Until confirmed, treat anything committed here as potentially public (Section 14).
+* This repository is **private** (confirmed 2026-09-30, see `docs/open-questions.md`). Repository data is treated as internal; credentials, sessions, runtime data and logs are still never committed (Section 2.5, Section 14). If visibility ever changes, re-check Section 14 first.
 
 ### 4.2 Historical Reference Repository
 
@@ -141,10 +166,34 @@ CLAUDE.md                         Claude-specific working rules
 docs/                             Requirements, specs, data and workflow docs (Section 6)
 docs/workflow/claude-codex-handoff.md   Claude → Codex handoff process
 scripts/codex-handoff.sh          Optional automated handoff script (Section 7.4)
-nc-ops-console-main/              The application (static site)
+scripts/services/                 Windows service scripts for the shared computer (see docs/deployment.md)
+config/districts.json             District → Station configuration
+geo/                              ZCTA boundary GeoJSON used by the map
+server/bin/                       CLI entry points (server, worker, dms:*, db:*, export:*)
+server/src/                       Backend modules, layered as below
+server/db/migrations/             PostgreSQL migrations (schema `nc`)
+server/test/                      Automated tests (`npm test`)
+web/                              Dashboard frontend served by the API server
+nc-ops-console-main/              Legacy static site (original prototype)
 ```
 
-Application files (`nc-ops-console-main/`):
+Backend layering (`server/src/`), matching `DMS / browser automation → transform → store → API → frontend`:
+
+```text
+dms/          Playwright session, Station switching, DMS page capture
+transform/    Normalization and validation of captured DMS data
+batch/        Multi-Station batch orchestration helpers, refresh plan, scrape lock, JSON/DB sinks
+store/        Runtime JSON files (atomic writes) and the JSON data source
+db/           PostgreSQL connection, migrations runner, DB data source, imports, parity
+api/          Read-only HTTP API and static file serving (port 3000)
+worker/       Local-only Worker (port 3100): refresh and management endpoints
+warehouses/   Warehouse API, store, geocoder and privilege checks
+districts/    District database privilege checks
+route-map/    Route / ZIP map building
+export/       Tableau export
+```
+
+Legacy application files (`nc-ops-console-main/`):
 
 ```text
 index.html                     Main network map (Station / DSP / Route / Volume / Price)
@@ -156,9 +205,17 @@ README.md                      Deployment and price-update instructions
 
 ### 4.4 Current Technology
 
-The application is a static website. There is no build step and no backend.
+The main dashboard is `server/` + `web/`:
 
-This static site is the existing prototype / legacy implementation, not a constraint on the final architecture. With Product Owner approval, a frontend/backend architecture may be introduced (see `docs/features/dms-refresh.md`); reuse the legacy site's good UI, interaction, and data patterns rather than rewriting them without reason.
+* Node.js >= 22.9, ES modules, no build step; dependencies in `package.json` (`pg`, `playwright`, `leaflet`, `protomaps-leaflet`)
+* Frontend: HTML / CSS / vanilla JavaScript ES modules in `web/`, served by the API server; Leaflet and protomaps-leaflet are served from `node_modules`, not a CDN
+* Data: runtime JSON (outside the repo) or PostgreSQL, selected by `DATA_SOURCE=json|db`; DMS data is captured by Playwright (`dms:*` scripts)
+* Services: read-only server on 3000 (`npm run server`), Worker on 127.0.0.1:3100 (`npm run worker`); see `docs/deployment.md`
+* Automated tests: `npm test`
+
+The legacy static site below is the original prototype, not a constraint on the architecture; reuse its good UI, interaction, and data patterns rather than rewriting them without reason.
+
+Legacy static site (`nc-ops-console-main/`): no build step, no backend.
 
 * HTML / CSS / vanilla JavaScript (inline in HTML files)
 * Leaflet 1.9.4 (map, loaded from CDN)
@@ -350,7 +407,8 @@ The Product Owner's product judgment takes priority over an AI's opinion of whet
 
 Preview options:
 
-* Local preview: run any static server from `nc-ops-console-main/` (for example `python -m http.server 8000` or `npx http-server -p 8000`) and open `http://localhost:8000/`.
+* Local preview (dashboard): `npm run server`, then open `http://127.0.0.1:3000/` (Route Profile) and `http://127.0.0.1:3000/map` (Route Map). Management features (refresh, warehouses) are on the Worker: `npm run worker`, `http://127.0.0.1:3100/`.
+* Local preview (legacy site): run any static server from `nc-ops-console-main/` (for example `npx http-server -p 8000`) and open `http://localhost:8000/`.
 * Publishing a preview to any public GitHub Pages site is an outward-facing action and requires Product Owner approval first.
 
 ---
@@ -373,7 +431,7 @@ After meaningful changes, check at minimum:
 ### 10.2 Lint / Build / Automated Tests
 
 * If the project has lint, build, or test commands configured, Codex must run them and report the results.
-* The project currently has **no** package manager, lint configuration, build step, or automated test suite. In that case Codex must say so explicitly and must not claim that lint/build/tests were run.
+* The project uses npm. Automated tests run with `npm test` (Node test runner, `server/test/`); DB tests use the separate `NC_TEST_DB_*` database from `.env`. There is no lint configuration or build step; say so explicitly and do not claim lint/build was run.
 * When possible, add automated tests for reusable logic (for example CSV parsing and price aggregation).
 * Tooling that changes the production runtime, build, deployment, or dependency architecture needs Product Owner approval first. Temporary development, local check, and preview tools may be used without approval, but say what was run. Do not add permanent project dependencies (e.g. `package.json`) without approval.
 
@@ -547,9 +605,7 @@ Datasets, metrics, visualizations, and integration options: `docs/tableau.md`.
 
 ## 18. Database and API
 
-A database and API may be introduced later, for example `Database → API → Web Dashboard` and `Database → Tableau`, or a shared database behind one API serving both.
-
-Do not introduce a database or API before it is needed and approved. Credentials follow Section 14.
+The dashboard runs on `PostgreSQL → API → Web Dashboard` (central DB, see `docs/features/central-db.md`), with runtime JSON kept as a fallback data source during the transition (`DATA_SOURCE=json|db`, optional JSON/DB dual-write). Schema changes go through `server/db/migrations/` and need Product Owner approval (Section 2.5). Database roles are separated (owner / scraper / reader / warehouse / district); credentials follow Section 14.
 
 ---
 
