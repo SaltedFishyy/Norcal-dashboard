@@ -206,22 +206,36 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
   background: transparent;
   border: 0;
   pointer-events: none;
-  font-size: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #334155;
+  opacity: 1;
+  white-space: nowrap;
+}
+.route-label > span { display: block; width: max-content; line-height: 22px; transform: translate(-50%, -50%); background: rgba(255,255,255,.72); padding: 0 4px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(15,23,42,.08); }
+.route-label--focused { color: #0f172a; }
+.route-label--focused > span { background: rgba(255,255,255,.9); }
+.route-label--selected { opacity: 1; }
+.route-label--selected > span {
+  font-size: 18px;
+  line-height: 22px;
   font-weight: 700;
   color: #0f172a;
-  white-space: nowrap;
-  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
+  background: rgba(255,255,255,.95);
+  padding: 1px 5px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(15,23,42,.3), 0 1px 3px rgba(15,23,42,.2);
 }
-.route-label > span { display: block; width: max-content; line-height: 18px; transform: translate(-50%, -50%); }
-.route-label--selected > span {
-  font-size: 15px;
-  color: #fff;
-  background: #0f172a;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-shadow: none;
-}
-.route-label--dimmed { opacity: 0.45; }
+.route-labels--far .route-label { font-size: 18px; opacity: 0.95; }
+.route-labels--far .route-label > span { line-height: 18px; }
+.route-labels--mid .route-label { font-size: 15px; opacity: 1; }
+.route-labels--mid .route-label > span { line-height: 20px; }
+.route-labels--far .route-label--selected,
+.route-labels--mid .route-label--selected { opacity: 1; }
+.route-labels--far .route-label--selected > span,
+.route-labels--mid .route-label--selected > span { font-size: 17px; line-height: 22px; }
+.route-label.route-label--dimmed > span { background: rgba(255,255,255,.72); color: #475569; }
+.route-label.route-label--dimmed { opacity: 0.4; color: #475569; font-weight: 600; }
 .route-label--hidden { display: none; }
 
 /* MAP-R1b: map page scale (PO 2026-10-09) */

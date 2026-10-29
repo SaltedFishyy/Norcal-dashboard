@@ -73,3 +73,9 @@ export function pageState({ loading = false, status, data, failed = false } = {}
   const code = errorCodes.has(data?.error) ? data.error : 'internal_error';
   return { state: 'error', message: profileText.loadError(code) };
 }
+
+export function dspOptions(routes, focusStation = null) {
+  return [...new Set(routes.filter(route => !focusStation || route.station === focusStation)
+    .map(route => typeof route.dsp_name === 'string' ? route.dsp_name.trim() : '')
+    .filter(Boolean))].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}

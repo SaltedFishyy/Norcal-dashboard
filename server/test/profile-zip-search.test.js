@@ -25,7 +25,7 @@ let counter = 0;
 async function fixture(t) {
   const previous = { document: globalThis.document, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } });
-  const ids = ['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district', 'profile-zip-form', 'profile-zip', 'profile-zip-result', 'route-detail', 'detail-content', 'detail-close', 'detail-title'];
+  const ids = ['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district', 'profile-dsp', 'profile-zip-form', 'profile-zip', 'profile-zip-result', 'route-detail', 'detail-content', 'detail-close', 'detail-title'];
   const e = Object.fromEntries(ids.map(id => [id, new Element()]));
   for (const key of ['pickup_volume', 'pph']) {
     const th = new Element('th'), control = new Element('button');
@@ -50,6 +50,86 @@ async function fixture(t) {
   const submit = async (value = '00123') => { e['profile-zip'].value = value; return e['profile-zip-form'].listeners.submit({ preventDefault() {} }); };
   return { e, state, calls, saved, button, submit, result: () => e['profile-zip-result'].textContent };
 }
+
+test('PD1 options, filtering before sorting, totals, source preservation and selection retention', async t => {
+  const f = await fixture(t), select = f.e['profile-dsp'];
+  const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<label for="profile-dsp">DSP<\/label>/);
+  assert.match(html, /<select id="profile-dsp" disabled>/);
+  f.state.rows = Object.freeze([
+    Object.freeze({ route_id: 1, dsp_name: ' Z ', pickup_volume: 0 }),
+    Object.freeze({ route_id: 2, dsp_name: 'A', pickup_volume: 4 }),
+    Object.freeze({ route_id: 3, dsp_name: 'Z', pickup_volume: 8 }),
+    Object.freeze({ route_id: 4, dsp_name: ' ' }),
+    Object.freeze({ route_id: 5 }),
+  ]);
+  const before = structuredClone(f.state.rows);
+  await f.e['profile-station'].listeners.change();
+  assert.deepEqual(select.children.map(option => option.value), ['', 'A', 'Z']);
+  assert.equal(select.children[0].textContent, '全部 DSP'); assert.equal(select.disabled, false);
+  assert.equal(f.e.total.textContent, '5');
+  select.value = 'Z'; select.listeners.change();
+  const order = () => f.e.rows.children.map(row => row.attributes['data-route-id']);
+  assert.deepEqual(order(), ['1', '3']); assert.equal(f.e.total.textContent, '2 / 5');
+  f.e['sort-pickup_volume'].listeners.click(); assert.deepEqual(order(), ['3', '1']);
+  f.e['sort-pickup_volume'].listeners.click(); assert.deepEqual(order(), ['1', '3']);
+  select.value = ''; select.listeners.change(); assert.deepEqual(order(), ['1', '2', '3', '4', '5']);
+  assert.deepEqual(f.state.rows, before);
+  select.value = 'Z'; select.listeners.change();
+  f.e['profile-district'].value = 'second'; await f.e['profile-district'].listeners.change();
+  assert.equal(select.value, 'Z');
+  f.state.rows = [{ route_id: 6, dsp_name: 'B' }];
+  await f.e['profile-station'].listeners.change();
+  assert.equal(select.value, ''); assert.deepEqual(select.children.map(option => option.value), ['', 'B']);
+  f.state.rows = []; await f.e.retry.listeners.click();
+  assert.deepEqual(select.children.map(option => option.value), ['']); assert.equal(select.disabled, false);
+  assert.equal(f.e.total.textContent, '0');
+  let release; f.state.profile = () => new Promise(resolve => { release = resolve; });
+  const pending = f.e.retry.listeners.click(); assert.equal(select.disabled, true);
+  release(reply({ error: 'internal_error' }, 500)); await pending; assert.equal(select.disabled, true);
+  assert.ok(f.saved.every(write => !Object.hasOwn(write.value, 'dsp')));
+});
+
+test('PD1 DSP change clears ZIP feedback, highlight and dialog but preserves input and invalidates pending queries', async t => {
+  const f = await fixture(t);
+  f.state.rows = [{ route_id: 2, dsp_name: 'A' }, { route_id: 3, dsp_name: 'B' }];
+  await f.e['profile-station'].listeners.change();
+  await f.submit(); assert.equal(f.e['route-detail'].open, true);
+  const oldRow = f.e.rows.children[0];
+  f.e['profile-dsp'].value = 'A'; f.e['profile-dsp'].listeners.change();
+  assert.equal(f.result(), ''); assert.equal(oldRow.className, '');
+  assert.equal(f.e.rows.children[0].className, ''); assert.equal(f.e['route-detail'].open, false);
+  assert.equal(f.e['profile-zip'].value, '00123');
+  let release; f.state.zip = () => new Promise(resolve => { release = resolve; });
+  const pending = f.submit();
+  f.e['profile-dsp'].value = 'B'; f.e['profile-dsp'].listeners.change();
+  release(reply({ status: 'covered', station: 'MOCKB', route_id: 2 })); await pending;
+  assert.equal(f.result(), ''); assert.equal(f.e['profile-dsp'].value, 'B');
+  assert.equal(f.e['route-detail'].open, false);
+});
+
+test('PD1 excluded ZIP offers explicit reveal; stale buttons cannot change filters; multi-station uses same path', async t => {
+  const f = await fixture(t), select = f.e['profile-dsp'];
+  f.state.rows = [{ route_id: 2, dsp_name: 'B' }, { route_id: 3, dsp_name: 'A' }];
+  await f.e['profile-station'].listeners.change();
+  select.value = 'A'; select.listeners.change();
+  await f.submit();
+  assert.equal(select.value, 'A'); assert.notEqual(f.e['route-detail'].open, true);
+  assert.match(f.result(), /ZIP 00123 · 站点 MOCKB · 线路 Mock B · DSP Mock DSP · 不在当前 DSP 筛选（A）中/);
+  const stale = f.e['profile-zip-result'].children[0]; assert.equal(stale.textContent, '显示该线路');
+  f.state.zip = { status: 'uncovered' }; await f.submit('00987');
+  await stale.listeners.click(); assert.equal(select.value, 'A'); assert.match(f.result(), /未找到/);
+  f.state.zip = { status: 'multi_station', owners: [{ station: 'MOCKC', route_id: 2, route_name: 'Mock C' }] };
+  await f.submit(); await f.e['profile-zip-result'].children[0].listeners.click();
+  assert.equal(select.value, 'A'); assert.match(f.result(), /不在当前 DSP 筛选/);
+  await f.e['profile-zip-result'].children[0].listeners.click();
+  assert.equal(select.value, ''); assert.equal(f.e.total.textContent, '2');
+  assert.equal(f.e.rows.children[0].className, 'zip-target-row'); assert.equal(f.e['route-detail'].open, true);
+  assert.ok(descendants(f.e['detail-content']).some(node => node.className === 'zip-target'));
+  select.value = 'B'; select.listeners.change();
+  f.state.zip = { status: 'covered', station: 'MOCKC', route_id: 2 }; await f.submit();
+  assert.equal(select.value, 'B'); assert.equal(f.e.rows.children[0].className, 'zip-target-row');
+});
 
 test('NAV1 shared navigation, active state and larger click targets', async () => {
   for (const [name, active] of [['index', '/'], ['map', '/map']]) {

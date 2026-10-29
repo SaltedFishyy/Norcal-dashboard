@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLYGON_STYLE, hoverStyle, polygonStyle, searchRoutes, selectRoute, selectZip, clearSelection, classifyQuery, switchStation, uncoveredZipStyle, vividRouteColor, ROUTE_FILL, routeLabelText, routeLabelAnchors } from '../../web/map-state.js';
+import { assignRouteColors, ROUTE_COLOR_ASSIGN, POLYGON_STYLE, hoverStyle, polygonStyle, searchRoutes, selectRoute, selectZip, clearSelection, classifyQuery, switchStation, uncoveredZipStyle, vividRouteColor, ROUTE_FILL, routeLabelText, routeLabelAnchors } from '../../web/map-state.js';
 import { palette, routeColor } from '../../web/route-colors.js';
 import { BASEMAP_FLAVOR } from '../../web/map-view.js';
 
@@ -9,7 +9,7 @@ test('RM2 selection styles preserve route color and distinguish route, ZIP and d
   const properties = { route_id: 1, postal_code: '00001' };
   const normal = polygonStyle(properties), route = polygonStyle(properties, selectRoute(1));
   assert.equal(normal.fillColor, vividRouteColor(routeColor(1))); assert.equal(normal.fillOpacity, POLYGON_STYLE.normal.fillOpacity);
-  assert.equal(route.fillColor, normal.fillColor); assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
+  assert.equal(route.fillColor, '#cca300'); assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
   assert.ok(route.weight > normal.weight);
   const zip = polygonStyle(properties, selectZip(properties)); assert.ok(zip.weight > route.weight);
   const dim = polygonStyle(properties, selectRoute(2)); assert.equal(dim.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
@@ -80,8 +80,8 @@ test('RM5 difficulty style table preserves semantic colors, borders and selectio
   for (const mode of ['route', 'difficulty']) {
     const normal = polygonStyle(properties, clearSelection(), mode);
     const faded = polygonStyle(properties, clearSelection(), mode, 'SMF01');
-    assert.equal(faded.fillColor, normal.fillColor); assert.equal(faded.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity); assert.equal(faded.opacity, POLYGON_STYLE.dimmed.opacity);
-    assert.deepEqual(polygonStyle(properties, clearSelection(), mode, 'SFO01'), { ...normal, ...POLYGON_STYLE.focused });
+    assert.equal(faded.fillColor === normal.fillColor, mode === 'difficulty'); assert.equal(faded.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity); assert.equal(faded.opacity, POLYGON_STYLE.dimmed.opacity);
+    assert.deepEqual(polygonStyle(properties, clearSelection(), mode, 'SFO01'), { ...normal, ...POLYGON_STYLE.focused, fillColor: mode === 'difficulty' ? normal.fillColor : polygonStyle(properties, selectRoute(properties.route_id)).fillColor });
     const selected = selectRoute({ route_id: 7, station: 'SFO01' });
     assert.deepEqual(polygonStyle(properties, selected, mode, 'SMF01'), polygonStyle(properties, selected, mode));
     assert.equal(polygonStyle({ ...properties, station: 'SMF01', route_id: 8 }, selected, mode, 'SMF01').fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
@@ -89,7 +89,8 @@ test('RM5 difficulty style table preserves semantic colors, borders and selectio
 });
 
 test('RM7 DSP options normalize, deduplicate, sort and scope without accepting missing names', async () => {
-  const { dspOptions, filteredRoutes } = await import('../../web/map-state.js');
+  const { filteredRoutes } = await import('../../web/map-state.js');
+  const { dspOptions } = await import('../../web/format.js');
   const routes = [' Z ', 'A', 'A', null, undefined, '', '  ', 7].map(dsp_name => ({ station: 'A', dsp_name, route_name: 'Alpha' }));
   routes.push({ station: 'B', dsp_name: 'B', route_name: 'Beta' });
   assert.deepEqual(dspOptions(routes, 'A'), ['A', 'Z']);
@@ -106,7 +107,7 @@ test('RM7 DSP fading preserves colors, selection precedence and null behavior', 
       const normal = polygonStyle(p, selection, mode, 'A');
       assert.deepEqual(polygonStyle(p, selection, mode, 'A', null), normal);
       const filtered = polygonStyle(p, selection, mode, 'A', 'Beta');
-      assert.deepEqual(filtered, selection.route ? normal : { ...normal, ...POLYGON_STYLE.dimmed });
+      assert.deepEqual(filtered, selection.route ? normal : { ...normal, ...POLYGON_STYLE.dimmed, fillColor: polygonStyle(p, selectRoute(2), mode).fillColor });
       assert.deepEqual(polygonStyle(p, selection, mode, 'A', 'Alpha'), normal);
     }
     assert.deepEqual(polygonStyle(p, clearSelection(), mode, 'B', 'Alpha'), polygonStyle(p, clearSelection(), mode, 'B'));
@@ -168,21 +169,21 @@ test('R2a focused hierarchy intersects Station and DSP filters without overridin
     const normal = polygonStyle(p, clearSelection(), mode);
     for (const [station, dsp] of [['A', null], [null, 'Alpha'], ['A', 'Alpha']]) {
       const focused = polygonStyle(p, clearSelection(), mode, station, dsp);
-      assert.deepEqual(focused, { ...normal, ...POLYGON_STYLE.focused });
+      assert.deepEqual(focused, { ...normal, ...POLYGON_STYLE.focused, fillColor: mode === 'difficulty' ? normal.fillColor : polygonStyle(p, selectRoute(1), mode).fillColor });
       assert.ok(focused.fillOpacity > normal.fillOpacity);
       assert.ok(focused.opacity > normal.opacity);
     }
     for (const [station, dsp] of [['B', 'Alpha'], ['A', 'Beta'], ['B', 'Beta']]) {
       const dim = polygonStyle(p, clearSelection(), mode, station, dsp);
-      assert.deepEqual(dim, { ...normal, ...POLYGON_STYLE.dimmed });
+      assert.deepEqual(dim, { ...normal, ...POLYGON_STYLE.dimmed, fillColor: polygonStyle(p, selectRoute(2), mode).fillColor });
       assert.ok(dim.fillOpacity < normal.fillOpacity && dim.opacity < normal.opacity);
     }
     assert.deepEqual(polygonStyle(p, selectRoute(1), mode, 'B', 'Beta'), polygonStyle(p, selectRoute(1), mode));
   }
 });
 
-test('R2a route label suffixes retain zeros and treat empty names as absent', () => {
-  for (const [name, text] of [['SFO01-021', '021'], ['SMF01-009', '009'], ['A-B-007', '007'], ['Route', 'Route'],
+test('R2a route label suffixes remove leading zeros and treat empty names as absent', () => {
+  for (const [name, text] of [['SFO01-021', '21'], ['RNO01-003', '3'], ['X-000', '0'], ['A12', 'A12'], ['X-A12', 'A12'], ['SMF01-009', '9'], ['A-B-007', '7'], ['Route', 'Route'],
     [null, null], [undefined, null], ['', null], ['  ', null]]) assert.equal(routeLabelText(name), text);
 });
 
@@ -208,7 +209,7 @@ test('R2a anchors group Routes once and fall back inside the nearest member ZIP 
   const point = anchors[0].latlng.toReversed();
   assert.equal(contains([1.75, 2.75], left) || contains([1.75, 2.75], top), false);
   assert.equal(contains(point, top), true); assert.equal(contains(point, left), false);
-  assert.equal(anchors[0].weight, 8); assert.equal(anchors[0].text, '001');
+  assert.equal(anchors[0].weight, 8); assert.equal(anchors[0].text, '1');
   assert.deepEqual(anchors[1].latlng, [1, 11]); assert.equal(anchors[1].weight, 4);
   assert.deepEqual(routeLabelAnchors([]), []);
 });
@@ -222,10 +223,10 @@ test('R2a area moments sum MultiPolygons and subtract holes independent of ring 
   assert.deepEqual(routeLabelAnchors([labelFeature(1, [outer.toReversed(), hole.toReversed()])]), [donut]);
   const parts = [[box(0, 0, 1, 1)], [box(3, 0, 2, 2)]];
   const [multi] = routeLabelAnchors([labelFeature(2, parts, 'MultiPolygon')]);
-  assert.equal(multi.weight, 5);
+  assert.equal(multi.weight, 4);
   assert.equal(parts.some(([ring]) => contains(multi.latlng.toReversed(), ring)), true);
   const [withHole] = routeLabelAnchors([labelFeature(3, [[outer, hole], [box(10, 0, 1, 1)]], 'MultiPolygon')]);
-  assert.equal(withHole.weight, 13);
+  assert.equal(withHole.weight, 12);
   assert.ok(contains(withHole.latlng.toReversed(), outer) && !contains(withHole.latlng.toReversed(), hole));
 });
 
@@ -234,4 +235,108 @@ test('R2a concave C-shaped ZIP uses the interior grid when its outer-ring centro
   const [anchor] = routeLabelAnchors([labelFeature(1, [c])]);
   assert.equal(contains(anchor.latlng.toReversed(), c), true);
   assert.equal(anchor.weight, 10);
+});
+
+
+test('RM10 regions retain significant islands, cap at three and preserve regional interior points', () => {
+  const rings = [box(0, 0, 2, 2), box(10, 0, 1, 1), box(20, 0, 0.9, 1)];
+  const features = rings.map(ring => labelFeature(1, [ring]));
+  const original = structuredClone(features);
+  const anchors = routeLabelAnchors(features);
+  assert.deepEqual(features, original);
+  assert.equal(anchors.length, 2);
+  assert.deepEqual(anchors.map(a => a.primary), [true, false]);
+  anchors.forEach((anchor, i) => assert.ok(contains(anchor.latlng.toReversed(), rings[i])));
+  assert.deepEqual(anchors.map(a => a.weight), [4, 1]);
+  const many = [0, 10, 20, 30, 40].map(x => labelFeature(1, [box(x, 0, 1, 1)]));
+  assert.equal(routeLabelAnchors(many).length, 3);
+  assert.equal(routeLabelAnchors([labelFeature(1, rings.map(r => [r]), 'MultiPolygon')]).length, 2);
+});
+
+test('RM10 bounding boxes merge transitively within tolerance and separate beyond it', () => {
+  const joined = [0, 1.009, 2.018].map(x => labelFeature(1, [box(x, 0, 1, 1)]));
+  const anchors = routeLabelAnchors(joined);
+  assert.equal(anchors.length, 1); assert.equal(anchors[0].weight, 3);
+  assert.equal(routeLabelAnchors([labelFeature(1, [box(0, 0, 1, 1)]),
+    labelFeature(1, [box(1.011, 0, 1, 1)])]).length, 2);
+});
+
+
+test('RM11 assignment deduplicates closing vertices, ignores corners, preserves hash, is deterministic and pure', () => {
+  const ids = Array.from({ length: 100 }, (_, i) => `route-${i}`);
+  const a = ids[0], b = ids.find(id => id !== a && routeColor(id) === routeColor(a));
+  const feature = (id, x, y) => ({ properties: { route_id: id }, geometry: { type: 'Polygon', coordinates: [box(x, y, 1, 1)] } });
+  const adjacent = [feature(a, 0, 0), feature(b, 1, 0)];
+  const before = structuredClone(adjacent), colors = assignRouteColors(adjacent);
+  assert.notEqual(colors.get(a), colors.get(b));
+  assert.deepEqual(assignRouteColors(adjacent.toReversed()), colors);
+  assert.deepEqual(adjacent, before);
+  for (const features of [[feature(a, 0, 0), feature(b, 1, 1)], [feature(a, 0, 0), feature(b, 4, 4)]]) {
+    const result = assignRouteColors(features);
+    assert.equal(result.get(a), routeColor(a)); assert.equal(result.get(b), routeColor(b));
+  }
+  assert.deepEqual(assignRouteColors([]), new Map());
+  assert.ok(Object.isFrozen(ROUTE_COLOR_ASSIGN));
+  assert.equal(ROUTE_COLOR_ASSIGN.minDeltaE, 30);
+});
+
+test('RM11 target, normal, dimmed transforms and missing assignment fallback', () => {
+  const p = { route_id: 1, postal_code: '00001' };
+  const colors = new Map([[1, '#66c2a5']]);
+  const normal = polygonStyle(p, clearSelection(), 'route', null, null, colors);
+  assert.equal(normal.fillColor, vividRouteColor('#66c2a5'));
+  const target = polygonStyle(p, selectRoute(1), 'route', null, null, colors);
+  const dim = polygonStyle(p, selectRoute(2), 'route', null, null, colors);
+  assert.equal(target.fillOpacity, .7); assert.equal(dim.fillOpacity, .16);
+  assert.equal(normal.fillColor, '#3bcea0'); assert.equal(target.fillColor, '#22ce98'); assert.equal(dim.fillColor, '#77b19f');
+  assert.equal(polygonStyle({ ...p, station: 'A' }, clearSelection(), 'route', 'A', null, colors).fillOpacity, .52);
+  assert.equal(polygonStyle(p, clearSelection(), 'route', 'A', null, colors).fillOpacity, .16);
+  assert.equal(polygonStyle(p, clearSelection(), 'route', null, 'Alpha', colors).fillOpacity, .16);
+  assert.equal(polygonStyle(p, selectZip(p), 'route', null, null, colors).fillColor, target.fillColor);
+  assert.deepEqual(polygonStyle(p, clearSelection(), 'route', null, null, new Map()), polygonStyle(p));
+  for (const selection of [clearSelection(), selectRoute(1), selectRoute(2), selectZip(p)]) {
+    assert.equal(polygonStyle(p, selection, 'difficulty', null, null, colors).fillColor, '#9ca3af');
+  }
+});
+
+
+// Independent matrix reference for CIE76 checks, including an overconstrained clique.
+function referenceLab(hex) {
+  const rgb = vividRouteColor(hex).match(/[a-f0-9]{2}/g).map(h => parseInt(h, 16) / 255)
+    .map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4);
+  const xyz = [[.4124564, .3575761, .1804375], [.2126729, .7151522, .072175], [.0193339, .119192, .9503041]]
+    .map((row, i) => row.reduce((sum, c, j) => sum + c * rgb[j], 0) / [.95047, 1, 1.08883][i])
+    .map(t => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+  return [116 * xyz[1] - 16, 500 * (xyz[0] - xyz[1]), 200 * (xyz[1] - xyz[2])];
+}
+const deltaE = (a, b) => Math.hypot(...referenceLab(a).map((v, i) => v - referenceLab(b)[i]));
+
+test('RM11 CIE76 threshold, cyclic first-fit and maximin fallback follow degree/string order', () => {
+  const ids = Array.from({ length: 24 }, (_, i) => `mock-${String(i).padStart(2, '0')}`);
+  const features = ids.toReversed().map(route_id => ({ properties: { route_id }, geometry: {
+    type: 'MultiPolygon', coordinates: [[box(0, 0, 1, 1)]] } }));
+  const assigned = assignRouteColors(features), prior = [];
+  let changed = false, fallback = false;
+  assert.deepEqual([...assigned.keys()], ids);
+  for (const id of ids) {
+    const preferred = palette.indexOf(routeColor(id));
+    const candidates = palette.map((_, i) => palette[(preferred + i) % palette.length]);
+    const scores = candidates.map(color => Math.min(...prior.map(other => deltaE(color, other))));
+    const first = scores.findIndex(score => score >= 30);
+    const index = first >= 0 ? first : scores.indexOf(Math.max(...scores));
+    assert.equal(assigned.get(id), candidates[index]);
+    if (first < 0) fallback = true;
+    if (first >= 0 && candidates[index] !== routeColor(id)) {
+      changed = true; assert.ok(prior.every(color => deltaE(color, assigned.get(id)) >= 30));
+    }
+    prior.push(assigned.get(id));
+  }
+  assert.ok(changed); assert.ok(fallback);
+  assert.deepEqual(assignRouteColors(features.toReversed()), assigned);
+  const precision = [
+    { properties: { route_id: 'a' }, geometry: { type: 'Polygon', coordinates: [box(0, 0, 1, 1)] } },
+    { properties: { route_id: 'b' }, geometry: { type: 'Polygon', coordinates: [box(1.000001, 0, 1, 1)] } },
+  ];
+  const pair = assignRouteColors(precision);
+  assert.ok(deltaE(pair.get('a'), pair.get('b')) >= 30);
 });

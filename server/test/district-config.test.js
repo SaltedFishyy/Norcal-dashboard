@@ -157,7 +157,7 @@ test('SC1-11 Route Profile selectors extend from real config and handle empty sn
   for (const option of e['profile-station'].children) assert.equal(option.disabled, true);
   assert.equal(requests.some(url => /station=(PHX|TUC|CGZ|PRC|LAS|STG|IFP|FLG)/.test(url)), false);
   const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
-  assert.doesNotMatch(html, /<select[^>]*id="[^"]*dsp/);
+  assert.match(html, /<select id="profile-dsp" disabled>/);
   e['profile-district'].value = 'north-cal'; await e['profile-district'].listeners.change();
   assert.deepEqual(e['profile-station'].children.map(o => o.value), north.stations);
 });

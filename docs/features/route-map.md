@@ -1008,3 +1008,164 @@ RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
 ### RM9-3 验收
 
 见 `.handoff/briefs/MAP-R1-rendering.md`、`MAP-R1b-scale.md`、`MAP-R2a-vivid-labels.md` 中的 AC。浏览器实测结果记录在本节的实现记录中。
+
+---
+
+## RM10 — 线路编号标签：按线路模式、短编号、多区域、低存在感（**Approved**，Product Owner 2026-10-29）
+
+在 RM9-M7 的标签基础上调整。**与 RM9-M7 冲突时以本节为准。** 数据、API、选择 / 淡化 / 聚焦的判定逻辑都不变；仍然**不新增 web 文件、不新增 import 路径**（RM9-2）。
+
+### RM10-1 Product Owner 决定
+
+| # | 决定 | 取代 |
+|---|---|---|
+| L1 | 只在**按线路**着色模式下显示编号；切到按难易度时全部隐藏，切回来时恢复。 | M7“不限着色模式” |
+| L2 | 只显示尾号的数字值，去掉前导零：`SFO01-021` → `21`，`RNO01-003` → `3`，`X-000` → `0`。尾号不是纯数字时原样显示（例如 `A12`）。 | M7 的 `021` |
+| L3 | 一条线路有多个明显分离的覆盖区域时，每个区域可以有一个相同编号；用规则限制密度（见 RM10-2）。 | M7“每条 Route 只显示一次” |
+| L4 | 样式：深灰文字 + 浅色 halo，不用黑框。普通标签低存在感但看得清；选中线路的编号更明显（更大、更深、浅色半透明底）；淡化的编号更淡但仍可读。 | M7 选中时黑底白字 |
+| L5 | 缩放太远时隐藏或减少：保留 M7 的阈值（普通 ≥ 11，选中线路 ≥ 9）；**次要区域**的编号只在 ≥ 12 时显示（选中线路的次要区域 ≥ 10）。 | — |
+
+### RM10-2 多区域规则（Claude 设计）
+
+- 分区：同一 Route 的成员 ZIP polygon，按经纬度包围盒判断是否相连（包围盒间距 ≤ 容差视为同一区域，容差为可配置常量，初始 0.01°）。用并查集合并，结果是这条 Route 的若干区域。
+- 每个区域按现有方法计算锚点（面积加权质心；不在区域内时用最近成员 ZIP 的内部点）。
+- 面积最大的区域为**主区域**。其他区域只有在面积 ≥ 主区域面积 × 25% 时才生成标签；每条 Route 最多 3 个标签。以上数值都是可配置常量。
+- 布局时：主区域的标签优先于同优先级的次要区域标签；同一 Route 的两个标签在屏幕上距离小于 160px 时，只保留先放下的那个。现有的避让（其他标签、仓库 marker、视口外）继续生效。
+
+### RM10-3 验收标准
+
+- RM10-AC1：按难易度模式下所有编号隐藏；切回按线路后，按原有规则显示。
+- RM10-AC2：`SFO01-021` 显示 `21`，`RNO01-003` 显示 `3`；`X-000` 显示 `0`；`A12` 这类非数字尾号原样显示；空名称仍然没有标签。
+- RM10-AC3：一条 Route 有两个分离区域且面积都达到阈值时，生成两个锚点，各自在对应区域内；面积太小的区域不生成；同一 Route 不超过 3 个。
+- RM10-AC4：同一 Route 的标签在屏幕上距离小于 160px 时只显示一个；次要区域按 L5 的缩放阈值显示。
+- RM10-AC5：CSS 不再有黑底白字；普通 / 选中 / 淡化三档在真实 Chrome 中能区分，选中的最明显。
+- RM10-AC6：标签不响应鼠标，hover / click / 选择 / 搜索 / DSP 过滤 / 仓库层行为都不变；缩放动画过程中不重新布局，也不重新计算几何（RM9 现有测试继续通过）。
+- RM10-AC7：Claude 在真实 Chrome 中检查 SFO01 等线路密集区域：标签不重叠，不显得杂乱。
+
+### RM10 实现记录
+
+- 第 1 轮修复：按 Claude 的 Chrome 审查反馈，将 `.route-label--dimmed` 不透明度从 0.5 提高到 0.65，改善街道级底图上的可读性，并同步更新 CSS 测试断言。
+- `routeLabelText` 使用字符串去除纯数字尾号的前导零，保留非数字尾号和空值行为，避免长数字转换丢失精度。
+- `ROUTE_LABEL_REGIONS` 集中配置包围盒容差 0.01°、次要区域面积比 0.25 和最多 3 个标签。Polygon / MultiPolygon 的 polygon 按包围盒通过并查集合并；区域内沿用面积加权质心及内部点回退，锚点增加 `primary`，`weight` 为区域面积。几何仍只在构建标签时计算。
+- 标签仅在线路模式布局；相同交互优先级先排主区域，再按区域面积排序。次要区域提高一级缩放阈值，同 Route 已放置中心距离小于 160px 时隐藏；视口、其他标签和仓库避让继续保留。
+- 普通标签改为深灰文字、白色半透明 halo、0.85 不透明度；选中为 14px 深色文字、浅色半透明底、1 不透明度；淡化为 0.5。同步调整碰撞矩形尺寸。
+- 更新 R2a 断言：尾号和锚点文本不再保留前导零；MultiPolygon 权重从整条线路总面积改为当前区域面积；难易度模式改为全部隐藏并验证切回恢复；CSS 从黑底白字 15px 改为浅底深字 14px，淡化不透明度改为 0.5。缩放缓存测试在动画结束前切回线路模式，以继续验证实际布局及几何缓存。
+- 新增测试覆盖分离区域内部锚点、25% 面积阈值、最多 3 个、MultiPolygon 分区、容差及传递合并、主区域优先、160px 严格边界、普通及选中次要区域缩放阈值。
+- 验证：定向测试 48/48；全量 `npm.cmd test` 609/609（`npm test` 被 PowerShell 的 `npm.ps1` 执行策略拦截，使用同一 npm 的 cmd 入口完成）；无 lint / build 脚本。`git diff --check` 通过。
+- 通过 Playwright 启动真实 Chrome（headless），只读检查现有 `http://127.0.0.1:3000/map`：地图加载 445 个 polygon、98 个标签；SFO01 放大后按 CSS display 统计标签为 5 → 难易度模式 0 → 线路模式恢复 5，无 pageerror。标签 marker 为零尺寸，不能用 Playwright `:visible` 统计其文本显示。首次中文按钮定位因 PowerShell 管道编码失败，改用模式按钮索引完成验证。
+- AC1–AC4 自动化通过；AC5 样式已实现，真实浏览器三档视觉效果仍待 Claude 复核；AC6 自动化回归通过；AC7 密集区域视觉验收和 Product Owner 预览签核待完成。未提交、推送或部署，未访问 DMS，未修改数据库结构或业务数据；全量测试包含既有独立测试库用例。
+
+### RM10b — 编号默认可见，按缩放分档（**Approved**，Product Owner 2026-10-29）
+
+**取代 RM9-M7 / RM10-L5 中的缩放阈值**（普通 ≥ 11、选中 ≥ 9、次要区域 +1）。RM10 的 L1–L4 和多区域规则不变。
+
+| # | 决定 |
+|---|---|
+| B1 | 按线路模式下，任何缩放级别都显示编号，不再有最小缩放；按难易度模式下全部隐藏（不变）。 |
+| B2 | 按缩放分三档（阈值和数值都是 `ROUTE_LABEL` 中的常量）：**远** zoom < 10：字更小、更淡，碰撞框外加较大的留白，让标签稀疏；**中** 10 ≤ zoom < 12；**近** zoom ≥ 12：沿用 RM10 现在的样式。 |
+| B3 | 继续使用碰撞 / 避让逻辑，挤不下的自动省略；优先级不变：选中 > 聚焦 > 普通 > 淡化，同级先主区域、再按面积。 |
+| B4 | 选中线路的编号在任何缩放下都显示（仍然要在视口内，不和仓库 marker 重叠），并且比同档其他编号更明显。 |
+| B5 | 次要区域：选中线路任何档都显示；其他线路只在中档和近档显示。 |
+
+验收：
+- RM10b-AC1：按线路模式下，zoom 7、9、10、12 都有编号显示；按难易度模式下全部隐藏。
+- RM10b-AC2：三档的字号、透明度、留白不同，远档最小、最淡、最稀疏；碰撞框尺寸和字号一致，标签之间不重叠。
+- RM10b-AC3：选中线路在远档也显示，并且比其他编号明显。
+- RM10b-AC4：其他线路的次要区域在远档不显示；选中线路的次要区域在远档也显示。
+- RM10b-AC5：缩放动画过程中不重新布局，也不重新计算几何（RM9 / RM10 现有测试继续通过）。
+- RM10b-AC6：Claude 在 Chrome 中检查片区总览（District Overview）和站点级别：远距离时不乱，不重叠。
+
+
+#### RM10b Implementation Notes
+
+- Removed minimum zoom and secondary offsets. Frozen `ROUTE_LABEL.tiers` defines far (<10), mid (<12), near dimensions and 10/5/2px padding. Pane classes change only when the tier changes. CSS uses 10/11/12px ordinary text, .7/.8/.85 opacity, and 13/13/14px selected text at full opacity.
+- Collision rectangles expand on all sides; viewport culling uses unpadded bounds. Selection and primary-region priority, 160px deduplication, warehouse avoidance, difficulty-mode hiding, animation guards and geometry caching remain. Far secondary regions require selection.
+- Updated old assertions: ordinary labels now appear at zoom 10; other routes at zoom 9 and labels at zoom 8 participate in layout. Ordinary secondary regions start at mid zoom 10 instead of 12; selected secondary regions appear at zoom 9. Strict 160px boundary remains.
+- Added coverage for zoom 7/9/10/12 pane classes and mode switching, 30px-separated labels conflicting only at far padding, unpadded viewport bounds, CSS tiers, far selection priority, warehouse avoidance and offscreen selection.
+- Final targeted tests: 51/51. Full `npm.cmd test`: 611/611; the subsequently added far selected warehouse/viewport test passed in the final targeted run. `git diff --check` passed. No lint/build scripts exist.
+- AC1-AC5 implemented and covered by automated tests. AC6 awaits Claude Chrome review at District Overview and Station levels, followed by Product Owner preview sign-off. No real-browser check this round. Existing uncommitted RM10 changes preserved; no commit, push, deployment, DMS access, business-data or database-schema changes. Full tests include existing isolated test-database cases.
+
+### RM10c — 编号更大、更明显（Product Owner 2026-10-29）
+
+Product Owner 反馈 RM10b 的编号“太不明显”。数值由 Claude 在真实 Chrome 中预览确定，**取代 RM10 / RM10b 中的字号和透明度**；分档、碰撞、优先级规则不变。
+
+| 档位 | 普通 | 淡化 | 选中 |
+|---|---|---|---|
+| 远（< 10） | 14px，opacity .95 | .7 | 17px |
+| 中（10–11） | 15px，opacity 1 | .75 | 17px |
+| 近（≥ 12） | 16px，opacity 1 | .8 | 18px |
+
+文字 `#0f172a`，粗细 700，halo 加强为 `0 0 2px #fff, 0 0 3px #fff, 0 0 6px rgba(255,255,255,.95)`。选中标签的浅底样式不变。碰撞框尺寸按新字号同步放大。
+
+- RM10c Implementation Notes (2026-10-29, Codex): Updated tier font sizes, opacity, halo and collision dimensions; retained selected background, padding and layout logic. Updated CSS/constants assertions and viewport fixture (8 to 9px). Targeted tests 51/51; npm.cmd test 612/612; git diff --check passed with line-ending warnings only. No lint/build scripts. Real-browser review and Product Owner preview sign-off remain pending. Preserved existing uncommitted changes; no commit, push, deployment, DMS access, business-data or database-schema changes. Full tests include existing isolated test-database cases.
+
+### RM10d — 编号跟随区域的淡化 / 选中状态（Product Owner 2026-10-29）
+
+规则：编号的透明度和强调程度要和对应 Route 的 polygon 当前视觉状态一致。站点聚焦时其他站点、DSP 筛选不匹配、选中某条线路时的其他线路，这些区域被淡化后，编号一起淡化；选中线路的编号最明显；普通的正常显示。不能出现 polygon 已经变淡、编号仍然很亮的情况。
+
+Claude 检查：判定逻辑已经和 `polygonStyle` 一致（`labelPriority`：选中 = 0，聚焦匹配 = 1，普通 = 2，所有成员 ZIP 都淡化 = 3）。问题出在 RM10c 把淡化编号的透明度调到了 .7–.8，视觉上和普通编号差不多。修改：各档的淡化编号统一为 `opacity: .38; color: #475569; font-weight: 600`（数值由 Claude 在 Chrome 中预览确定）。
+
+- RM10d Implementation Notes (2026-10-29, Codex): Consolidated dimmed CSS into `.route-label.route-label--dimmed` after tier rules (opacity .38, color #475569, weight 600); removed far/mid dimmed overrides without changing ordinary/selected styles or logic. Added station-focus, DSP-filter and route-selection label/polygon consistency checks at zoom 7/10/12, and updated CSS assertions. Targeted tests 52/52; npm.cmd test 613/613; git diff --check passed with line-ending warnings only; no lint/build scripts. Headless Playwright Chromium computed-style checks confirmed all three tiers; full map browser regression and Product Owner preview sign-off remain pending. Existing uncommitted changes preserved; no commit, push, deployment or DMS access; no business-data/schema changes (full suite includes existing isolated test-database cases).
+
+### RM10e — 编号加半透明浅色底（Product Owner 2026-10-29）
+
+目标：编号在复杂底图上更容易看，但不变成很抢眼的 marker。数值由 Claude 在 Chrome 中预览确定。Product Owner 手动把远档字号调成了 18px，本节保留这个值，其他字号不变。
+
+- 普通：数字 `#334155`；底 `rgba(255,255,255,.72)`，padding `0 4px`，圆角 2px，细描边 `0 0 0 1px rgba(15,23,42,.08)`；去掉 text-shadow halo。
+- 选中：底 `rgba(255,255,255,.95)`，数字 `#0f172a`，padding `1px 5px`，圆角 3px，`box-shadow: 0 0 0 1px rgba(15,23,42,.3), 0 1px 3px rgba(15,23,42,.2)`。
+- 淡化：opacity 作用在整个标签上，数字和底一起淡化为 `.4`，数字 `#475569`。
+
+- RM10e Implementation Notes (2026-10-29, Codex): Added ordinary/selected translucent chips and borders, removed text-shadow, and set outer dimmed opacity to .4; preserved far 18px, all other font sizes/line-heights, collision constants and logic, and existing uncommitted changes. Updated CSS assertions; targeted tests 52/52, npm.cmd test 613/613 (includes existing isolated test-database cases), git diff --check passed with line-ending warnings only; no lint/build scripts. Headless Playwright Chromium confirmed computed styles in all three tiers; full map browser regression and Product Owner preview sign-off remain pending. No commit, push, deployment, DMS access, business-data or schema changes.
+
+---
+
+## RM11 — 目标区域强调 + 相邻线路避色（**Approved**，Product Owner 2026-10-29）
+
+前端呈现的改动，不改 API 和数据。**与 RM9-M5 / M6 的数值和 RM2 “颜色由 route_id hash 固定”冲突时，以本节为准。** 仍然**不新增 web 文件**。
+
+### RM11-1 目标区域更明显（Product Owner 决定）
+
+- **目标** = 选中的 Route，或站点聚焦 / DSP 筛选中匹配的区域（现有的 `selectedRoute` / `focused` 状态）。目标区域的颜色更深、更饱和，fill opacity 提高。
+- **淡化** = 现有的 `dimmed` 状态。降低饱和度和透明度，但仍然能看清。
+- 两者之间要有明显的颜色 / 填充差异，不只靠边框区分。没有筛选时的 `normal` 状态不变。
+- 饱和度和亮度的变换**只在按线路模式下生效**。按难易度模式下难度色的含义不变，只沿用现有的透明度层级（Claude 决定：避免难度色偏离 legend）。
+- 初始数值（`POLYGON_STYLE` / `ROUTE_FILL` 中的常量，Claude 会在 Chrome 中调整）：
+  - 目标：在 vivid 色的基础上饱和度 ×1.2、亮度 −0.05；`focused.fillOpacity` .42 → .52，`selectedRoute.fillOpacity` .62 → .7。
+  - 淡化：在 vivid 色的基础上饱和度 ×0.45、亮度 +0.06；`dimmed.fillOpacity` .14 → .16。
+- 编号跟随这个层级：目标区域（聚焦匹配，priority 1）的编号使用新 class `route-label--focused`，数字 `#0f172a`，底 `rgba(255,255,255,.9)`；选中和淡化的样式不变（RM10e）。
+
+### RM11-2 相邻线路避色（Product Owner 决定，算法由 Claude 设计）
+
+- 只要求**共享边界的 Route** 颜色不同、并且不太接近；不要求全地图唯一。selected / dimmed 仍然叠加在分配到的基础色之上。
+- **邻接**：两条 Route 的 ZIP polygon 共享 ≥ 2 个顶点（坐标保留 5 位小数作为 key）时视为相邻。Census ZCTA 的相邻边界共用顶点，Claude 实测：北加州 97 条 Route、192 对相邻、每条最多和 9 条相邻，计算约 80ms。只碰到一个角不算相邻。
+- **颜色距离**：对 `vividRouteColor(color)` 计算 CIE Lab ΔE（CIE76），阈值 `minDeltaE = 30`（常量；第 1 轮审查按 Product Owner“一眼能区分”的要求从 20 提高：ΔE 21.3–25.5 的相邻色仍较相似。此阈值同步适用于 AC1 / AC6 的色差检查；Claude 页面模拟的 5 个片区均满足，最小 ΔE 为 33.5）。
+- **分配**（纯函数，确定性：相同输入一定得到相同输出）：
+  1. 按相邻数从多到少排序，相同时按 `String(route_id)` 排序。
+  2. 每条 Route 的首选色是原来的 `routeColor(route_id)`（没有冲突时颜色不变，减少变化）。首选色和已分配的相邻 Route 的 ΔE 都 ≥ 阈值时，就用首选色。
+  3. 否则从首选色在 palette 中的下一个位置开始，循环寻找第一个满足阈值的颜色。
+  4. 都不满足时，选和相邻 Route 最小 ΔE 最大的颜色。
+- **范围**：每次加载片区数据（`/api/route-map/district`）时，对整个片区的 features 计算一次。地图 polygon 和右侧栏线路色块使用**同一份**分配结果，保证一致。换站点聚焦 / DSP / 选择时不重新计算，颜色不会跳。没有分配结果的 Route（例如 ZIP 搜索带出来的片区外 Route）回退到 `routeColor`。
+- **已知影响**：同一条 Route 的颜色由所在片区的邻接关系决定，数据刷新导致邻接变化时，颜色可能变化。线路画像页不使用 `routeColor`，不受影响。
+- 基线（现有 hash 分配，Claude 实测）：北加州 193 对相邻中同色 4 对、ΔE < 20 的 8 对；南加州 450 对中同色 20 对、ΔE < 20 的 21 对。
+
+### RM11-3 验收标准
+
+- RM11-AC1：`assignRouteColors` 是纯函数，结果确定；两条共享边界的 Route 不同色；只碰角不算相邻；没有冲突时保留 `routeColor`；冲突时换色后 ΔE ≥ 20；无解时取最小 ΔE 最大的颜色。
+- RM11-AC2：地图 polygon 和侧栏色块使用同一份分配结果；切换站点聚焦 / DSP / 选中 / 着色模式时不重新计算；没有结果时回退到 `routeColor`。
+- RM11-AC3：按线路模式下，目标区域的颜色变换和 fill opacity 按 RM11-1 生效，淡化区域去饱和；按难易度模式下难度色不做变换；`normal` 不变。
+- RM11-AC4：聚焦匹配的编号有 `route-label--focused`，样式按 RM11-1。
+- RM11-AC5：hover、click、选择、搜索、仓库层、标签布局行为都不变；现有测试继续通过（断言因为本节数值改变而失效时，逐条说明）。
+- RM11-AC6：Claude 在 Chrome 中检查北加州、南加州的密集区域：相邻 Route 一眼能区分；在页面里重新统计，相邻 Route 中同色 0 对，ΔE < 20 的尽量为 0（没有达到时说明原因）；目标区域和淡化区域的差异足够明显。
+
+### RM11 Implementation Notes (2026-10-29, Codex)
+
+- Added pure `assignRouteColors`: deduplicated five-decimal vertex keys across Polygon/MultiPolygon rings, shared-vertex adjacency, degree-descending/string-ID ordering, sRGB D65 CIE76 distances after vivid conversion, cyclic first-fit and maximin fallback. Frozen configuration lives in `ROUTE_COLOR_ASSIGN`; palette/hash and source features remain unchanged.
+- `map.js` computes one assignment per successful district load and shares it with view/panel. Polygon paths (including hover and searched ZIP highlights) and panel swatches retain it across interactions; missing entries fall back to hash colors.
+- Reused HSL conversion for vivid/target/dimmed fills. Focused/selected-route/dimmed opacity is .52/.7/.16; selected ZIP remains .8. Difficulty colors are unchanged. Priority-1 labels toggle `route-label--focused`; selected/dimmed CSS takes precedence. Existing RM10 changes, far 18px font and geometry/collision rules are preserved.
+- Updated prior assertions individually: RM2 selected fill expects target `#cca300`; DS focus expects target/dimmed route fills while difficulty colors remain unchanged; RM7 DSP expects dimmed route fill without explicit selection; R2a focused hierarchy expects target/dimmed route fills; RM5 mode-switch searched-highlight expects selected target fill on returning to route mode. Border, hierarchy and interaction assertions remain.
+- Added tests for purity/determinism, corner-only separation, closing-vertex deduplication, coordinate precision, CIE76/cyclic choice, overconstrained-clique maximin fallback, transform values, difficulty invariance, shared render arguments, persistent view/panel colors, fallback and focused labels.
+- Verification: targeted 57/57; full npm.cmd test 618/618, including existing isolated test-database cases. No lint/build scripts. One overlapping full-test rerun did not start because PowerShell could not reopen the active log; the previous suite completed successfully.
+- Headless Playwright Chromium loaded the existing local map: HTTP 200, 445 polygon paths, 98 labels, 37 focused labels, far font 18px, no page errors. This was a loading smoke check. AC1-AC5 have automated coverage; AC6 remains with Claude in Chrome, followed by Product Owner preview sign-off. Legacy price-sheet/analytics pages were not manually rechecked.
+- No commit, push, deployment, DMS access, dependency/API changes, production data or schema changes. REQUIREMENTS.md is absent; requirements came from the approved route-map spec.
+
+- RM11 review round 1 (2026-10-29, Codex): Raised minDeltaE from 20 to 30 for clearer adjacent-route distinction; updated three threshold assertions and added an explicit configuration assertion. Targeted tests 57/57; npm.cmd test 618/618 (including existing isolated test-database cases); git diff --check passed with a line-ending warning only. No lint/build scripts; Chrome visual recheck and Product Owner preview sign-off remain pending. Existing uncommitted changes preserved; no commit, push or deployment.

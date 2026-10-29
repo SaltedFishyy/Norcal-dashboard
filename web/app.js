@@ -1,5 +1,5 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
-import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone, sortRows } from './format.js';
+import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone, sortRows, dspOptions } from './format.js';
 import { openRouteDetail } from './route-detail.js';
 import { chooseSelection, readSelection, saveSelection, populateDistricts, populateStations } from './station-preference.js';
 
@@ -12,6 +12,8 @@ const retry = document.getElementById('retry');
 const profiles = document.getElementById('profiles');
 const stationSelect = document.getElementById('profile-station');
 const districtSelect = document.getElementById('profile-district');
+const dspSelect = document.getElementById('profile-dsp');
+let dsp = null;
 let districts = [], selected = {}, stationsLoaded = false, sequence = 0;
 let renderedData, pendingLoad, renderedRows = new Map(), zipSequence = 0;
 const zipForm = document.getElementById('profile-zip-form');
@@ -45,6 +47,7 @@ const columns = [
 ];
 
 function render(result, data) {
+  if (dspSelect) dspSelect.disabled = true;
   message.textContent = result.message;
   profiles.setAttribute('aria-busy', String(result.state === 'loading'));
   retry.hidden = result.state !== 'error' && result.state !== 'empty';
@@ -57,11 +60,23 @@ function render(result, data) {
   if (result.state !== 'success' && !(result.state === 'empty' && data?.rows)) return;
   updated.textContent = formatUpdated(data.fetched_at);
   if (updated.textContent !== '—') updated.title = data.fetched_at;
-  total.textContent = formatNumber(data.total);
-  if (result.state !== 'success') return;
+  const options = dspOptions(data.rows);
+  if (!options.includes(dsp)) dsp = null;
+  if (dspSelect) {
+    dspSelect.replaceChildren();
+    for (const name of ['', ...options]) {
+      const option = document.createElement('option');
+      option.value = name; option.textContent = name || '全部 DSP';
+      dspSelect.append(option);
+    }
+    dspSelect.value = dsp || ''; dspSelect.disabled = false;
+  }
+  const visibleRows = data.rows.filter(row => dsp === null || (typeof row.dsp_name === 'string' && row.dsp_name.trim() === dsp));
+  total.textContent = dsp === null ? formatNumber(data.total) : `${formatNumber(visibleRows.length)} / ${formatNumber(data.total)}`;
   renderedData = data;
+  if (result.state !== 'success') return;
   const fragment = document.createDocumentFragment();
-  for (const row of sortRows(data.rows, sort)) {
+  for (const row of sortRows(visibleRows, sort)) {
     const tr = document.createElement('tr');
     tr.setAttribute('data-route-id', String(row.route_id));
     renderedRows.set(String(row.route_id), { row, tr });
@@ -155,6 +170,14 @@ districtSelect.addEventListener('change', () => {
   return switchTo({ district: districtSelect.value });
 });
 
+dspSelect?.addEventListener('change', () => {
+  dsp = dspSelect.value || null;
+  invalidateZip();
+  clearZipHighlight();
+  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
+  if (renderedData) render(pageState({ status: 200, data: renderedData }), renderedData);
+});
+
 function zipFeedback(text, error = false) {
   zipResult.textContent = text;
   zipResult.className = error ? 'zip-error' : '';
@@ -170,16 +193,34 @@ async function locateZip(owner, data, zip, current) {
     await switchTo({ district: district.id, station: owner.station });
   } else await pendingLoad;
   if (current !== zipSequence) return;
-  const target = renderedRows.get(String(owner.route_id));
-  if (!target) { zipFeedback('当前快照中找不到该线路'); return; }
-  clearZipHighlight();
-  target.tr.className = 'zip-target-row';
-  target.tr.scrollIntoView({ block: 'center' });
+  const row = renderedData?.rows.find(row => String(row.route_id) === String(owner.route_id));
+  if (!row) { zipFeedback('当前快照中找不到该线路'); return; }
   const parts = [`ZIP ${zip}`];
   for (const [label, value] of [['站点', owner.station], ['线路', owner.route_name], ['DSP', data.route?.dsp_name || data.dsp_name]]) {
     if (value !== null && value !== undefined && value !== '') parts.push(`${label} ${value}`);
   }
   if (data.status === 'covered_no_boundary') parts.push('有线路归属，但无地图边界');
+  if (dsp !== null && (typeof row.dsp_name !== 'string' || row.dsp_name.trim() !== dsp)) {
+    zipFeedback(`${parts.join(' · ')} · 不在当前 DSP 筛选（${dsp}）中`);
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = '显示该线路';
+    button.addEventListener('click', async () => {
+      if (current !== zipSequence) return;
+      dsp = null; if (dspSelect) dspSelect.value = '';
+      render(pageState({ status: 200, data: renderedData }), renderedData);
+      await highlightZipRoute(owner.route_id, parts, zip, current);
+    });
+    zipResult.append(button);
+    return;
+  }
+  await highlightZipRoute(owner.route_id, parts, zip, current);
+}
+async function highlightZipRoute(routeId, parts, zip, current) {
+  if (current !== zipSequence) return;
+  const target = renderedRows.get(String(routeId));
+  if (!target) { zipFeedback('当前快照中找不到该线路'); return; }
+  clearZipHighlight();
+  target.tr.className = 'zip-target-row';
+  target.tr.scrollIntoView({ block: 'center' });
   zipFeedback(parts.join(' · '));
   const detail = await openRouteDetail(target.row, target.button, renderedData.fetched_at, {
     highlightZip: zip, isCurrent: () => current === zipSequence,

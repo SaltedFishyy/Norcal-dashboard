@@ -1,4 +1,4 @@
-import { routeColor } from './route-colors.js';
+import { palette, routeColor } from './route-colors.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 
 export const clearSelection = (station = null) => ({ station, route: null, zip: null });
@@ -36,11 +36,11 @@ export function selectionOutlineStyles({ zip = false, uncovered = false } = {}) 
 
 export const POLYGON_STYLE = Object.freeze({
   normal: Object.freeze({ fillOpacity: 0.34, difficultyFillOpacity: 0.4, color: '#334155', opacity: 0.5, weight: 0.8 }),
-  focused: Object.freeze({ fillOpacity: 0.42, color: '#1e293b', opacity: 0.65, weight: 1 }),
+  focused: Object.freeze({ fillOpacity: 0.52, color: '#1e293b', opacity: 0.65, weight: 1 }),
   hover: Object.freeze({ fillOpacityIncrease: 0.15, color: '#0f172a', opacity: 0.9, weight: 1.6 }),
-  selectedRoute: Object.freeze({ fillOpacity: 0.62, color: '#1e293b', opacity: 0.9, weight: 1.2 }),
+  selectedRoute: Object.freeze({ fillOpacity: 0.7, color: '#1e293b', opacity: 0.9, weight: 1.2 }),
   selectedZip: Object.freeze({ fillOpacity: 0.8, color: '#334155', opacity: 1, weight: 3 }),
-  dimmed: Object.freeze({ fillOpacity: 0.14, color: '#334155', opacity: 0.3, weight: 0.8 }),
+  dimmed: Object.freeze({ fillOpacity: 0.16, color: '#334155', opacity: 0.3, weight: 0.8 }),
 });
 
 export function hoverStyle(baseStyle) {
@@ -50,7 +50,7 @@ export function hoverStyle(baseStyle) {
     fillOpacity: Math.min(baseStyle.fillOpacity + c.hover.fillOpacityIncrease, c.selectedZip.fillOpacity) };
 }
 
-export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null) {
+export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null, routeColors) {
   const active = selection.route !== null;
   const selected = active && selection.route.route_id === properties.route_id;
   const faded = active ? !selected : (focusStation !== null && properties.station !== focusStation)
@@ -61,7 +61,9 @@ export function polygonStyle(properties, selection = clearSelection(), colorMode
   const style = faded ? POLYGON_STYLE.dimmed : zip ? POLYGON_STYLE.selectedZip
     : selected ? POLYGON_STYLE.selectedRoute
       : (focusStation !== null || dsp !== null) ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
-  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : vividRouteColor(routeColor(properties.route_id)),
+  const vivid = vividRouteColor(routeColors?.get(properties.route_id) ?? routeColor(properties.route_id));
+  const transform = style === POLYGON_STYLE.normal ? null : style === POLYGON_STYLE.dimmed ? ROUTE_FILL.dimmed : ROUTE_FILL.target;
+  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : transform ? transformRouteColor(vivid, transform) : vivid,
     fillOpacity: style === POLYGON_STYLE.normal && colorMode === 'difficulty' ? style.difficultyFillOpacity : style.fillOpacity,
     color: style.color, weight: style.weight, opacity: style.opacity };
 }
@@ -73,29 +75,27 @@ export function searchRoutes(routes, query) {
   return { exact: term ? matches.find(route => route.route_name.toLowerCase() === term) : undefined, matches };
 }
 
-export function dspOptions(routes, focusStation = null) {
-  return [...new Set(routes.filter(route => !focusStation || route.station === focusStation)
-    .map(route => typeof route.dsp_name === 'string' ? route.dsp_name.trim() : '')
-    .filter(Boolean))].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
-}
-
 export function filteredRoutes(routes, query, focusStation = null, dsp = null) {
   const classified = classifyQuery(query);
   return searchRoutes(routes.filter(route => ((query && classified.kind !== 'zip') || !focusStation || route.station === focusStation)
     && (dsp === null || route.dsp_name === dsp)), classified.kind === 'zip' ? '' : query);
 }
 
-export const ROUTE_FILL = Object.freeze({ saturation: 1.4, lightness: -0.06 });
+export const ROUTE_FILL = Object.freeze({ saturation: 1.4, lightness: -0.06,
+  target: Object.freeze({ saturation: 1.2, lightness: -0.05 }),
+  dimmed: Object.freeze({ saturation: 0.45, lightness: 0.06 }) });
 
-export function vividRouteColor(hex) {
+export const vividRouteColor = hex => transformRouteColor(hex, ROUTE_FILL);
+
+function transformRouteColor(hex, transform) {
   const [r, g, b] = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255);
   const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
   const lightness = (max + min) / 2;
   const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
   const hue = delta === 0 ? 0 : max === r ? ((g - b) / delta + 6) % 6
     : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
-  const l = Math.max(0, Math.min(1, lightness + ROUTE_FILL.lightness));
-  const c = (1 - Math.abs(2 * l - 1)) * Math.min(1, saturation * ROUTE_FILL.saturation);
+  const l = Math.max(0, Math.min(1, lightness + transform.lightness));
+  const c = (1 - Math.abs(2 * l - 1)) * Math.min(1, saturation * transform.saturation);
   const x = c * (1 - Math.abs(hue % 2 - 1)), m = l - c / 2;
   const rgb = hue < 1 ? [c, x, 0] : hue < 2 ? [x, c, 0] : hue < 3 ? [0, c, x]
     : hue < 4 ? [0, x, c] : hue < 5 ? [x, 0, c] : [c, 0, x];
@@ -104,7 +104,8 @@ export function vividRouteColor(hex) {
 
 export function routeLabelText(routeName) {
   if (typeof routeName !== 'string' || !routeName.trim()) return null;
-  return routeName.slice(routeName.lastIndexOf('-') + 1) || null;
+  const suffix = routeName.slice(routeName.lastIndexOf('-') + 1);
+  return /^\d+$/.test(suffix) ? suffix.replace(/^0+(?=\d)/, '') : suffix || null;
 }
 
 const geometryParts = geometry => geometry?.type === 'Polygon' ? [geometry.coordinates]
@@ -173,6 +174,35 @@ function interiorPoint(parts) {
   return best;
 }
 
+export const ROUTE_LABEL_REGIONS = Object.freeze({ boundsTolerance: 0.01, secondaryAreaRatio: 0.25, maxLabels: 3 });
+
+function labelRegions(parts) {
+  const bounds = parts.map(rings => {
+    const xs = rings[0].map(p => p[0]), ys = rings[0].map(p => p[1]);
+    return { left: Math.min(...xs), right: Math.max(...xs), bottom: Math.min(...ys), top: Math.max(...ys) };
+  });
+  const parents = parts.map((_, i) => i);
+  const root = i => {
+    while (parents[i] !== i) { parents[i] = parents[parents[i]]; i = parents[i]; }
+    return i;
+  };
+  const tolerance = ROUTE_LABEL_REGIONS.boundsTolerance;
+  for (let i = 0; i < parts.length; i++) for (let j = 0; j < i; j++) {
+    const a = bounds[i], b = bounds[j];
+    if (a.left <= b.right + tolerance && b.left <= a.right + tolerance
+      && a.bottom <= b.top + tolerance && b.bottom <= a.top + tolerance) parents[root(i)] = root(j);
+  }
+  const groups = new Map();
+  parts.forEach((rings, i) => {
+    const id = root(i);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push([rings]);
+  });
+  return [...groups.values()].map(members => ({ members,
+    area: members.flat().reduce((sum, rings) => sum + Math.max(0, polygonMoments(rings).area), 0) }))
+    .filter(region => region.area > 0).sort((a, b) => b.area - a.area);
+}
+
 export function routeLabelAnchors(features) {
   const routes = new Map();
   for (const feature of features) {
@@ -182,19 +212,84 @@ export function routeLabelAnchors(features) {
     routes.get(p.route_id).members.push(parts);
   }
   const anchors = [];
-  for (const { properties: p, members } of routes.values()) {
-    const moments = members.flat().map(polygonMoments).filter(moment => moment.area > 0);
-    const weight = moments.reduce((sum, moment) => sum + moment.area, 0);
-    if (!weight) continue;
-    let point = [0, 1].map(axis => moments.reduce((sum, moment) => sum + moment.point[axis] * moment.area, 0) / weight);
-    if (!members.some(parts => parts.some(rings => inPolygon(point, rings) && boundaryDistanceSquared(point, rings) > 0))) {
-      // Distance is to ZIP coverage, rather than its centroid (important for long, thin ZIPs).
-      const nearest = members.toSorted((a, b) => Math.min(...a.map(rings => boundaryDistanceSquared(point, rings)))
-        - Math.min(...b.map(rings => boundaryDistanceSquared(point, rings))));
-      point = interiorPoint(nearest[0]);
+  for (const { properties: p, members: routeMembers } of routes.values()) {
+    const regions = labelRegions(routeMembers.flat());
+    const eligible = regions.filter(region => region.area >= regions[0].area * ROUTE_LABEL_REGIONS.secondaryAreaRatio)
+      .slice(0, ROUTE_LABEL_REGIONS.maxLabels);
+    for (const [index, { members }] of eligible.entries()) {
+      const moments = members.flat().map(polygonMoments).filter(moment => moment.area > 0);
+      const weight = moments.reduce((sum, moment) => sum + moment.area, 0);
+      if (!weight) continue;
+      let point = [0, 1].map(axis => moments.reduce((sum, moment) => sum + moment.point[axis] * moment.area, 0) / weight);
+      if (!members.some(parts => parts.some(rings => inPolygon(point, rings) && boundaryDistanceSquared(point, rings) > 0))) {
+        // Distance is to ZIP coverage, rather than its centroid (important for long, thin ZIPs).
+        const nearest = members.toSorted((a, b) => Math.min(...a.map(rings => boundaryDistanceSquared(point, rings)))
+          - Math.min(...b.map(rings => boundaryDistanceSquared(point, rings))));
+        point = interiorPoint(nearest[0]);
+      }
+      if (point) anchors.push({ route_id: p.route_id, route_name: p.route_name, station: p.station,
+        text: routeLabelText(p.route_name), latlng: [point[1], point[0]], weight, primary: index === 0 });
     }
-    if (point) anchors.push({ route_id: p.route_id, route_name: p.route_name, station: p.station,
-      text: routeLabelText(p.route_name), latlng: [point[1], point[0]], weight });
   }
   return anchors;
+}
+
+
+export const ROUTE_COLOR_ASSIGN = Object.freeze({ minDeltaE: 30, sharedVertices: 2, coordinatePrecision: 5 });
+
+// sRGB D65 to CIE Lab; distances are measured after the ordinary vivid transform.
+function routeLab(hex) {
+  const [r, g, b] = vividRouteColor(hex).slice(1).match(/../g).map(value => {
+    const channel = parseInt(value, 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const f = value => value > (6 / 29) ** 3 ? Math.cbrt(value) : value / (3 * (6 / 29) ** 2) + 4 / 29;
+  const x = f((0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047);
+  const y = f(0.2126729 * r + 0.7151522 * g + 0.0721750 * b);
+  const z = f((0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+export function assignRouteColors(features) {
+  const vertices = new Map(), neighbors = new Map();
+  for (const feature of features) {
+    const id = feature.properties.route_id;
+    if (id == null) continue;
+    if (!neighbors.has(id)) neighbors.set(id, new Set());
+    for (const rings of geometryParts(feature.geometry)) for (const ring of rings) for (const point of ring) {
+      const key = point.slice(0, 2).map(value => value.toFixed(ROUTE_COLOR_ASSIGN.coordinatePrecision)).join(',');
+      if (!vertices.has(key)) vertices.set(key, new Set());
+      vertices.get(key).add(id);
+    }
+  }
+  const shared = new Map();
+  for (const ids of vertices.values()) {
+    const list = [...ids];
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      if (!shared.has(a)) shared.set(a, new Map());
+      if (!shared.has(b)) shared.set(b, new Map());
+      const count = (shared.get(a).get(b) || 0) + 1;
+      shared.get(a).set(b, count); shared.get(b).set(a, count);
+      if (count >= ROUTE_COLOR_ASSIGN.sharedVertices) { neighbors.get(a).add(b); neighbors.get(b).add(a); }
+    }
+  }
+  const labs = new Map(palette.map(color => [color, routeLab(color)]));
+  const distance = (a, b) => Math.hypot(...labs.get(a).map((value, i) => value - labs.get(b)[i]));
+  const ordered = [...neighbors.keys()].sort((a, b) => neighbors.get(b).size - neighbors.get(a).size
+    || (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
+  const assigned = new Map();
+  for (const id of ordered) {
+    const adjacent = [...neighbors.get(id)].filter(other => assigned.has(other)).map(other => assigned.get(other));
+    const start = palette.indexOf(routeColor(id));
+    let best, bestDistance = -Infinity;
+    for (let offset = 0; offset < palette.length; offset++) {
+      const color = palette[(start + offset) % palette.length];
+      const minimum = Math.min(...adjacent.map(other => distance(color, other)));
+      if (minimum > bestDistance) { best = color; bestDistance = minimum; }
+      if (minimum >= ROUTE_COLOR_ASSIGN.minDeltaE) { best = color; break; }
+    }
+    assigned.set(id, best);
+  }
+  return assigned;
 }

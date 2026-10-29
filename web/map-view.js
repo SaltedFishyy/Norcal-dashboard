@@ -3,8 +3,12 @@ import { polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles
 import { mapText as t } from './map-text.js';
 
 export const MAP_RENDER = Object.freeze({ svgPadding: 0.5 });
-export const ROUTE_LABEL = Object.freeze({ minZoom: 11, selectedZoomOffset: 2,
-  characterWidth: 8, widthPadding: 10, height: 18, selectedCharacterWidth: 10, selectedWidthPadding: 12, selectedHeight: 22 });
+export const ROUTE_LABEL = Object.freeze({ sameRouteDistance: 160, widthPadding: 8, selectedWidthPadding: 12,
+  tiers: Object.freeze([
+    Object.freeze({ name: 'far', maxZoom: 10, characterWidth: 8.5, height: 18, padding: 10, selectedCharacterWidth: 10.5, selectedHeight: 26 }),
+    Object.freeze({ name: 'mid', maxZoom: 12, characterWidth: 9, height: 20, padding: 5, selectedCharacterWidth: 10.5, selectedHeight: 26 }),
+    Object.freeze({ name: 'near', maxZoom: Infinity, characterWidth: 9.5, height: 22, padding: 2, selectedCharacterWidth: 11, selectedHeight: 26 }),
+  ]) });
 
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
@@ -40,12 +44,12 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   labelPane.style.zIndex = '610';
   labelPane.style.pointerEvents = 'none';
   const routeLabels = [];
-  let zooming = false;
+  let zooming = false, labelTier = null;
   const renderer = L.svg({ padding: MAP_RENDER.svgPadding });
   const outlineRenderer = L.svg({ pane: 'selection-outline', padding: MAP_RENDER.svgPadding });
   const outlines = [];
   let polygons, highlight, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
-  let routeDetails = new Map();
+  let routeDetails = new Map(), routeColors;
   const highlightLayers = [];
   const layers = [];
   const fit = bounds => { if (bounds.isValid()) map.fitBounds(bounds, { padding: [16, 16] }); };
@@ -103,36 +107,54 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   const tooltip = properties => zipDetails(doc, properties, selection, colorMode, routeDetails.get(properties.route_id));
   function labelPriority(label) {
     if (selection.route?.route_id === label.anchor.route_id) return 0;
-    const styles = label.members.map(p => polygonStyle(p, selection, colorMode, focusStation, dsp));
+    const styles = label.members.map(p => polygonStyle(p, selection, colorMode, focusStation, dsp, routeColors));
     if (styles.some(style => style.fillOpacity === POLYGON_STYLE.focused.fillOpacity)) return 1;
     return styles.every(style => style.fillOpacity === POLYGON_STYLE.dimmed.fillOpacity) ? 3 : 2;
   }
-  function labelRectangle(label, container) {
+  function labelRectangle(label, container, tier) {
     const point = map.latLngToContainerPoint(label.anchor.latlng);
     const selected = label.priority === 0, c = ROUTE_LABEL;
-    const width = label.anchor.text.length * (selected ? c.selectedCharacterWidth : c.characterWidth)
+    const width = label.anchor.text.length * (selected ? tier.selectedCharacterWidth : tier.characterWidth)
       + (selected ? c.selectedWidthPadding : c.widthPadding);
-    const height = selected ? c.selectedHeight : c.height;
+    const height = selected ? tier.selectedHeight : tier.height;
     return { left: container.left + point.x - width / 2, right: container.left + point.x + width / 2,
       top: container.top + point.y - height / 2, bottom: container.top + point.y + height / 2 };
   }
   function layoutRouteLabels() {
+    if (colorMode !== 'route') {
+      routeLabels.forEach(label => label.marker.getElement().classList.add('route-label--hidden'));
+      return;
+    }
     if (zooming || !routeLabels.length) return;
     const container = map.getContainer().getBoundingClientRect(), zoom = map.getZoom();
+    const tier = ROUTE_LABEL.tiers.find(candidate => zoom < candidate.maxZoom);
+    if (labelTier !== tier.name) {
+      if (labelTier) labelPane.classList.remove(`route-labels--${labelTier}`);
+      labelPane.classList.add(`route-labels--${tier.name}`);
+      labelTier = tier.name;
+    }
     const warehouses = [...map.getContainer().querySelectorAll('.warehouse-marker')]
       .map(node => node.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
-    const placed = [];
+    const placed = [], routeCenters = new Map();
     for (const label of routeLabels) label.priority = labelPriority(label);
-    for (const label of routeLabels.toSorted((a, b) => a.priority - b.priority || b.anchor.weight - a.anchor.weight)) {
+    for (const label of routeLabels.toSorted((a, b) => a.priority - b.priority || Number(b.anchor.primary) - Number(a.anchor.primary) || b.anchor.weight - a.anchor.weight)) {
       const node = label.marker.getElement();
+      node.classList.toggle('route-label--focused', label.priority === 1);
       node.classList.toggle('route-label--selected', label.priority === 0);
       node.classList.toggle('route-label--dimmed', label.priority === 3);
-      const rect = labelRectangle(label, container);
-      const visible = zoom >= ROUTE_LABEL.minZoom - (label.priority === 0 ? ROUTE_LABEL.selectedZoomOffset : 0)
+      const rect = labelRectangle(label, container, tier);
+      const collision = { left: rect.left - tier.padding, right: rect.right + tier.padding,
+        top: rect.top - tier.padding, bottom: rect.bottom + tier.padding };
+      const center = { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+      const centers = routeCenters.get(label.anchor.route_id) || [];
+      const visible = (tier.name !== 'far' || label.anchor.primary || label.priority === 0)
+        && !centers.some(other => Math.hypot(center.x - other.x, center.y - other.y) < ROUTE_LABEL.sameRouteDistance)
         && rect.left >= container.left && rect.right <= container.right
         && rect.top >= container.top && rect.bottom <= container.bottom
-        && ![...warehouses, ...placed].some(other => overlaps(rect, other));
-      if (visible) placed.push(rect);
+        && ![...warehouses, ...placed].some(other => overlaps(collision, other));
+      if (visible) {
+        placed.push(collision); centers.push(center); routeCenters.set(label.anchor.route_id, centers);
+      }
       node.classList.toggle('route-label--hidden', !visible);
     }
   }
@@ -168,11 +190,11 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   }
   function refreshStyles() {
     layers.forEach(layer => {
-      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp));
+      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors));
       layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     highlightLayers.forEach(layer => {
-      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp));
+      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors));
       if (selection.route) layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     updateLegend();
@@ -225,7 +247,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id ?? feature?.properties.route_id };
       highlight = L.geoJSON({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties }] }, {
         renderer,
-        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation, dsp),
+        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation, dsp, routeColors),
         onEachFeature(_, layer) {
           highlightLayers.push(layer);
           layer.options.bubblingMouseEvents = false;
@@ -267,23 +289,24 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (polygons) map.removeLayer(polygons);
     polygons = null; layers.length = 0; selection = clearSelection(); routeDetails = new Map(); updateLegend();
   }
-  function render(data, { fitToStation = true, focusStation: focus = null } = {}) {
+  function render(data, { fitToStation = true, focusStation: focus = null, routeColors: colors } = {}) {
+    routeColors = colors;
     clear();
     focusStation = focus; fitButton.textContent = focus ? t.fit : '定位片区';
     routeDetails = new Map(data.routes.map(route => [route.route_id, route.zip_detail]));
     polygons = L.geoJSON(data.features, {
       renderer,
-      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation, dsp),
+      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors),
       onEachFeature(feature, layer) {
         layers.push(layer);
         layer.bindTooltip(tooltip(feature.properties), { direction: 'auto', sticky: true });
         layer.options.bubblingMouseEvents = false;
         layer.on({
           mouseover: () => {
-            const style = polygonStyle(feature.properties, selection, colorMode, focusStation, dsp);
+            const style = polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors);
             layer.setStyle(hoverStyle(style));
           },
-          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode, focusStation, dsp)),
+          mouseout: () => layer.setStyle(polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors)),
           click: event => {
             if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
             onZip(feature.properties);

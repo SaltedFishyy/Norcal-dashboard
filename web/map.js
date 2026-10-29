@@ -1,6 +1,7 @@
+import { dspOptions } from './format.js';
 import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
-import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, dspOptions } from './map-state.js';
+import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, assignRouteColors } from './map-state.js';
 import { mapText as t, warehouseText, localizeMap } from './map-text.js';
 import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
 
@@ -150,7 +151,8 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
-      stationData = data; panel.render(data, { focusStation: station }); view.render(data, { fitToStation: true, focusStation: station }); updateSelection(clearSelection(station));
+      const routeColors = assignRouteColors(data.features.features);
+      stationData = data; panel.render(data, { focusStation: station, routeColors }); view.render(data, { fitToStation: true, focusStation: station, routeColors }); updateSelection(clearSelection(station));
       const options = dspOptions(data.routes, station);
       if (!options.includes(dsp)) dsp = null;
       dspSelect.replaceChildren();

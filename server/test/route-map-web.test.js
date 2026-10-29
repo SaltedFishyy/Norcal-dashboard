@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
-import { POLYGON_STYLE, hoverStyle, uncoveredZipStyle, vividRouteColor } from '../../web/map-state.js';
+import { polygonStyle, selectRoute, POLYGON_STYLE, hoverStyle, uncoveredZipStyle, vividRouteColor } from '../../web/map-state.js';
 import { MAP_RENDER, basemaps, createMapView, ROUTE_LABEL } from '../../web/map-view.js';
 import { routeColor, palette } from '../../web/route-colors.js';
 import { buildRouteMap, lookupZip } from '../src/route-map/route-map.js';
@@ -125,7 +125,7 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   elements['route-map'].getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 });
   elements['route-map'].querySelectorAll = () => [];
   doc.body = new Element('body');
-  const map = { panes: {}, createPane(name) { return this.panes[name] = { style: {} }; }, listeners: {}, fits: [], removed: [], attributionControl: {
+  const map = { panes: {}, createPane(name) { const values = new Set(); return this.panes[name] = { style: {}, classList: { add: name => values.add(name), remove: name => values.delete(name), contains: name => values.has(name) } }; }, listeners: {}, fits: [], removed: [], attributionControl: {
     setPrefix(value) { this.prefix = value; }, addAttribution(value) { this.text = value; },
   }, setView() {}, on(name, fn) { this.listeners[name] = fn; }, removeLayer(layer) { this.removed.push(layer); },
   fitBounds(bounds, options) { this.fits.push({ bounds, options }); } };
@@ -504,7 +504,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.equal(highlight.styles[0].fillColor, difficultyColor('A')); assert.equal(highlight.styles[0].color, '#334155');
   mode.children[0].listeners.click();
   assert.equal(legend.hidden, true);
-  assert.equal(highlight.styles.at(-1).fillColor, vividRouteColor(routeColor(1)));
+  assert.equal(highlight.styles.at(-1).fillColor, polygonStyle({route_id: 1}, selectRoute(1)).fillColor);
   assert.equal(highlight.tooltip.children.length, 3);
   mode.children[1].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
@@ -859,12 +859,43 @@ async function labelFixture() {
 }
 const labelVisible = marker => !marker.node.className.includes('route-label--hidden');
 
-test('R2a label zoom thresholds, classes, safe DOM content, viewport culling and pane preserve interactions', async () => {
+test('RM10d label dimming matches polygons for station focus, DSP filtering and route selection at every tier', async () => {
+  for (const zoom of [7, 10, 12]) {
+    const { view, map, data, routeMarkers, groups } = await labelFixture();
+    data.features.features.forEach((feature, index) => { feature.properties.postal_code = `0000${index + 1}`; });
+    map.zoom = zoom;
+    map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 });
+    view.render(data, { fitToStation: false, focusStation: 'A' });
+    let layers = groups.at(-1).layers;
+    const check = (dimmed, selected = [false, false]) => {
+      routeMarkers.slice(-2).forEach((marker, index) => {
+        assert.equal(labelVisible(marker), true);
+        assert.equal(marker.node.classList.contains('route-label--dimmed'), dimmed[index]);
+        assert.equal(marker.node.classList.contains('route-label--selected'), selected[index]);
+        assert.equal(layers[index].styles.at(-1).fillOpacity,
+          dimmed[index] ? POLYGON_STYLE.dimmed.fillOpacity
+            : selected[index] ? POLYGON_STYLE.selectedRoute.fillOpacity : POLYGON_STYLE.focused.fillOpacity);
+      });
+    };
+    check([false, true]);
+    // Beta reverses the match, then removing station focus isolates the DSP filter.
+    view.setDsp('Beta'); check([true, true]);
+    view.render(data, { fitToStation: false });
+    layers = groups.at(-1).layers;
+    check([true, false]);
+    view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null });
+    check([false, true], [true, false]);
+    view.applySelection({ station: 'B', route: { route_id: 2 }, zip: null });
+    check([true, false], [false, true]);
+  }
+});
+
+test('RM10b labels at all zoom levels, classes, safe DOM content, viewport culling and pane preserve interactions', async () => {
   const f = await labelFixture(), { view, map, data, routeMarkers } = f;
   data.features.features[1].properties.route_name = 'X-<img src=x onerror=alert(1)>';
   map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 + lat * 30 });
-  map.zoom = ROUTE_LABEL.minZoom - 1; view.render(data, { fitToStation: false });
-  assert.equal(routeMarkers.length, 2); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  map.zoom = 7; view.render(data, { fitToStation: false });
+  assert.equal(routeMarkers.length, 2); assert.ok(routeMarkers.every(labelVisible));
   assert.equal(map.panes['route-labels'].style.zIndex, '610');
   assert.equal(map.panes['route-labels'].style.pointerEvents, 'none');
   for (const m of routeMarkers) {
@@ -876,11 +907,12 @@ test('R2a label zoom thresholds, classes, safe DOM content, viewport culling and
   }
   assert.equal(routeMarkers[1].options.icon.html.textContent, '<img src=x onerror=alert(1)>');
   map.zoom = 11; map.listeners.zoomend(); assert.ok(routeMarkers.every(labelVisible));
-  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(labelVisible));
+  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  view.setColorMode('route'); assert.ok(routeMarkers.every(labelVisible));
   map.zoom = 9; view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null });
   assert.equal(labelVisible(routeMarkers[0]), true); assert.match(routeMarkers[0].node.className, /route-label--selected/);
-  assert.equal(labelVisible(routeMarkers[1]), false);
-  map.zoom = 8; map.listeners.zoomend(); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  assert.equal(labelVisible(routeMarkers[1]), true);
+  map.zoom = 8; map.listeners.zoomend(); assert.ok(routeMarkers.every(labelVisible));
   map.zoom = 11; map.latLngToContainerPoint = () => ({ x: -100, y: 100 }); map.listeners.moveend();
   assert.ok(routeMarkers.every(m => !labelVisible(m)));
   view.clear(); assert.ok(routeMarkers.every(m => map.removed.includes(m)));
@@ -918,6 +950,7 @@ test('R2a zoom animation does not lay out labels or recalculate cached geometry'
   map.listeners.zoomstart(); map.zoom = 12;
   map.listeners.moveend(); view.setDsp('Alpha'); view.setColorMode('difficulty');
   assert.equal(map.projections, projections); assert.equal(geometryReads, reads);
+  view.setColorMode('route');
   map.listeners.zoomend(); assert.ok(map.projections > projections);
   assert.equal(geometryReads, reads); assert.deepEqual(routeMarkers.map(m => m.point), points);
   const after = map.projections; map.listeners.moveend(); assert.ok(map.projections > after);
@@ -928,9 +961,136 @@ test('R2a zoom animation does not lay out labels or recalculate cached geometry'
 test('R2a label CSS removes divIcon defaults, centers text and uses classes without inline style strings', async () => {
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   const source = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
-  assert.match(css, /\.route-label \{[^}]*background: transparent;[^}]*border: 0;[^}]*pointer-events: none;[^}]*font-size: 12px;/);
+  assert.match(css, /\.route-label \{[^}]*background: transparent;[^}]*border: 0;[^}]*pointer-events: none;[^}]*font-size: 16px;/);
   assert.match(css, /transform: translate\(-50%, -50%\)/);
-  assert.match(css, /\.route-label--selected > span \{[^}]*font-size: 15px;[^}]*color: #fff;[^}]*background: #0f172a;/);
-  assert.match(css, /\.route-label--dimmed \{ opacity: 0.45;/);
+  const labelRules = css.match(/\.route-label[^{}]*\{[^}]*\}/g).join('\n');
+  assert.doesNotMatch(labelRules, /text-shadow:/);
+  assert.match(css, /\.route-label > span \{[^}]*background: rgba\(255,255,255,.72\);[^}]*padding: 0 4px;[^}]*border-radius: 2px;[^}]*box-shadow: 0 0 0 1px rgba\(15,23,42,.08\);/);
+  assert.match(css, /\.route-label--selected > span \{[^}]*padding: 1px 5px;[^}]*border-radius: 3px;[^}]*box-shadow: 0 0 0 1px rgba\(15,23,42,.3\), 0 1px 3px rgba\(15,23,42,.2\);/);
+  assert.doesNotMatch(labelRules, /\.route-label[^{}]*> span\s*\{[^}]*opacity:/);
+  assert.match(css, /\.route-label--selected > span \{[^}]*font-size: 18px;[^}]*line-height: 22px;[^}]*font-weight: 700;[^}]*color: #0f172a;[^}]*background: rgba\(255,255,255,.95\);/);
+  assert.match(css, /\.route-label\.route-label--dimmed \{ opacity: 0.4; color: #475569; font-weight: 600; \}/);
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|cssText|setAttribute\(['"]style/);
+});
+
+
+test('RM10b secondary tiers and same-route distance use placed centers with a strict 160px boundary', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  data.features.features[1].properties = { ...data.features.features[0].properties };
+  let distance = 160;
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + (lng > 5 ? distance : 0), y: 200 });
+  map.zoom = 9; view.render(data, { fitToStation: false });
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, false]);
+  map.zoom = 10; map.listeners.zoomend();
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, true]);
+  distance = 159; map.listeners.moveend();
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, false]);
+  distance = 160; map.zoom = 9;
+  view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null });
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, true]);
+  map.zoom = 10; map.listeners.zoomend();
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, true]);
+  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  view.setColorMode('route'); assert.ok(routeMarkers.every(labelVisible));
+});
+
+test('RM10 primary regions beat larger secondary regions at the same priority', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  const first = data.features.features[0], second = data.features.features[1];
+  const square = (x, size) => ({ type: 'Polygon', coordinates: [[[x, 0], [x + size, 0], [x + size, size], [x, size], [x, 0]]] });
+  first.geometry = square(0, 3);
+  second.geometry = square(20, 1);
+  data.features.features.push({ ...first, geometry: square(10, 2) });
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: lng < 5 ? 100 : 400, y: 200 });
+  map.zoom = 12; view.render(data, { fitToStation: false });
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, false, true]);
+});
+
+
+test('RM10b tiers use exclusive boundaries, padded collisions and unpadded viewport bounds', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  let edge = false;
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: edge ? 9 : 200 + (lng > 5 ? 30 : 0), y: 200 });
+  map.zoom = 7; view.render(data, { fitToStation: false });
+  for (const [zoom, tier, visible] of [[7, 'far', [true, false]], [9, 'far', [true, false]],
+    [10, 'mid', [true, true]], [12, 'near', [true, true]]]) {
+    map.zoom = zoom; map.listeners.zoomend();
+    for (const candidate of ROUTE_LABEL.tiers) assert.equal(map.panes['route-labels'].classList.contains(`route-labels--${candidate.name}`), candidate.name === tier);
+    assert.deepEqual(routeMarkers.map(labelVisible), visible);
+    view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+    view.setColorMode('route'); assert.deepEqual(routeMarkers.map(labelVisible), visible);
+  }
+  map.zoom = 7; edge = true; map.listeners.zoomend();
+  assert.deepEqual(routeMarkers.map(labelVisible), [true, false]);
+});
+
+
+test('RM10e CSS preserves tier sizes and layout dimensions and selection stays prominent', async () => {
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  for (const [tier, font, opacity, height] of [['far', 18, '0.95', 18], ['mid', 15, '1', 20]]) {
+    assert.ok(css.includes(`.route-labels--${tier} .route-label { font-size: ${font}px; opacity: ${opacity}; }`));
+    assert.ok(css.includes(`.route-labels--${tier} .route-label > span { line-height: ${height}px; }`));
+    assert.ok(!css.includes(`.route-labels--${tier} .route-label--dimmed`));
+    assert.equal(ROUTE_LABEL.tiers.find(t => t.name === tier).height, height);
+  }
+  assert.match(css, /\.route-labels--far \.route-label--selected,\s*\.route-labels--mid \.route-label--selected \{ opacity: 1; \}/);
+  assert.match(css, /font-size: 17px; line-height: 22px;/);
+  assert.match(css, /\.route-label \{[^}]*font-weight: 700;[^}]*color: #334155;[^}]*opacity: 1;/);
+  assert.match(css, /\.route-label > span \{[^}]*line-height: 22px;/);
+  assert.deepEqual(ROUTE_LABEL.tiers.map(t => [t.name, t.characterWidth, t.height, t.padding, t.selectedCharacterWidth, t.selectedHeight]), [
+    ['far', 8.5, 18, 10, 10.5, 26], ['mid', 9, 20, 5, 10.5, 26], ['near', 9.5, 22, 2, 11, 26],
+  ]);
+});
+
+
+test('RM10b far selected labels still yield to warehouses and viewport edges', async () => {
+  const { view, map, data, routeMarkers, elements } = await labelFixture();
+  map.zoom = 7;
+  map.latLngToContainerPoint = () => ({ x: 100, y: 100 });
+  view.render(data, { fitToStation: false });
+  view.applySelection({ station: 'B', route: { route_id: 2 }, zip: null });
+  assert.deepEqual(routeMarkers.map(labelVisible), [false, true]);
+  elements['route-map'].querySelectorAll = () => [{ getBoundingClientRect: () => ({ left: 90, right: 110, top: 90, bottom: 110, width: 20, height: 20 }) }];
+  map.listeners.moveend(); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  elements['route-map'].querySelectorAll = () => [];
+  map.latLngToContainerPoint = () => ({ x: -100, y: 100 });
+  map.listeners.moveend(); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+});
+
+
+test('RM11 shared assignments persist in view and focused labels track priority', async () => {
+  const { view, data, groups, routeMarkers } = await labelFixture();
+  const colors = new Map([[1, palette[0]], [2, palette[1]]]);
+  view.render(data, { focusStation: 'A', routeColors: colors });
+  const layers = groups.at(-1).layers;
+  assert.ok(routeMarkers.at(-2).node.classList.contains('route-label--focused'));
+  assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, undefined, 'route', 'A', null, colors).fillColor);
+  view.applySelection(selectRoute(1));
+  assert.equal(routeMarkers.at(-2).node.classList.contains('route-label--focused'), false);
+  view.setColorMode('difficulty'); view.setColorMode('route'); view.setDsp('Alpha');
+  assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, selectRoute(1), 'route', 'A', 'Alpha', colors).fillColor);
+  const source = await fs.readFile(new URL('../../web/map.js', import.meta.url), 'utf8');
+  assert.equal(source.match(/assignRouteColors\(/g).length, 1);
+  assert.match(source, /panel.render\(data, \{ focusStation: station, routeColors \}\)/);
+  assert.match(source, /view.render\(data, \{ fitToStation: true, focusStation: station, routeColors \}\)/);
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.route-label--focused \{ color: #0f172a; \}/);
+  assert.match(css, /\.route-label--focused > span \{ background: rgba\(255,255,255,\.9\); \}/);
+});
+
+
+test('RM11 panel consumes supplied palette assignments and falls back after a new render', async () => {
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { doc, elements: e } = await fixture();
+  const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
+  const data = payload(), route = data.routes[0];
+  const colors = new Map([[route.route_id, palette[0]]]);
+  panel.render(data, { routeColors: colors });
+  const swatches = () => e['map-routes'].children.filter(row => row.className === 'map-route').map(row => row.children[0].style.backgroundColor);
+  assert.equal(swatches()[0], palette[0]);
+  panel.applySelection(selectRoute(route.route_id)); panel.setDsp(null);
+  panel.setColorMode('difficulty'); panel.setColorMode('route');
+  assert.equal(swatches()[0], palette[0]);
+  panel.render(data);
+  assert.deepEqual(swatches(), data.routes.map(row => routeColor(row.route_id)));
 });

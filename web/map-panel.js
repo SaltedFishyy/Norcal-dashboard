@@ -17,7 +17,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     if (difficultyLevel(value)) { node.children[1].className = 'difficulty system-difficulty'; node.children[1].style.backgroundColor = difficultyColor(difficultyLevel(value)); node.children[1].style.color = '#ffffff'; }
     return node;
   };
-  let data, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
+  let data, routeColors, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   const search = element('search');
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
@@ -32,7 +32,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       if (groups && previous !== route.station) { element('routes').append(text('h3', route.station)); previous = route.station; }
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
-      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : routeColor(route.route_id);
+      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : (routeColors?.get(route.route_id) ?? routeColor(route.route_id));
       button.append(swatch, text('span', query && !focusStation ? route.station + ' · ' + route.route_name : route.route_name));
       if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
       button.append(text('span', `${route.zip_count} ZIP`));
@@ -104,7 +104,8 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('missing-empty').hidden = true; element('regenerate').hidden = true;
     element('source').textContent = ''; element('updated').textContent = '—'; element('updated').removeAttribute('title');
   }
-  function render(next, { focusStation: focus = null } = {}) {
+  function render(next, { focusStation: focus = null, routeColors: colors } = {}) {
+    routeColors = colors;
     data = next; focusStation = focus;
     const scoped = focus ? next.routes.filter(route => route.station === focus) : next.routes;
     const missing = focus ? next.missing.filter(row => row.station === focus) : next.missing;
