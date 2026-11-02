@@ -22,10 +22,9 @@
     },
     {
       "id": "seattle",
-      "scrape_disabled": { "EUG02": "not_in_dms_menu" },
       "name_zh": "西雅图片区",
       "name_en": "Seattle District",
-      "stations": ["SEA01", "PAE01", "GEG01", "YKM01", "TRC01", "BOI01", "PDX01", "EUG01", "EUG02"]
+      "stations": ["SEA01", "PAE01", "GEG01", "YKM01", "TRC01", "BOI01", "PDX01", "EUG01"]
     },
     {
       "id": "phoenix",

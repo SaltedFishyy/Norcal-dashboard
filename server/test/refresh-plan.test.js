@@ -38,9 +38,11 @@ test('refresh plan preserves order, excludes unassigned, rejects missing distric
   for (const scope of ['all', 'district:denver']) {
     const plan = planRefresh({ config, scope: parseRefreshScope(scope) });
     const expectedSkipped = ['GJT01', 'BZN01'].map(code => ({ code, district: 'denver', reason: 'not_in_dms_menu' }));
-    if (scope === 'all') expectedSkipped.push({ code: 'EUG02', district: 'seattle', reason: 'not_in_dms_menu' });
     assert.deepEqual(plan.skipped, expectedSkipped);
     assert.ok(plan.stations.every(s => !expectedSkipped.some(skipped => skipped.code === s.code)));
+    assert.ok(plan.stations.every(s => s.code !== 'EUG02'));
+    if (scope === 'all') assert.deepEqual(plan.stations.filter(s => s.district === 'seattle').map(s => s.code),
+      ['SEA01', 'PAE01', 'GEG01', 'YKM01', 'TRC01', 'BOI01', 'PDX01', 'EUG01']);
   }
 });
 

@@ -159,10 +159,10 @@ test('DA-T1 privilege checks detect correct, excessive and missing permissions',
 
 test('DA-T1 real seed counts order skip reasons and rejection of existing targets', { skip: dbSkip }, async t => {
   const db = await createTestDb(t);
-  assert.deepEqual(await seed(db), { districts: 5, known_stations: 55, district_stations: 55, version: 1 });
+  assert.deepEqual(await seed(db), { districts: 5, known_stations: 54, district_stations: 54, version: 1 });
   const before = await viewRows(db.reader);
   for (const station of before.known_stations)
-    assert.equal(station.scrape_disabled_reason, ['GJT01', 'BZN01', 'EUG02'].includes(station.code) ? 'not_in_dms_menu' : null);
+    assert.equal(station.scrape_disabled_reason, ['GJT01', 'BZN01'].includes(station.code) ? 'not_in_dms_menu' : null);
   await assert.rejects(seed(db));
   assert.deepEqual(await viewRows(db.reader), before);
   // Independent targets prevent import; membership rows also require their FK parents.
@@ -182,7 +182,7 @@ test('DA-T1 real seed counts order skip reasons and rejection of existing target
 test('DA-T1 seed includes historical unassigned codes and rolls back database failure', { skip: dbSkip }, async t => {
   const db = await createTestDb(t);
   await db.owner.query("INSERT INTO stations(code) VALUES ('ZZZ01')");
-  assert.equal((await seed(db)).known_stations, 56);
+  assert.equal((await seed(db)).known_stations, 55);
   assert.equal((await db.reader.query("SELECT * FROM v_known_stations WHERE code='ZZZ01'")).rowCount, 1);
   assert.equal((await db.reader.query("SELECT * FROM v_district_stations WHERE station_code='ZZZ01'")).rowCount, 0);
   await db.owner.query('TRUNCATE district_stations, known_stations, districts, district_config_version');
