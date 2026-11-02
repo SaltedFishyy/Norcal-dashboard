@@ -13,6 +13,10 @@ async function fixture(t) {
   t.after(() => fs.rm(basemapDir, { recursive: true, force: true }));
   await fs.writeFile(path.join(basemapDir, 'us.pmtiles'), bytes);
   await fs.writeFile(path.join(basemapDir, 'mountain.pmtiles'), bytes);
+  await fs.writeFile(path.join(basemapDir, 'pnw.pmtiles'), bytes);
+  await fs.writeFile(path.join(basemapDir, 'az.pmtiles'), bytes);
+  await fs.writeFile(path.join(basemapDir, 'socal.pmtiles'), bytes);
+  await fs.writeFile(path.join(basemapDir, 'hawaii.pmtiles'), bytes);
   return basemapDir;
 }
 
@@ -64,6 +68,22 @@ test('basemap API streams full files, supports single ranges and preserves secur
   assert.equal(mountain.status, 206);
   assert.equal(mountain.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
   assert.deepEqual(Buffer.from(await mountain.arrayBuffer()), bytes.subarray(0, 8));
+  const pnw = await fetch(url + '/basemap/pnw.pmtiles', { headers: { Range: 'bytes=0-7' } });
+  assert.equal(pnw.status, 206);
+  assert.equal(pnw.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
+  assert.deepEqual(Buffer.from(await pnw.arrayBuffer()), bytes.subarray(0, 8));
+  const az = await fetch(url + '/basemap/az.pmtiles', { headers: { Range: 'bytes=0-7' } });
+  assert.equal(az.status, 206);
+  assert.equal(az.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
+  assert.deepEqual(Buffer.from(await az.arrayBuffer()), bytes.subarray(0, 8));
+  const socal = await fetch(url + '/basemap/socal.pmtiles', { headers: { Range: 'bytes=0-7' } });
+  assert.equal(socal.status, 206);
+  assert.equal(socal.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
+  assert.deepEqual(Buffer.from(await socal.arrayBuffer()), bytes.subarray(0, 8));
+  const hawaii = await fetch(url + '/basemap/hawaii.pmtiles', { headers: { Range: 'bytes=0-7' } });
+  assert.equal(hawaii.status, 206);
+  assert.equal(hawaii.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
+  assert.deepEqual(Buffer.from(await hawaii.arrayBuffer()), bytes.subarray(0, 8));
   let response = await fetch(url + '/basemap/ops.pmtiles');
   assert.equal(response.status, 404); assert.deepEqual(await response.json(), { error: 'basemap_not_found' });
   await fs.writeFile(path.join(basemapDir, 'ops.pmtiles'), 'invalid');

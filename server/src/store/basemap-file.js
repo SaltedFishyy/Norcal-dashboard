@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 
-const filenames = new Map([['us', 'us.pmtiles'], ['norcal', 'norcal.pmtiles'], ['mountain', 'mountain.pmtiles'], ['ops', 'ops.pmtiles']]);
+const filenames = new Map([['us', 'us.pmtiles'], ['norcal', 'norcal.pmtiles'], ['socal', 'socal.pmtiles'], ['mountain', 'mountain.pmtiles'], ['pnw', 'pnw.pmtiles'], ['az', 'az.pmtiles'], ['hawaii', 'hawaii.pmtiles'], ['ops', 'ops.pmtiles']]);
 export class BasemapNotFoundError extends Error {
   constructor() { super('Basemap is unavailable.'); this.name = 'BasemapNotFoundError'; }
 }

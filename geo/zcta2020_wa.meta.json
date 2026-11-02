@@ -1,0 +1,12 @@
+{
+  "dataset": "cb_2020_us_zcta520_500k",
+  "vintage": 2020,
+  "source_url": "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+  "generated_at": "2026-10-29T23:47:56.000Z",
+  "boundary_file": "zcta2020_wa.geojson",
+  "scope": {
+    "description": "All 2020 ZCTAs whose ZIP prefix is WA (980-994)",
+    "postal_code_pattern": "^(98|99[0-4])"
+  },
+  "feature_count": 605
+}

@@ -64,8 +64,8 @@ test('boundary file errors and malformed JSON are sanitized', async () => {
 
 test('checked-in public Census boundary files satisfy the boundary contract', async () => {
   const result = await readBoundaries({ geoDir: fileURLToPath(new URL('../../geo/', import.meta.url)) });
-  assert.equal(result.geojson.features.length, 4542);
-  assert.equal(result.byZip.size, 4542);
+  assert.equal(result.geojson.features.length, 5564);
+  assert.equal(result.byZip.size, 5564);
   assert.ok(result.inScope('95812')); assert.ok(!result.inScope('10001'));
   assert.equal(result.byZip.get('95814').type, 'Polygon');
   assert.equal(await readBoundaries({ geoDir: fileURLToPath(new URL('../../geo/', import.meta.url)) }), result);

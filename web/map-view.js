@@ -16,7 +16,11 @@ export const BASEMAP_FLAVOR = 'light';
 export const basemaps = [
   { name: 'us', maxDataZoom: 6 },
   { name: 'norcal', minZoom: 7, maxDataZoom: 10, bounds: [[35.5, -124.6], [42.5, -119.0]] },
+  { name: 'socal', minZoom: 7, maxDataZoom: 10, bounds: [[32.4, -121.5], [35.6, -114.0]] },
   { name: 'mountain', minZoom: 7, maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] },
+  { name: 'pnw', minZoom: 7, maxDataZoom: 10, bounds: [[42.0, -124.9], [49.1, -116.4]] },
+  { name: 'az', minZoom: 7, maxDataZoom: 10, bounds: [[31.2, -115.0], [37.4, -108.8]] },
+  { name: 'hawaii', maxDataZoom: 10, bounds: [[18.8, -160.6], [22.4, -154.7]] },
   { name: 'ops', minZoom: 10, maxDataZoom: 14, bounds: [[36.43, -123.16], [39.01, -121.06]] },
 ];
 

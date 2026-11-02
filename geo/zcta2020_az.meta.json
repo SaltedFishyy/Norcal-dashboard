@@ -1,0 +1,12 @@
+{
+  "dataset": "cb_2020_us_zcta520_500k",
+  "vintage": 2020,
+  "source_url": "https://www2.census.gov/geo/tiger/GENZ2020/shp/cb_2020_us_zcta520_500k.zip",
+  "generated_at": "2026-11-02T19:56:44.000Z",
+  "boundary_file": "zcta2020_az.geojson",
+  "scope": {
+    "description": "All 2020 ZCTAs whose ZIP prefix is AZ (850-865)",
+    "postal_code_pattern": "^(85|86[0-5])"
+  },
+  "feature_count": 417
+}

@@ -2,7 +2,7 @@
 
 规格：`docs/features/route-map.md`（RM3 R3-5）。这里只放**截取后**的边界文件；全国原始文件不进 Git。
 
-## 服务区边界库（两个区域文件，共用 Census 来源）
+## 服务区边界库（四个区域文件，共用 Census 来源）
 
 server 按文件名排序读取本目录全部 `*.meta.json`，通过各 meta 的 `boundary_file` 加载对应 GeoJSON。当前包括：
 
@@ -10,8 +10,10 @@ server 按文件名排序读取本目录全部 `*.meta.json`，通过各 meta �
 |---|---|---|
 | `zcta2020_ca_nv_or.geojson` | `^(9[0-6]|889|89[0-8]|97)`（CA / NV / OR） | 2,519 |
 | `zcta2020_mountain.geojson` | `^(80|81|82|83[0-8]|84[0-7]|87|88[0-4]|59)`（CO / WY / ID / UT / NM / MT） | 2,023 |
+| `zcta2020_wa.geojson` | `^(98|99[0-4])`（WA） | 605 |
+| `zcta2020_az.geojson` | `^(85|86[0-5])`（AZ） | 417 |
 
-两份文件使用相同 dataset / vintage，合并后为 4,542 个 ZIP。范围判断取所有规则的并集；跨文件重复 ZIP、dataset / vintage 不一致、meta 引用文件缺失或校验失败均为 `boundary_invalid`，没有 meta 为 `boundary_not_found`。以下生成说明以 CA / NV / OR 为例。
+四份文件使用相同 dataset / vintage，合并后为 5,564 个 ZIP。范围判断取所有规则的并集；跨文件重复 ZIP、dataset / vintage 不一致、meta 引用文件缺失或校验失败均为 `boundary_invalid`，没有 meta 为 `boundary_not_found`。以下生成说明以 CA / NV / OR 为例。
 
 | 项 | 内容 |
 |---|---|
