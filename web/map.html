@@ -13,16 +13,22 @@
 </head>
 <body>
   <main class="map-page">
-    <header class="map-heading">
-      <div><p class="eyebrow">NC OPS CONSOLE</p><h1 data-map-text="title">线路地图</h1></div>
+    <header class="console-heading map-heading">
+      <p class="console-brand"></p>
+      <div class="console-title"><h1 data-map-text="title">线路地图</h1></div>
+      <nav class="page-nav" aria-label="页面"><a href="/" data-map-text="profiles">线路档案</a><a href="/map" aria-current="page" data-map-text="title">线路地图</a></nav>
+    </header>
+    <section class="map-toolbar" aria-label="地图筛选">
       <label><span>片区</span> <select id="map-district" disabled aria-label="片区"></select></label>
       <label><span data-map-text="station">站点</span> <select id="map-station" disabled aria-label="站点"></select></label>
       <label><span data-map-text="dsp">DSP</span> <select id="map-dsp" disabled aria-label="DSP"></select></label>
-      <button id="map-warehouses" type="button" hidden disabled class="warehouse-entry">管理仓库</button>
-      <nav class="page-nav" aria-label="页面"><a href="/" data-map-text="profiles">线路档案</a><a href="/map" aria-current="page" data-map-text="title">线路地图</a></nav>
-    </header>
+      <div class="map-toolbar-actions">
+<p class="snapshot" title="DMS 快照，非实时数据"><span class="sr-only" data-map-text="snapshot">DMS 快照，非实时数据</span><span data-map-text="updated">数据更新时间</span>：<span id="map-updated">—</span></p>
+        <button id="map-warehouses" type="button" hidden disabled class="warehouse-entry">管理仓库</button>
+        <div id="map-data-actions"></div>
+      </div>
+    </section>
     <section id="data-status" class="data-status" aria-label="数据状态"></section>
-    <p class="snapshot"><span data-map-text="snapshot">DMS 快照，非实时数据</span> · <span data-map-text="updated">更新时间</span>：<span id="map-updated">—</span></p>
     <p id="map-message" role="status" aria-live="polite" data-map-text="loadingStations">正在加载站点…</p>
     <p id="map-basemap-message" role="status" hidden></p>
     <p id="map-warehouse-message" class="warehouse-notice" role="status" aria-live="polite"></p>
@@ -31,14 +37,14 @@
     <div class="map-layout" id="map-content" aria-busy="true">
       <div id="route-map" role="region" aria-label="线路邮编覆盖地图"></div>
       <aside class="map-sidebar">
-        <section class="panel" id="map-zip-panel" hidden><div class="map-card-heading" id="map-zip-heading"><h2 data-map-text="currentZip">当前邮编</h2><button id="map-clear" type="button" disabled data-map-text="clear">清除选择</button></div><div id="map-selection" aria-live="polite"></div></section>
-        <section class="panel" id="map-summary-panel" hidden><div class="map-card-heading" id="map-summary-heading"><h2 data-map-text="summary">线路概览</h2></div><div id="map-summary" aria-live="polite"></div></section>
-        <section class="panel"><h2 data-map-text="route">线路</h2>
-          <label for="map-search" data-map-text="search">搜索线路或邮编</label><input id="map-search" type="search" placeholder="搜索线路或邮编" disabled>
+        <section class="panel map-route-panel"><h2 data-map-text="route">线路</h2>
+          <label class="sr-only" for="map-search" data-map-text="search">搜索线路或邮编</label><div class="map-search-field"><svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg><input id="map-search" type="search" placeholder="搜索线路编号或邮编" disabled></div>
           <p id="map-search-hint" class="snapshot" data-map-text="zipHint" hidden>输入完整 5 位邮编可搜索邮编</p>
           <p id="map-search-message" role="status" aria-live="polite"></p>
           <div id="map-routes" class="map-routes" aria-label="线路"></div><p id="map-no-match" data-map-text="noMatch" hidden>未找到匹配线路</p>
         </section>
+        <section class="panel" id="map-zip-panel" hidden><div class="map-card-heading" id="map-zip-heading"><h2 data-map-text="currentZip">当前邮编</h2><button id="map-clear" type="button" disabled data-map-text="clear">清除选择</button></div><div id="map-selection" aria-live="polite"></div></section>
+        <section class="panel" id="map-summary-panel" hidden><div class="map-card-heading" id="map-summary-heading"><h2 data-map-text="summary">线路概览</h2></div><div id="map-summary" aria-live="polite"></div></section>
         <section class="panel"><h2 data-map-text="coverage">地图覆盖率</h2><p id="map-coverage">—</p><p id="map-coverage-count"></p><p id="map-regenerate" hidden></p><p id="map-source"></p></section>
         <details class="panel" id="map-conflicts-details" hidden><summary id="map-conflicts-title"></summary><ul id="map-conflicts"></ul></details>
         <details class="panel" id="map-missing-details"><summary id="map-missing-title">缺少边界的邮编 (0)</summary>

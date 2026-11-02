@@ -60,7 +60,7 @@ export function polygonStyle(properties, selection = clearSelection(), colorMode
     : difficultyLevel(properties.route_difficulty);
   const style = faded ? POLYGON_STYLE.dimmed : zip ? POLYGON_STYLE.selectedZip
     : selected ? POLYGON_STYLE.selectedRoute
-      : (focusStation !== null || dsp !== null) ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
+      : (focusStation !== null || dsp !== null || colorMode === 'route') ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
   const vivid = vividRouteColor(routeColors?.get(properties.route_id) ?? routeColor(properties.route_id));
   const transform = style === POLYGON_STYLE.normal ? null : style === POLYGON_STYLE.dimmed ? ROUTE_FILL.dimmed : ROUTE_FILL.target;
   return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : transform ? transformRouteColor(vivid, transform) : vivid,

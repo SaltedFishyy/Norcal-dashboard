@@ -166,6 +166,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
       status('success', routes.length === 0 ? t.noRoutes
         : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
+      if (routes.some(route => route.mapped_count > 0)) message.className = 'sr-only';
       if (data.details_status === 'invalid') {
         message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
       }

@@ -141,7 +141,7 @@ test('NAV1 shared navigation, active state and larger click targets', async () =
     if (name === 'map') { assert.match(nav, /data-map-text="profiles"/); assert.match(nav, /data-map-text="title"/); }
   }
   const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /\.page-nav a \{[^}]*font-size: 17px;[^}]*padding: 8px 12px/);
+  assert.match(css, /\.page-nav a \{[^}]*font-size: var\(--fs-16\);[^}]*padding: 8px 12px/);
   assert.match(css, /\.page-nav a\[aria-current="page"\]/);
   assert.match(css, /\.page-nav a:focus-visible/);
   const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
@@ -270,4 +270,25 @@ test('PZ1 latest covered query waits for an already loading target station', asy
 test('PS1 fresh page defaults to API order with inactive headers', async t => {
   const f = await fixture(t);
   for (const key of ['pickup_volume', 'pph']) assert.equal(f.e['sort-' + key].parentNode.attributes['aria-sort'], 'none');
+});
+
+test('RM13c profile presentation retains metric values and filter totals', async t => {
+  const f = await fixture(t);
+  const { formatUpdated } = await import('../../web/format.js');
+  assert.equal(f.e.updated.textContent, formatUpdated('2026-10-08T12:00:00Z'));
+  assert.equal(f.e.updated.title, '2026-10-08T12:00:00Z');
+  f.state.rows = [{ route_id: 1, dsp_name: 'A' }, { route_id: 2, dsp_name: 'B' }];
+  await f.e['profile-station'].listeners.change();
+  assert.equal(f.e.total.textContent, '2');
+  f.e['profile-dsp'].value = 'A'; f.e['profile-dsp'].listeners.change();
+  assert.equal(f.e.total.textContent, '1 / 2');
+  assert.equal(f.e.updated.textContent, formatUpdated('2026-10-08T12:00:00Z'));
+  const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  assert.match(html, /href="\/" aria-current="page">线路档案/);
+  assert.match(html, /id="profile-data-summary"/);
+  for (const direction of ['up', 'down']) assert.equal((html.match(new RegExp('class="sort-' + direction + '"', 'g')) || []).length, 2);
+  const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  for (const [state, path] of [['ascending', 'up'], ['descending', 'down']]) {
+    assert.ok(css.includes('[aria-sort="' + state + '"] .sort-' + path));
+  }
 });

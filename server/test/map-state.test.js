@@ -8,7 +8,7 @@ test('RM2 selection styles preserve route color and distinguish route, ZIP and d
   assert.equal(BASEMAP_FLAVOR, 'light');
   const properties = { route_id: 1, postal_code: '00001' };
   const normal = polygonStyle(properties), route = polygonStyle(properties, selectRoute(1));
-  assert.equal(normal.fillColor, vividRouteColor(routeColor(1))); assert.equal(normal.fillOpacity, POLYGON_STYLE.normal.fillOpacity);
+  assert.equal(normal.fillColor, '#cca300'); assert.equal(normal.fillOpacity, POLYGON_STYLE.focused.fillOpacity);
   assert.equal(route.fillColor, '#cca300'); assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
   assert.ok(route.weight > normal.weight);
   const zip = polygonStyle(properties, selectZip(properties)); assert.ok(zip.weight > route.weight);
@@ -33,7 +33,7 @@ test('unified query classification and station/route/ZIP transitions', () => {
   for (const status of ['uncovered', 'no_boundary', 'out_of_range']) {
     const state = selectZip({ postal_code: '00002', status }, 'MOCKA');
     assert.equal(state.route, null); assert.equal(state.station, 'MOCKA');
-    assert.equal(polygonStyle({ route_id: 1 }, state).fillOpacity, POLYGON_STYLE.normal.fillOpacity);
+    assert.equal(polygonStyle({ route_id: 1 }, state).fillOpacity, POLYGON_STYLE.focused.fillOpacity);
   }
   assert.deepEqual(switchStation('MOCKB'), { station: 'MOCKB', route: null, zip: null });
   assert.equal(uncoveredZipStyle().dashArray, '8 6'); assert.equal(uncoveredZipStyle().weight, 5);
@@ -62,7 +62,8 @@ test('RM5 difficulty style table preserves semantic colors, borders and selectio
     assert.deepEqual(polygonStyle(properties, selection, 'route'), route);
     const difficult = polygonStyle(properties, selection, 'difficulty');
     const level = selection.route?.route_id === 1 ? 'A' : 'S';
-    assert.deepEqual(difficult, { ...route, fillColor: difficultyColor(level),
+    const border = selection.route ? route : POLYGON_STYLE.normal;
+    assert.deepEqual(difficult, { ...route, color: border.color, weight: border.weight, opacity: border.opacity, fillColor: difficultyColor(level),
       fillOpacity: selection.route ? route.fillOpacity : POLYGON_STYLE.normal.difficultyFillOpacity });
   }
   for (const status of ['available', 'missing', 'not_in_detail']) {
@@ -123,7 +124,7 @@ test('R1 visual hierarchy and hover cap hold in both color modes', () => {
     const zip = polygonStyle(p, selectZip(p), mode);
     const dimmed = polygonStyle(p, selectRoute(2), mode);
     const hover = hoverStyle(normal);
-    assert.equal(normal.fillOpacity, mode === 'route' ? POLYGON_STYLE.normal.fillOpacity : POLYGON_STYLE.normal.difficultyFillOpacity);
+    assert.equal(normal.fillOpacity, mode === 'route' ? POLYGON_STYLE.focused.fillOpacity : POLYGON_STYLE.normal.difficultyFillOpacity);
     assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
     assert.equal(zip.fillOpacity, POLYGON_STYLE.selectedZip.fillOpacity);
     assert.equal(dimmed.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
@@ -170,8 +171,8 @@ test('R2a focused hierarchy intersects Station and DSP filters without overridin
     for (const [station, dsp] of [['A', null], [null, 'Alpha'], ['A', 'Alpha']]) {
       const focused = polygonStyle(p, clearSelection(), mode, station, dsp);
       assert.deepEqual(focused, { ...normal, ...POLYGON_STYLE.focused, fillColor: mode === 'difficulty' ? normal.fillColor : polygonStyle(p, selectRoute(1), mode).fillColor });
-      assert.ok(focused.fillOpacity > normal.fillOpacity);
-      assert.ok(focused.opacity > normal.opacity);
+      assert.ok(mode === 'route' ? focused.fillOpacity === normal.fillOpacity : focused.fillOpacity > normal.fillOpacity);
+      assert.ok(mode === 'route' ? focused.opacity === normal.opacity : focused.opacity > normal.opacity);
     }
     for (const [station, dsp] of [['B', 'Alpha'], ['A', 'Beta'], ['B', 'Beta']]) {
       const dim = polygonStyle(p, clearSelection(), mode, station, dsp);
@@ -280,15 +281,15 @@ test('RM11 assignment deduplicates closing vertices, ignores corners, preserves 
   assert.equal(ROUTE_COLOR_ASSIGN.minDeltaE, 30);
 });
 
-test('RM11 target, normal, dimmed transforms and missing assignment fallback', () => {
+test('RM11 target, RM12 active, dimmed transforms and missing assignment fallback', () => {
   const p = { route_id: 1, postal_code: '00001' };
   const colors = new Map([[1, '#66c2a5']]);
   const normal = polygonStyle(p, clearSelection(), 'route', null, null, colors);
-  assert.equal(normal.fillColor, vividRouteColor('#66c2a5'));
+  assert.equal(normal.fillColor, '#22ce98');
   const target = polygonStyle(p, selectRoute(1), 'route', null, null, colors);
   const dim = polygonStyle(p, selectRoute(2), 'route', null, null, colors);
   assert.equal(target.fillOpacity, .7); assert.equal(dim.fillOpacity, .16);
-  assert.equal(normal.fillColor, '#3bcea0'); assert.equal(target.fillColor, '#22ce98'); assert.equal(dim.fillColor, '#77b19f');
+  assert.equal(normal.fillColor, '#22ce98'); assert.equal(target.fillColor, '#22ce98'); assert.equal(dim.fillColor, '#77b19f');
   assert.equal(polygonStyle({ ...p, station: 'A' }, clearSelection(), 'route', 'A', null, colors).fillOpacity, .52);
   assert.equal(polygonStyle(p, clearSelection(), 'route', 'A', null, colors).fillOpacity, .16);
   assert.equal(polygonStyle(p, clearSelection(), 'route', null, 'Alpha', colors).fillOpacity, .16);
@@ -339,4 +340,31 @@ test('RM11 CIE76 threshold, cyclic first-fit and maximin fallback follow degree/
   ];
   const pair = assignRouteColors(precision);
   assert.ok(deltaE(pair.get('a'), pair.get('b')) >= 30);
+});
+
+test('RM12 All Stations matches focused route style while difficulty and explicit states stay unchanged', () => {
+  const p = { route_id: 1, station: 'A', dsp_name: 'Alpha', postal_code: '00001' };
+  const colors = new Map([[1, '#66c2a5']]);
+  const style = (selection = clearSelection(), mode = 'route', station = null, dsp = null) =>
+    polygonStyle(p, selection, mode, station, dsp, colors);
+  const expected = (base, fillColor) => ({ fillColor, fillOpacity: base.fillOpacity,
+    color: base.color, weight: base.weight, opacity: base.opacity });
+  assert.deepEqual(style(), expected(POLYGON_STYLE.focused, '#22ce98'));
+  assert.deepEqual(style(), style(clearSelection(), 'route', 'A'));
+  assert.deepEqual(style(clearSelection(), 'difficulty'), {
+    ...expected(POLYGON_STYLE.normal, '#9ca3af'), fillOpacity: POLYGON_STYLE.normal.difficultyFillOpacity });
+  for (const mode of ['route', 'difficulty']) {
+    const target = mode === 'route' ? '#22ce98' : '#9ca3af';
+    const dimmed = mode === 'route' ? '#77b19f' : '#9ca3af';
+    for (const [station, dsp] of [['A', null], [null, 'Alpha'], ['A', 'Alpha']])
+      assert.deepEqual(style(clearSelection(), mode, station, dsp), expected(POLYGON_STYLE.focused, target));
+    for (const [station, dsp] of [['B', null], [null, 'Beta'], ['A', 'Beta']])
+      assert.deepEqual(style(clearSelection(), mode, station, dsp), expected(POLYGON_STYLE.dimmed, dimmed));
+    for (const [selection, base, fill] of [[selectRoute(1), POLYGON_STYLE.selectedRoute, target],
+      [selectZip(p), POLYGON_STYLE.selectedZip, target], [selectRoute(2), POLYGON_STYLE.dimmed, dimmed]])
+      assert.deepEqual(style(selection, mode, 'B', 'Beta'), expected(base, fill));
+  }
+  assert.deepEqual(hoverStyle(style()), { ...style(), color: POLYGON_STYLE.hover.color,
+    opacity: POLYGON_STYLE.hover.opacity, weight: POLYGON_STYLE.hover.weight,
+    fillOpacity: POLYGON_STYLE.focused.fillOpacity + POLYGON_STYLE.hover.fillOpacityIncrease });
 });

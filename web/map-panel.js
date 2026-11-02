@@ -4,6 +4,15 @@ import { routeColor } from './route-colors.js';
 import { filteredRoutes, classifyQuery, clearSelection } from './map-state.js';
 import { routeDifficultyText, mapText as t } from './map-text.js';
 
+// Compare instants before formatting; API order and timezone offsets need not match chronology.
+export function mapUpdatedSummary(stations, fallback) {
+  const times = stations.map(station => station.fetched_at).filter(value => value && Number.isFinite(Date.parse(value)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  if (!times.length) return formatUpdated(fallback);
+  return Date.parse(times[0]) === Date.parse(times.at(-1)) ? formatUpdated(times[0])
+    : `${formatUpdated(times[0])} – ${formatUpdated(times.at(-1))}`;
+}
+
 export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   const element = id => doc.getElementById(`map-${id}`);
   const text = (tag, value, className) => {
@@ -102,6 +111,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('missing').replaceChildren(); element('missing-details').open = false;
     element('missing-title').textContent = t.missingTitle(0);
     element('missing-empty').hidden = true; element('regenerate').hidden = true;
+    if (element('station-times')) element('station-times').textContent = '';
     element('source').textContent = ''; element('updated').textContent = '—'; element('updated').removeAttribute('title');
   }
   function render(next, { focusStation: focus = null, routeColors: colors } = {}) {
@@ -122,7 +132,9 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('regenerate').className = missing_not_checked > 0 ? 'map-warning' : '';
     element('source').textContent = t.boundaries(data.boundary_source.dataset, data.boundary_source.vintage);
     const times = data.stations?.filter(station => !focus || station.code === focus) || [];
-    element('updated').textContent = times.length ? times.map(station => station.code + ' ' + formatUpdated(station.fetched_at)).join(' · ') : formatUpdated(data.fetched_at);
+    element('updated').textContent = mapUpdatedSummary(times, data.fetched_at);
+    const detail = element('station-times');
+    if (detail) detail.textContent = times.length ? times.map(station => station.code + ' ' + formatUpdated(station.fetched_at)).join(' · ') : formatUpdated(data.fetched_at);
     element('updated').removeAttribute('title');
     element('missing-title').textContent = t.missingTitle(coverage.missing);
     element('missing-details').open = false; element('missing').replaceChildren();

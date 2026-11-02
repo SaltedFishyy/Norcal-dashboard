@@ -1,5 +1,19 @@
 import { formatUpdated } from './format.js';
 
+const brand = ['West Region', ' Ops Dashboard'];
+function renderBrand(doc) {
+  for (const host of doc.querySelectorAll?.('.console-brand') || []) {
+    const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('class', 'ui-icon');
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'm3 5 6-3 6 3 6-3v17l-6 3-6-3-6 3Z M9 2v17 M15 5v17'); icon.append(path);
+    const label = doc.createElement('span'), region = doc.createElement('span'), suffix = doc.createElement('span');
+    region.className = 'console-brand-region'; region.textContent = brand[0]; suffix.textContent = brand[1];
+    label.append(region, suffix); host.replaceChildren(icon, label);
+  }
+}
+
 const notice = '数据来自 DMS 抓取，非实时';
 const loginNotice = 'DMS 登录已过期，请在公用电脑打开终端执行 npm run dms:login，登录完成后重新刷新。';
 const reasons = { not_in_dms_menu: 'DMS 中无此站点', no_permission: '无权限', disabled: '已停用' };
@@ -10,6 +24,7 @@ const triggers = { ui: '刷新按钮', cli: '命令行', json_import: 'JSON 导�
 export function createDataStatus({ document: doc = globalThis.document, fetch: request = globalThis.fetch,
   setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
   reload = () => globalThis.location.reload() } = {}) {
+  renderBrand(doc);
   const root = doc.getElementById('data-status');
   const node = (tag, text, parent) => {
     const el = doc.createElement(tag);
@@ -24,7 +39,9 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     const el = node('time', value ? formatUpdated(value) : '暂无数据', parent);
     if (value) el.title = value; return el;
   };
-  const text = node('div', undefined, root), actions = node('div', undefined, root);
+  const text = node('div', undefined, root), actionHost = doc.getElementById('map-data-actions');
+  const actions = node('div', undefined, actionHost && actionHost !== root ? actionHost : root);
+  text.className = 'data-status-details';
   actions.className = 'data-status-actions';
   const runMessage = node('p', undefined, root), brief = node('p', undefined, root);
   const login = node('p', undefined, root), error = node('p', undefined, root);
@@ -46,17 +63,30 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     const h = node('h2', title, heading); h.id = `data-${title === '更新记录' ? 'runs' : 'refresh'}-title`;
     el.setAttribute('aria-labelledby', h.id);
     button('关闭', heading, () => el.close());
+    const details = title === '更新记录' && actionHost && actionHost !== root ? node('section', undefined, el) : null;
+    if (details) details.className = 'data-history-times';
     const content = node('div', undefined, el); content.setAttribute('aria-live', 'polite');
     let opener;
     el.addEventListener('close', () => { previewSequence++; (opener?.disabled ? progressButton : opener)?.focus(); });
-    return { el, content, open(from) { opener = from; if (!el.open) el.showModal(); } };
+    return { el, content, details, open(from) { opener = from; if (!el.open) el.showModal(); } };
   }
   const history = dialog('更新记录'), refresh = dialog('刷新数据');
   function renderFreshness() {
-    text.replaceChildren();
-    node('span', freshness?.notice || notice, text);
-    node('span', ' · Last Updated：', text); time(freshness?.global?.newest_fetched_at, text);
-    const details = node('details', undefined, text); node('summary', '数据时间明细', details);
+    const previousTimes = doc.getElementById('map-station-times')?.textContent || '';
+    const detailHost = history.details || text;
+    detailHost.replaceChildren();
+    if (history.details) node('p', 'DMS 快照，非实时数据', detailHost);
+    let details;
+    if (actionHost && actionHost !== root) {
+      details = node('details', undefined, detailHost); node('summary', '数据时间明细', details);
+      const stationTimes = node('p', previousTimes, details); stationTimes.id = 'map-station-times';
+    }
+    const profileSummary = doc.getElementById('profile-data-summary');
+    if (profileSummary) profileSummary.replaceChildren();
+    const sourceHost = profileSummary || details || text;
+    node('span', freshness?.notice || notice, sourceHost);
+    node('span', ' · Last Updated：', sourceHost); time(freshness?.global?.newest_fetched_at, sourceHost);
+    if (!details) { details = node('details', undefined, detailHost); node('summary', '数据时间明细', details); }
     for (const d of freshness?.districts ?? []) {
       const group = node('details', undefined, details);
       const summary = node('summary', `${districtName(d.id)} · 有数据 / 总数：${d.stations_with_data} / ${d.station_count} · 最新：`, group);
@@ -97,6 +127,14 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       }
     } catch { history.content.replaceChildren(); node('p', '更新记录获取失败', history.content); }
   });
+  if (actionHost && actionHost !== root) {
+    const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('class', 'ui-icon map-history-icon');
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M5 2h14v20H5Z M8 7h8 M8 12h8 M8 17h5');
+    icon.append(path); historyButton.prepend(icon);
+  }
   function chooseScope() {
     previewSequence++; refresh.content.replaceChildren();
     const label = node('label', '选择范围 ', refresh.content), select = node('select', undefined, label);

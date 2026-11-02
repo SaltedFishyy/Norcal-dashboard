@@ -12,6 +12,7 @@ class Element {
   set textContent(text) { this.ownText = String(text); this.children = []; }
   get textContent() { return this.ownText + this.children.map(c => c.textContent).join(''); }
   append(...nodes) { this.children.push(...nodes); }
+  prepend(...nodes) { this.children.unshift(...nodes); }
   replaceChildren(...nodes) { this.ownText = ''; this.children = nodes; }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(key, fn) { this.listeners[key] = fn; }
@@ -29,7 +30,7 @@ function fresh(source = 'db') {
       ...['not_in_dms_menu', 'no_permission', 'disabled'].map((reason, i) => ({ code: `SKIP${i}`, district: 'mock', fetched_at: null, scrape_disabled: reason }))],
     run: source === 'json' ? null : { running: true, last: null } };
 }
-function fixture({ capability = false, failCapability = false, source = 'db', initialState = 'idle' } = {}) {
+function fixture({ capability = false, failCapability = false, source = 'db', initialState = 'idle', mapPage = false, profilePage = false } = {}) {
   const root = new Element('section'), calls = [], timers = new Map(); let timerId = 0, reloads = 0;
   const data = { freshness: fresh(source), state: { state: initialState, progress: initialState === 'running' ? progress() : null },
     districts: [{ id: 'mock', name_zh: '合成片区' }, { id: 'unassigned', name_zh: '未分配站点' }],
@@ -44,12 +45,37 @@ function fixture({ capability = false, failCapability = false, source = 'db', in
     const status = url === '/api/refresh' ? data.postStatus : 200;
     return { status, ok: status >= 200 && status < 300, json: async () => structuredClone(body) };
   };
-  const page = createDataStatus({ document: { getElementById: () => root, createElement: tag => new Element(tag) }, fetch: request,
+  const actions = new Element('div'), summary = new Element('div');
+  const doc = { getElementById: id => id === 'data-status' ? root : id === 'profile-data-summary' && profilePage ? summary : id === 'map-data-actions' && (mapPage || profilePage) ? actions : nodes(root).find(n => n.id === id),
+    createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
+  const page = createDataStatus({ document: doc, fetch: request,
     setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), reload: () => reloads++ });
   const click = async text => { const el = find(root, text); assert.ok(el, `button ${text}`); await el.listeners.click(); return el; };
   const tick = async delay => { const entry = [...timers].find(([, t]) => t.delay === delay); assert.ok(entry); timers.delete(entry[0]); await entry[1].fn(); };
-  return { root, page, data, calls, timers, click, tick, reloads: () => reloads };
+  return { root, actions, summary, page, data, calls, timers, click, tick, reloads: () => reloads };
 }
+
+test('RM13b Station times live in history while refresh warnings remain outside details', async () => {
+  const h = fixture({ mapPage: true }); await h.page.start();
+  const details = nodes(h.root).find(n => n.tag === 'details');
+  const dialog = nodes(h.root).find(n => n.tag === 'dialog');
+  assert.ok(nodes(dialog).includes(details));
+  assert.ok(!h.root.children.filter(n => n.tag !== 'dialog').flatMap(nodes).includes(details));
+  assert.match(dialog.textContent, /DMS 快照，非实时数据/);
+  for (const value of ['MOCK1', 'SKIP0', 'SKIP1', 'SKIP2', 'DMS 中无此站点', '无权限', '已停用', formatUpdated(iso)]) assert.ok(details.textContent.includes(value), value);
+  assert.ok(!details.open);
+  assert.match(details.textContent, /数据来自 DMS|MOCK1/);
+  const times = nodes(details).find(n => n.id === 'map-station-times');
+  times.textContent = 'MOCK1 snapshot';
+  h.data.freshness.run = { running: false, last: { status: 'stopped', finished_at: iso, needs_login: true } };
+  await h.page.loadFreshness();
+  assert.ok(nodes(h.root).some(n => n.tag === 'p' && /最近一次更新失败/.test(n.textContent) && !nodes(details).includes(n)));
+  assert.ok(h.root.children.some(n => n.tag === 'p' && /npm run dms:login/.test(n.textContent)));
+  assert.ok(nodes(h.root).some(n => n.id === 'map-station-times' && n.textContent === 'MOCK1 snapshot'));
+  const history = find(h.actions, '更新记录'); assert.ok(history);
+  await history.listeners.click(); assert.equal(nodes(h.root).find(n => n.tag === 'dialog').open, true);
+  h.page.dispose();
+});
 function progress() {
   return { run_id: 'mock-run', started_at: iso, phase: 'capture', district: 'mock', station: 'MOCK1',
     station_index: 1, station_total: 4, route_index: 2, route_total: null, completed: ['DONE'], skipped: ['SKIP0'], failed: ['FAIL'],
@@ -146,8 +172,40 @@ test('CD-T7 both pages load shared self-hosted module through the common static 
     assert.match(html, /id="data-status"/); assert.match(html, /src="\/data-status.js"/);
   }
   const js = await readFile(new URL('../../web/data-status.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(js, /innerHTML|https?:\/\//);
+  assert.doesNotMatch(js.replaceAll('http://www.w3.org/2000/svg', ''), /innerHTML|https?:\/\//);
   assert.ok(isStaticPath('/data-status.js'));
   const asset = await createStaticReader(fileURLToPath(new URL('../../web/', import.meta.url)))('/data-status.js');
   assert.match(asset.contentType, /text\/javascript/); assert.equal(asset.body.toString(), js);
+});
+
+test('RM13b both headers share one brand definition and map timestamp explains the snapshot', async () => {
+  for (const name of ['map', 'index']) {
+    const html = await readFile(new URL(`../../web/${name}.html`, import.meta.url), 'utf8');
+    assert.match(html, /class="console-brand"/);
+    assert.doesNotMatch(html, /NC OPS CONSOLE/);
+    if (name === 'map') assert.match(html, /class="snapshot" title="DMS 快照，非实时数据"/);
+  }
+  const h = fixture(), host = new Element('p');
+  // Reuse the public constructor to exercise actual shared brand rendering.
+  const page = createDataStatus({ document: { getElementById: () => h.root, querySelectorAll: () => [host],
+    createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) } });
+  assert.equal(host.textContent, 'West Region Ops Dashboard');
+  assert.equal(host.children[0].attributes['aria-hidden'], 'true');
+  assert.equal(host.children[1].children[0].className, 'console-brand-region');
+  page.dispose(); h.page.dispose();
+});
+
+test('RM13c profile freshness summary is in the card and details remain in history', async () => {
+  const h = fixture({ profilePage: true }); await h.page.start();
+  assert.match(h.summary.textContent, /Last Updated/);
+  assert.ok(h.summary.textContent.includes(formatUpdated(iso)));
+  const history = nodes(h.root).find(n => n.tag === 'dialog');
+  assert.ok(nodes(history).some(n => n.tag === 'details'));
+  assert.ok(!h.root.children.filter(n => n.tag !== 'dialog').flatMap(nodes).some(n => n.tag === 'details'));
+  h.data.freshness.global.newest_fetched_at = '2026-10-09T12:00:00Z';
+  await h.page.loadFreshness();
+  assert.ok(h.summary.textContent.includes(formatUpdated('2026-10-09T12:00:00Z')));
+  assert.equal(h.summary.children.filter(n => n.tag === 'time').length, 1);
+  assert.ok(h.actions.children[0].children.some(n => n.tag === 'button'));
+  h.page.dispose();
 });

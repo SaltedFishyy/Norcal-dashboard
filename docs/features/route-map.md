@@ -282,10 +282,14 @@ server/test/route-map.test.js           组装逻辑、API、颜色函数、静�
   |---|---|---|---|
   | `us.pmtiles` | 美国本土 | 0–6 | 4.7 MB |
   | `norcal.pmtiles` | 北加 + Reno + Medford | 0–10 | 11.6 MB |
+  | `socal.pmtiles` | ????bbox `-121.5,32.4,-114.0,35.6`??? `20261028` | 0?10 | 6.1 MB |
   | `mountain.pmtiles` | CO / WY / ID / UT / NM / MT 区域；bbox `-116.5,34.0,-103.0,47.0`；构建 `20261002` | 0–10 | 33.8 MB |
+  | `pnw.pmtiles` | WA + OR；bbox `-124.9,42.0,-116.4,49.1`；构建 `20261028` | 0–10 | 22 MB |
+  | `az.pmtiles` | AZ；bbox `-115.0,31.2,-108.8,37.4`；构建 `20261028` | 0–10 | 9.3 MB |
+  | `hawaii.pmtiles` | ????bbox `-160.6,18.8,-154.7,22.4`??? `20261028` | 0?10 | 0.9 MB |
   | `ops.pmtiles` | SFO01 运营区 | 0–14 | 125.2 MB |
 
-  合计约 175 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
+  合计约 197 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
 - 更新：需要更新底图（例如几个月一次，或新增运营区）时，换成新的构建日期重新执行上面的命令，并更新本表。新增 Station 时扩大或新增 `ops` 层的 bbox。
 
 目标：把 RM1 的“深色背景 + polygon”升级为带地理参照的运营地图。**不扩展数据层，不新增 DMS 抓取**；RM1 的 join / coverage / missing / 冲突校验保持在 server 端不变。
@@ -1169,3 +1173,172 @@ Claude 检查：判定逻辑已经和 `polygonStyle` 一致（`labelPriority`：
 - No commit, push, deployment, DMS access, dependency/API changes, production data or schema changes. REQUIREMENTS.md is absent; requirements came from the approved route-map spec.
 
 - RM11 review round 1 (2026-10-29, Codex): Raised minDeltaE from 20 to 30 for clearer adjacent-route distinction; updated three threshold assertions and added an explicit configuration assertion. Targeted tests 57/57; npm.cmd test 618/618 (including existing isolated test-database cases); git diff --check passed with a line-ending warning only. No lint/build scripts; Chrome visual recheck and Product Owner preview sign-off remain pending. Existing uncommitted changes preserved; no commit, push or deployment.
+
+## RM12 — All Stations 全部视为 active（**Approved**，Product Owner 2026-10-29，轻量改动）
+
+只改前端呈现，不改 API 和数据。**与 RM11-1 中“没有筛选时 `normal` 状态不变”冲突时，以本节为准。**
+
+- 按线路模式下，没有选中 Route、没有站点聚焦（All Stations）、也没有 DSP 筛选时，所有 Route 都使用和站点聚焦时目标区域相同的 `focused` 样式：颜色按 `ROUTE_FILL.target` 变换，fill opacity 和边框也相同。不因为 All Stations 整体变淡。
+- 单站点聚焦、DSP 筛选、选中 Route 时的行为不变：目标区域 `focused` / `selectedRoute`，其余 `dimmed`。
+- 编号跟随 polygon 状态（RM10d）：All Stations 下的编号都是 `route-label--focused`。
+- 按难易度模式不变：没有筛选时继续使用 `normal`（`difficultyFillOpacity`）。
+- `POLYGON_STYLE.normal` 常量保留，难易度模式仍然使用它。
+
+验收标准：
+- RM12-AC1：按线路模式、无选择、`focusStation === null`、`dsp === null` 时，`polygonStyle` 的返回值和同一 Route 在站点聚焦匹配时相同。
+- RM12-AC2：按难易度模式下，无筛选时的返回值不变。
+- RM12-AC3：单站点、DSP、选中 Route 时的返回值都不变；hover 在 focused 基础上叠加。
+- RM12-AC4：All Stations 时编号都有 `route-label--focused`，碰撞布局不变。
+- RM12-AC5：Claude 在 Chrome 中检查北加州 All Stations：整张地图的饱和度和单站点聚焦时的目标区域一致。
+
+### RM12 Implementation Notes
+
+- 2026-10-29 (Codex): Added route-mode fallback to focused in polygonStyle; map-view priority/collision logic, constants and far 18px CSS unchanged. Updated old normal assumptions individually: RM2 fill/color and unowned ZIP transitions now focused; RM5 unfiltered difficulty borders remain normal; R1 route opacity now focused; R2a unfiltered route/focus opacity equality; RM11 unfiltered target transform; web initial/mouseout/clear styles now focused; district-map unfiltered colors equal station-focused colors. Added complete style/filter/selection/hover and All Stations focused-label coverage. Targeted tests 59/59, final npm.cmd test 623/623 (existing isolated test DB), git diff --check passed (line-ending warnings only); earlier runs exposed old assertions, corrected before final rerun. No lint/build scripts. Existing local /map HTTP 200; headless Chromium loaded 445 paths/98 labels without page errors (loading smoke only). AC1-AC4 automated; AC5 Claude Chrome check and Product Owner preview sign-off pending; legacy pages not manually rechecked. Existing spec edits preserved; no API/data/schema/dependency changes, DMS access, commit, push or deployment.
+
+## RM13 — 页面视觉改版（参考图）（**Approved**，Product Owner 2026-11-02）
+
+Product Owner 提供参考图 `线路画像Ui改动.png`（仓库根目录，未加入 Git；副本 `.handoff/RM13-reference.png`），说明“不用完全一样，奇怪的地方按 Claude 的理解处理”。参考图画的是**线路地图页**。只改前端呈现，不改 API、数据和交互逻辑；**不新增 web 文件**（静态文件白名单），图标用内联 SVG。
+
+### RM13-1 顶部标题栏（两个页面共用）
+
+- 一行：左侧是青色竖条 + `NC OPS CONSOLE`（小号、字距加宽），一条竖分隔线，然后是页面图标和页面标题（地图页：地图图标 + “线路地图”；画像页保留“美西线路画像”和英文副标题）。右侧是页面切换（线路档案 / 线路地图），当前页是填充的深青色按钮，下边缘带青色高亮，其他是普通文字。
+- 线路画像页只换这个标题栏，表格、筛选区和 ZIP 搜索的布局不变（Claude 决定：参考图没有画线路画像页，避免猜测）。
+
+### RM13-2 地图页工具栏
+
+- 标题栏下面是一张圆角卡片（工具栏）：左侧是 片区 / 站点 / DSP 三个下拉框，标签在框的左边；右侧是 “DMS 快照 · 更新于 <时间>” 和一个带图标的「更新记录」按钮（打开现有的更新记录弹窗）。“管理仓库”和 3100 上的“刷新数据”按钮也放在这一侧，不改变它们的显示条件。
+- 原来在页面上方占好几行的内容收起：
+  - 数据来源说明、各 Station 的数据时间明细，放进现有的“数据时间明细”折叠区，或者放进更新记录弹窗，**默认不展开**；
+  - **警告类信息仍然直接显示**：最近一次刷新失败、正在更新、需要重新登录、加载错误、底图缺失、仓库提示等。有内容时在工具栏下方显示一行提示条，没有内容时不占空间。不能因为改版而隐藏这些警告。
+  - 「更新于」的显示（第 0 轮 Codex 指出：现有 `#map-updated` 显示的是各 Station 名称和时间的完整列表，不是单个时间；Claude 决定如下）：
+    - 选中单个 Station：显示该 Station 的数据时间；
+    - 片区总览：只有一个时间时直接显示；有多个时间时显示**最早 – 最新**的范围（例如 `2026-10-14 10:02 – 2026-10-29 17:14 PDT`）。不只显示最新时间，避免掩盖过期的 Station。
+    - 各 Station 名称和时间的完整列表移到默认折叠的“数据时间明细”中，内容不变。
+    - 时间格式沿用现有的格式化函数。
+  - “DMS 快照，非实时数据”的含义保留（例如写成 “DMS 快照 · 更新于 …”）。
+
+### RM13-3 地图卡片
+
+- 地图是大圆角卡片（约 12px），尽量占满工具栏下方的高度（桌面端约 `calc(100vh - 标题栏 - 工具栏 - 边距)`，最小约 480px）。
+- 缩放按钮：白色方形圆角按钮，上下排列。“定位站点 / 定位片区”改为缩放按钮下方的定位图标按钮（准星图标），保留原来的 `aria-label` / `title` 文字和行为。
+- 着色模式（按线路 / 按难易度）：右上角深色胶囊形分段按钮，选中项是青色填充、深色文字。
+
+### RM13-4 右侧线路栏
+
+- “线路”卡片：标题较大；搜索框带放大镜图标，placeholder 改为“搜索线路编号或邮编”。线路列表每行是一张带边框的圆角小卡片：左边是色块，中间是线路名称，右边是 “N ZIP”。列表固定高度、内部滚动。选中 / hover 状态沿用现有逻辑，只调整样式。
+- 当前邮编、线路概览、地图覆盖率、缺少边界的邮编等其他卡片保留，使用同样的卡片样式，放在线路卡片下面。
+
+### RM13-5 通用
+
+- 深色背景，统一的卡片背景、边框和圆角；青色作为强调色。
+- 390px 宽度：工具栏换行，不出现横向滚动；地图和侧栏上下排列。
+- 现有元素的 id、`data-map-text`、aria 属性保持不变，JS 逻辑不改（只允许为了放置位置做必要的 DOM 调整）。
+
+### RM13-6 验收标准
+
+- RM13-AC1：两个页面的标题栏按 RM13-1；画像页其他部分不变。
+- RM13-AC2：地图页工具栏按 RM13-2；警告类信息有内容时仍然可见，没有内容时不占空间；更新记录弹窗可以打开。
+- RM13-AC3：地图卡片、缩放 / 定位按钮、着色模式切换按 RM13-3，行为不变。
+- RM13-AC4：右侧线路栏按 RM13-4，搜索、选择、ZIP 搜索行为不变。
+- RM13-AC5：390px 下没有横向滚动；现有测试通过（因为 DOM 位置改变而失效的断言逐条说明）。
+- RM13-AC6：Claude 在 Chrome 中对照参考图检查桌面和 390px 两种宽度。
+
+### 实现记录（Implementation Notes）— RM13
+
+- 2026-11-02：标题栏共用视觉样式；画像页只调整标题栏包装。地图筛选和数据操作移入工具栏；地图数据来源与 Station 完整时间列表放入默认折叠明细，刷新失败、登录过期及其他状态提示保留在折叠区之外。画像页的数据状态布局保持原样。
+- `mapUpdatedSummary` 按实际时间排序并复用 `formatUpdated`，单站显示单个时间，片区显示最早至最新范围；同一时刻的不同 ISO 表达不产生重复范围。
+- 定位按钮使用内联 SVG，保留点击行为并按站点／片区更新 `aria-label` 和 `title`；更新记录按钮和搜索框也使用内联 SVG。未新增 web 文件、依赖或数据字段。
+- 测试断言调整：搜索 placeholder 使用批准的新文案；定位按钮从文字断言改为可访问名称断言，原定位行为检查保留；旧 R1b 样式检查限定于自身区块，新 RM13 样式另行检查；外部 URL 检查仅豁免 SVG namespace（不是网络资源），HTML 注入和其他外部 URL 检查保留。
+- Playwright headless 已检查运行中的 `http://127.0.0.1:3000/map`：1440×900 和 390×900 截图位于 `.handoff/RM13-desktop.png`、`.handoff/RM13-mobile.png`，390px 下 `document.documentElement.scrollWidth` 为 390，无页面 JavaScript 异常；确认明细默认折叠、更新记录弹窗、线路选择、定位及难易度切换可用。截图含内部现有运行数据，仅留本地，不提交。AC6 仍待 Claude 在 Chrome 中检查，并待 Product Owner 预览签核。
+- 浏览器模拟 freshness 返回刷新失败及登录过期状态，实测两条提示均可见且不在 details 内；画像页标题和原站点筛选仍正常。`npm.cmd test` 全量通过；无 lint / build 脚本。`git diff --check` 通过（仅有现存 LF/CRLF 提示）。未执行 DMS、提交、推送、部署或生产数据库操作。
+- 2026-11-02 第 2 轮修复：仅取消地图页最大宽度，清理旧边距规则，保留桌面左右 24px／移动端 12px；正常加载成功的消息复用 `.sr-only`，文字和 aria 属性不变，加载中、失败、无数据、无边界及详情警告仍可见；新增状态切换测试并将旧宽度断言更新为 `none`。`npm.cmd test` 633/633 通过（含已有隔离测试数据库用例），无 lint/build 脚本；`git diff --check` 通过（仅 LF/CRLF 提示）。Playwright 实测 2327px、1440px 满宽和 390px 无横向滚动，成功消息视觉隐藏、模拟失败消息可见；待本轮预览签核。未访问 DMS，未修改业务数据或数据库结构，未 commit/push/部署。
+
+## RM13b — 视觉改版第 2 版（参考图 2.0）（**Approved**，Product Owner 2026-11-02）
+
+Product Owner 提供新的参考图 `线路画像2.0.png`（仓库根目录，未加入 Git；副本 `.handoff/RM13b-reference.png`），说明“不好看的地方按 Claude 的想法处理”。在 RM13 的基础上修改，规则同 RM13-5（不新增 web 文件、不改逻辑、保留 id / aria、警告可见）。
+
+1. **品牌**（两个页面共用的标题栏）：左侧改为青色地图轮廓图标 + 品牌名，取代竖条和 `NC OPS CONSOLE`。品牌名前半部分是青色，后半部分是白色，字号较大、加粗。竖分隔线后面是页面标题（地图页“线路地图”，不再带图标；画像页“美西线路画像”和英文副标题不变）。
+   - **品牌名（Claude 决定）**：参考图写的是 “NorCal & SoCal Ops Dashboard”，但现在的片区还包括丹佛、西雅图、凤凰城，这个名字不准确。改用 **“West Region Ops Dashboard”**（“West Region” 青色），和画像页的 “West Region Route Profile” 一致。品牌名放在一个常量 / 一处 HTML 中，方便以后修改。
+2. **工具栏**：右侧文字改为 `数据更新时间：<时间>`（时间规则同 RM13-2）。“DMS 快照，非实时数据”的说明不在工具栏中显示，改为这段文字的 `title` 提示，同时写在更新记录弹窗顶部。
+3. **“数据时间明细”折叠区**从工具栏下方移到「更新记录」弹窗中（弹窗顶部一节，例如“各站点数据时间”，内容不变）。工具栏下方只保留有内容时才出现的警告提示条（RM13-2 的规则不变）。
+4. **地图卡片**：1px 青色边框，加一层很淡的青色外发光。
+5. **仓库图例**（地图左下角现有的 `.warehouse-legend`）：改为深色圆角胶囊，带细边框，仓库图标是白色线条，旁边是“仓库”。只改样式，显示条件不变。
+6. 其他（缩放 / 定位按钮、着色模式切换、右侧线路栏、390px）保持 RM13 的效果。
+
+验收标准：
+- RM13b-AC1：两个页面的标题栏按第 1 条显示品牌名和页面标题。
+- RM13b-AC2：工具栏按第 2 条显示；数据时间明细在更新记录弹窗中，可以看到完整列表；警告提示条规则不变。
+- RM13b-AC3：地图边框、仓库图例按第 4、5 条显示。
+- RM13b-AC4：390px 下没有横向滚动；现有测试通过（因为结构改变而失效的断言逐条说明）。
+- RM13b-AC5：Claude 在 Chrome 中对照参考图检查。
+
+
+### 实现记录（Implementation Notes）— RM13b
+
+- 2026-11-02：两页标题栏共用 `data-status.js` 中唯一品牌常量（West Region / Ops Dashboard），通过 textContent 和内联 SVG 构造；页面标题保留，地图标题旁旧图标移除。未新增 web 文件或外部资源。
+- 地图工具栏显示“数据更新时间”，DMS 快照说明置于 title（保留原 data-map-text 节点供辅助技术读取），并显示在更新记录弹窗顶部。地图时间明细移到弹窗独立 section，刷新记录异步加载或失败不会清除明细，周期刷新继续保留当前 Station 时间列表。画像页数据状态区布局不变。
+- 地图增加 1px 青色边框和淡外发光；仓库图例为深色圆角胶囊，白色线条仅覆盖图例 SVG，marker 和显示条件不变。移动端图例抬高以避开地图署名。
+- 断言调整：旧 RM13 明细位置断言改为弹窗归属，增加完整 4 个合成站点、时间、跳过原因及 DMS 说明检查；线路概览时间文案断言从“更新时间”改为“数据更新时间”，原值与行为断言保留。新增两页品牌挂载、唯一品牌常量渲染、图标 aria-hidden 和工具栏 title 测试。
+- 检查：相关测试 51/51；npm.cmd test 全量 634/634 通过（包含项目原有隔离测试数据库用例）；无 lint / build 脚本。git diff --check 通过，仅有 LF/CRLF 提示。
+- Playwright headless 检查现有本地服务 /map：1440×900 和 390×900，scrollWidth 分别为 1440 / 390；445 个 polygon path，弹窗含 54 个站点列表项，两页品牌正确，无 pageerror。浏览器拦截 freshness 响应模拟刷新失败和登录过期，两条提示均可见且不在 details/dialog 内。截图为 .handoff/RM13b-desktop.png、.handoff/RM13b-mobile.png，仅本地保留。未手动回归 legacy 价格表和 analytics 页面。
+- AC1–AC4 技术检查通过；AC5 待 Claude Chrome 对照检查及 Product Owner 预览签核。未修改需求、验收标准、API、业务数据或数据库结构，未访问 DMS、commit、push 或部署；既有未提交改动保留。
+
+## RM13c — 线路档案页视觉改版（参考图）（**Approved**，Product Owner 2026-11-02）
+
+Product Owner 提供参考图 `线路档案.png`（仓库根目录，未加入 Git；副本 `.handoff/RM13c-reference.png`），规则和 RM13 / RM13b 相同：不用完全一样，不好看的地方按 Claude 的想法处理。只改线路档案页（`/`，`web/index.html`）的呈现，不改 API、数据、筛选 / 排序 / ZIP 搜索 / 详情弹窗等逻辑。不新增 web 文件；保留 id、aria 和事件；警告信息有内容时必须可见。
+
+1. **标题栏**：沿用 RM13b 的共用标题栏（地图图标 + “West Region Ops Dashboard”，竖分隔线，页面标题“美西线路画像” + 英文副标题 “West Region Route Profile”，右侧页面切换）。参考图左上角还是旧的竖条 + 大写文字样式，**Claude 决定以 RM13b 为准**，两个页面保持一致。
+2. **数据状态条**（一张圆角卡片，一行）：左侧数据库图标 + “DMS 快照，非实时数据”（加粗），竖分隔线，然后是数据来源说明和 Last Updated（现有 data-status 的内容）；右侧是「更新记录」按钮。3100 上的“刷新数据”按钮也放在右侧，显示条件不变。
+   - “数据时间明细”和地图页一样放在「更新记录」弹窗中（RM13b-3，`data-status.js` 两个页面共用）。参考图把它画在状态条里，**Claude 决定与地图页保持一致**。
+   - 警告（刷新失败、正在更新、需要登录、加载错误）有内容时显示在状态条下方的提示条中。
+3. **筛选工具栏**（一张圆角卡片）：片区 / 站点 / DSP 下拉框（标签在左）；竖分隔线；时钟图标 + 两行文字“更新时间 / <时间>”（现有 `#updated`）；图层图标 + “线路总数 / <数量>”（现有 `#total`，筛选时仍然是“筛选数 / 全部数”）；竖分隔线；右侧是 ZIP 输入框和「搜索」按钮。ZIP 搜索结果（`#profile-zip-result`）显示在工具栏下方，有内容时才占空间。
+4. **表格**：放在圆角卡片中；表头背景略深，列名加粗，可排序的列带排序图标（沿用现有排序状态）；行之间是细分隔线，hover 时行背景变亮；线路名称是青色链接；难度徽章保留现有颜色，圆角加大一点；数字列右对齐。
+5. 390px：标题栏和工具栏换行，页面不出现横向滚动；表格在自己的滚动容器中横向滚动（现有 `.table-scroll`）。
+
+验收标准：
+- RM13c-AC1：标题栏和地图页一致，当前页是“线路档案”。
+- RM13c-AC2：数据状态条、筛选工具栏按第 2、3 条显示；明细在更新记录弹窗中；警告和 ZIP 结果有内容时可见。
+- RM13c-AC3：表格按第 4 条显示；排序、DSP 筛选、ZIP 搜索、点击线路打开详情的行为不变。
+- RM13c-AC4：390px 下 `scrollWidth <= 390`；现有测试通过（因为结构改变而失效的断言逐条说明）。
+- RM13c-AC5：Claude 在 Chrome 中对照参考图检查。
+
+### 实现记录（Implementation Notes）— RM13c
+
+- 档案页新增 `.profile-page` 样式作用域，沿用 RM13b 标题栏；状态卡片包含数据库 SVG、来源和 Last Updated、更新记录及原条件下的刷新按钮。通过现有 `map-data-actions` 挂载机制复用更新记录弹窗；`data-status.js` 仅新增可选的 `profile-data-summary` 宿主，地图页渲染路径保持不变。
+- 筛选栏保留所有控件 id 和事件，更新时间、线路总数增加时钟 / 图层 SVG，ZIP 结果移到工具栏下方，空内容不占空间。表格增加卡片、分隔线、hover 和徽章圆角；排序 SVG 直接使用现有 `aria-sort` 状态，保留原箭头 span 供现有渲染更新，不修改 `app.js` 或筛选 / 排序 / ZIP / 详情逻辑。
+- 新增档案页当前导航、更新时间、DSP 筛选数 / 全部数、排序 SVG 状态样式，以及状态卡片时间更新和明细弹窗归属测试；原有行为断言全部保留，没有因本次改版删除或改写断言。
+- Playwright headless 使用现有本地 3000 服务检查 `/` 和 `/map`，1440×900、390×900 的页面 scrollWidth 分别为 1440、390；地图两种宽度均渲染 445 个边界。已检查排序图标循环、DSP 数量 / 时间、打开详情、ZIP 结果显示、更新记录明细；拦截 freshness 响应模拟刷新失败和登录过期，两条警告均在弹窗外可见；无 pageerror。
+- 截图保存在 `.handoff/RM13c-desktop.png`、`.handoff/RM13c-mobile.png`，仅本地保留。未访问 DMS、未修改数据源或数据库结构、未重启服务、未提交 / 推送 / 部署。AC5 的 Claude Chrome 审查和 Product Owner 预览签收待后续完成；legacy 价格表与 analytics 未手动回归。
+- 检查结果：`npm.cmd test` 全量 636 / 636 通过，定向测试 25 / 25 通过；`git diff --check` 无空白错误（工作区有 Git 的 LF / CRLF 提示）。项目没有 lint 配置或 build 命令。
+
+## RM13d — 字体和字号统一（**Approved**，Product Owner 2026-11-02，轻量改动）
+
+Product Owner 反馈：两个页面的字体和参考图不一样，字太小，看着累。按 Claude 的审美调整，只改 `web/styles.css`。
+
+- **字体**：`"Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif`（Windows 上中文用微软雅黑 UI，英文和数字用 Segoe UI）。数字列和时间统一使用 `font-variant-numeric: tabular-nums`。不引入外部字体（CSP / 局域网使用）。
+- **字号层级**（桌面端；文字不小于 12px）：
+  - 品牌名 22px / 700；页面标题 28px / 700；英文副标题 14px；页面切换 16px（当前页 600）。
+  - 工具栏和状态条：标签 15px、下拉框和输入框 15px、“更新时间 / 线路总数”等小标题 13px、它们的值 16px / 600、数据来源说明 14px、按钮 15px。
+  - 表格：表头 14px / 600，正文 15px，行高约 44px；难度徽章 13px / 600。
+  - 地图页侧栏：卡片标题 18px（“线路”卡片 22px）、线路名称 15px、ZIP 数 13px、覆盖率数字 28px、正文 14px；着色模式按钮 14px；地图标注、tooltip 等现有尺寸不变。
+  - 原来 11px / 12px 的辅助文字（例如 `dt`、`.eyebrow`、`.map-sidebar dt`、`.map-badge`）提高到 12–13px。
+- **390px**：整体约缩小 1–2px（例如页面标题 22px、表格正文 14px），保持不出现横向滚动。
+- 标签字号（`.route-label*`，包括 Product Owner 调过的 18px）**不改**。
+- **宽屏放大（第 1 轮审查补充，Claude 决定）**：Product Owner 的浏览器视口约 2560 CSS px（缩放 100%），参考图约 1700px 宽，所以上面的桌面字号在宽屏上仍然显得小。增加两档：
+  - 视口 ≥ 1800px：上面列出的字号（标签除外）整体 +2px（例如表格正文 17px、表头 16px、工具栏标签 / 下拉框 17px、值 18px、品牌名 24px、侧栏线路名称 17px；**页面标题例外，每档 +4px：28 → 32 → 36px**，第 1 轮 Codex 指出原文示例和“+2px”矛盾，Claude 决定），表格行高、按钮和输入框的内边距相应加大。
+  - 视口 ≥ 2300px：在上一档的基础上再 +2px（页面标题 +4px）。
+  - 用媒体查询或 CSS 变量实现，不使用 CSS `zoom` / `transform: scale`（会影响 Leaflet 的鼠标坐标）。地图标注字号不变。
+- 验收：两个页面在 Chrome 中对照参考图，主要文字（工具栏、表格、侧栏列表）明显更易读；390px 下 `scrollWidth <= 390`；现有测试通过。
+
+
+### ?????Implementation Notes?? RM13d
+
+- 2026-11-02?????????? web/styles.css ???????????????????????????????? tabular-nums??? 22px??? 28px??? 16px?????? 15px????? 15px??? 14px/600??? 13px/600???? 44px????? 18px????? 22px????? 15px??? 14px???? 28px?390px ????????????
+- ?? MAP-R1b ??????????????????? tooltip?popup???????????.route-label* ??????????????? 18px?????????????HTML??????API ????????????????
+- ? brief ??? CSS ?????NAV1 ????? 17px ?? 16px?R1b ??????????????? :where ????????????????????? 20px ????? 15px?????????????????????????????????? 57/57 ???
+- Playwright headless ???????? / ? /map?? 1440?900?390?900??? scrollWidth ??? 1440 / 390???? 37 ???? 445 ????? pageerror?????/???? 28px/22px???? 22px/20px??? .handoff/RM13d-profile-desktop.png?RM13d-profile-mobile.png?RM13d-map-desktop.png?RM13d-map-mobile.png???????
+- ??????????????????DSP ????/????????ZIP ??????????????????/????????????????? legacy ???? analytics????????????????????????? Chrome ????? Product Owner ???????390px ?????????
+- ??? DMS?????????????????commit?push ????npm test ????????????????????????? lint ??? build ???
+- ?????npm.cmd test ?? 636/636 ???git diff --check ??? 0????? LF/CRLF ??????????????????/??????????????????????
+
+- 2026-11-02 RM13d ? 2 ??? :root ?? / ????? ?1800px??2300px ?????????? UI ???? +2px?h1 ?? +4px?28/32/36px??????????????????? .route-label*??? tooltip / popup ????????????????? zoom / scale??? R1b ? NAV1 ??????????????npm.cmd test 636/636 ???git diff --check ???? LF/CRLF ????Playwright ????????? / ? /map ? 1440/1920/2560/390?900 ?????? .handoff/RM13d-{profile,map}-{width}.png?390px ?? scrollWidth=390?2560px ??????????????????? 100?60px ???????????? 0?? pageerror?37 ???? 445 ??????????? DMS????????????????/??/?????? lint/build ???Claude ???????? Product Owner ?????????

@@ -75,7 +75,12 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   const control = L.control({ position: 'topleft' });
   control.onAdd = () => {
     const container = doc.createElement('div'), button = doc.createElement('button');
-    fitButton = button; container.className = 'leaflet-bar map-fit'; button.type = 'button'; button.textContent = t.fit;
+    fitButton = button; container.className = 'leaflet-bar map-fit'; button.type = 'button'; button.setAttribute('aria-label', t.fit); button.title = t.fit;
+    const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24'); icon.setAttribute('aria-hidden', 'true'); icon.setAttribute('class', 'ui-icon');
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M12 2v5 M12 17v5 M2 12h5 M17 12h5 M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0');
+    icon.append(path); button.append(icon);
     button.addEventListener('click', fitStation); container.append(button);
     L.DomEvent.disableClickPropagation(container); return container;
   };
@@ -296,7 +301,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   function render(data, { fitToStation = true, focusStation: focus = null, routeColors: colors } = {}) {
     routeColors = colors;
     clear();
-    focusStation = focus; fitButton.textContent = focus ? t.fit : '定位片区';
+    focusStation = focus; fitButton.setAttribute('aria-label', focus ? t.fit : '定位片区'); fitButton.title = focus ? t.fit : '定位片区';
     routeDetails = new Map(data.routes.map(route => [route.route_id, route.zip_detail]));
     polygons = L.geoJSON(data.features, {
       renderer,
