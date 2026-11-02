@@ -150,6 +150,25 @@ test('RD3-14 method/attempt records and summary preserve write-close-restore ord
   assert.match(h.logs.join('\n'), /定位方法：\{"L1":1,"L2":1,"L3":1,"L5":1\}/);
 });
 
+test('RD3-15 retry metadata reaches run records and sanitized failure diagnostics', async () => {
+  const success = batchHarness();
+  assert.equal(await success.run({ capture: async (_context, { routeId }) => ({ ...result(routeId), click_retry: 1 }) }), 0);
+  assert.ok(success.runs[0].routes.every(route => route.click_retry === 1));
+  const failure = batchHarness();
+  let diagnostic;
+  assert.equal(await failure.run({ capture: async () => {
+    throw Object.assign(new SelectorError('portrait', { cause: new Error('Timeout 3000ms https://example.invalid/private\nCall log: DO_NOT_LOG') }),
+      { click_retry: 1, click_wait_reason: 'intercepted' });
+  }, diagnosticFileOps: { mkdir: async () => {}, rename: async () => {}, rm: async () => {},
+    writeFile: async (_filename, value) => { diagnostic = JSON.parse(value); } } }), 1);
+  assert.equal(failure.runs[0].routes[0].click_retry, 1);
+  assert.equal(diagnostic.click_retry, 1);
+  assert.equal(diagnostic.click_wait_reason, 'intercepted');
+  assert.doesNotMatch(JSON.stringify(diagnostic), /https?:|private|DO_NOT_LOG|Call log/);
+  assert.deepEqual(failure.saved, []);
+  assert.equal(failure.runs[0].routes[1].result, 'not_run');
+});
+
 test('RD3-14 failed location records attempted levels and writes diagnostic without continuing', async () => {
   const h = batchHarness();
   const attempts = ['L1', 'L2', 'L3', 'L5:unavailable'];

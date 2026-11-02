@@ -97,7 +97,9 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
     const diagnosticError = error.name === 'DbStoreError' ? { name: error.name, message: error.message } : error;
     await writePageFailureDiagnostic({ runtimeDir, page, error: diagnosticError, currentRoute, phase, now,
       prefix: 'station-batch', fileOps: diagnosticFileOps, errorLog,
-      fields: { station: current?.station ?? null, error_type: safeType(error) } });
+      fields: { station: current?.station ?? null, error_type: safeType(error),
+        ...(error.click_retry !== undefined ? { click_retry: error.click_retry } : {}),
+        ...(error.click_wait_reason !== undefined ? { click_wait_reason: error.click_wait_reason } : {}) } });
   };
   try {
     options = parseStationBatchArgs(args); config = parseStationBatchConfig(env);

@@ -1,6 +1,6 @@
 import { NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError } from './route-profile-page.js';
 
-import { withPortraitPage } from './portrait-page.js';
+import { withPortraitPage, hasVisiblePortraitModal } from './portrait-page.js';
 const pathname = (url) => new URL(url).pathname;
 
 function inspectVisibleTableBody(elements, scroll) {
@@ -40,7 +40,7 @@ async function inspectRouteRow({ page, guarded }, routeName, scroll = false) {
   return rows[0];
 }
 
-async function clickLocatedRow({ page, guarded }, routeName) {
+async function inspectLocatedButton({ page, guarded }, routeName) {
   // Resolve again after every scroll: virtual rendering reassigns row IDs.
   const row = await inspectRouteRow({ page, guarded }, routeName);
   const selected = await guarded(() => page.locator('.vxe-table--fixed-right-wrapper .vxe-table--body-wrapper')
@@ -62,14 +62,40 @@ async function clickLocatedRow({ page, guarded }, routeName) {
       if (x < viewport.left || x >= viewport.right || y < viewport.top || y >= viewport.bottom
         || !button.contains(document.elementFromPoint(x, y))) return null;
       button.setAttribute('data-rd1-row-action', 'portrait');
-      return true;
+      return { x, y };
     }, row?.id));
   if (selected === 'duplicate-row') throw new SelectorError('Route 行不唯一');
   if (selected === false) throw new SelectorError('画像详情按钮不唯一');
-  if (selected !== true || !row?.inView) return 'not_found';
-  // A failed click must stop; it may already have reached DMS, so never fall back afterward.
-  try { await guarded(() => page.locator('[data-rd1-row-action="portrait"]').click({ timeout: 1000 })); }
-  catch (error) { error.portraitClickAttempted = true; throw error; }
+  return selected && row?.inView ? selected : null;
+}
+
+export function classifyClickWaitReason(message = '') {
+  if (/intercepts pointer events/i.test(message)) return 'intercepted';
+  if (/not stable/i.test(message)) return 'not_stable';
+  if (/not visible/i.test(message)) return 'not_visible';
+  if (/not attached|detached/i.test(message)) return 'detached';
+  if (/not enabled|disabled/i.test(message)) return 'not_enabled';
+  return 'unknown';
+}
+
+async function clickLocatedRow(context, routeName) {
+  const { page, guarded } = context;
+  const first = await inspectLocatedButton(context, routeName);
+  if (!first) return 'not_found';
+  await guarded(() => page.waitForTimeout(150));
+  const second = await inspectLocatedButton(context, routeName);
+  if (!second || Math.abs(first.x - second.x) > 1 || Math.abs(first.y - second.y) > 1) return 'not_found';
+  const before = context.counts().prodApiRequestCount;
+  try { await guarded(() => page.locator('[data-rd1-row-action="portrait"]').click({ timeout: 3000 })); }
+  catch (error) {
+    error.portraitClickAttempted = true;
+    error.click_wait_reason = classifyClickWaitReason(error.message);
+    error.click_retry = context.location.click_retry ?? 0;
+    context.location.click_wait_reason = error.click_wait_reason;
+    context.location.click_retry = error.click_retry;
+    error.prodApiBeforeClick = before;
+    throw error;
+  }
   return 'clicked';
 }
 
@@ -155,9 +181,9 @@ async function locateL5(context, routeName, routeId, deadline, state) {
   return locateL1(context, routeName, 0, Math.min(deadline, Date.now() + 5000));
 }
 
-async function clickPortraitRow(context, { routeName, routeId }) {
+async function locatePortraitRow(context, { routeName, routeId }) {
   const attempts = [], deadline = Date.now() + 30000;
-  context.location = { locateMethod: null, attempts };
+  context.location = { ...context.location, locateMethod: null, attempts };
   try {
     await locateL0(context);
     const index = context.body.data.records.findIndex(row => row.roadAreaName === routeName);
@@ -170,6 +196,7 @@ async function clickPortraitRow(context, { routeName, routeId }) {
           ? await locate(context, routeName, routeId, until, state)
           : await locate(context, routeName, index, until);
       } catch (error) {
+        if (state.restoreList) error.restoreList = state.restoreList;
         attempts.push(method);
         if (error.portraitClickAttempted || error.noFallback || !(error instanceof SelectorError || error.name === 'TimeoutError')
           || /画像详情按钮不唯一|Route 行不唯一/.test(error.message)) throw error;
@@ -186,6 +213,30 @@ async function clickPortraitRow(context, { routeName, routeId }) {
   } catch (error) {
     error.attempts = attempts;
     throw error;
+  }
+}
+
+async function clickPortraitRow(context, target) {
+  context.location = {};
+  let restoreList;
+  for (let retry = 0; retry <= 1; retry++) {
+    try {
+      const result = await locatePortraitRow(context, target);
+      return { ...result, restoreList: result.restoreList ?? restoreList };
+    }
+    catch (error) {
+      restoreList = error.restoreList ?? restoreList;
+      if (context.location.click_retry !== undefined) error.click_retry = context.location.click_retry;
+      if (!error.portraitClickAttempted || retry === 1) throw error;
+      // Observe through the same safety guard: circuit breakers and login failures still stop immediately.
+      for (let poll = 0; poll <= 10; poll++) {
+        if (context.counts().prodApiRequestCount !== error.prodApiBeforeClick
+          || await hasVisiblePortraitModal(context)
+          || context.counts().prodApiRequestCount !== error.prodApiBeforeClick) throw error;
+        if (poll < 10) await context.guarded(() => context.page.waitForTimeout(150));
+      }
+      context.location.click_retry = 1;
+    }
   }
 }
 
@@ -266,7 +317,12 @@ export async function captureRouteDetail({ browserType, statePath, baseUrl, stat
 
 export async function captureRouteDetailOnPage(context, { routeName, routeId }) {
     const { page, body, guarded, control, counts } = context;
-    const location = await control('画像详情', () => clickPortraitRow(context, { routeName, routeId }));
+    const location = await control('画像详情', () => clickPortraitRow(context, { routeName, routeId })).catch(error => {
+      for (const key of ['click_retry', 'click_wait_reason']) {
+        if (context.location?.[key] !== undefined) error[key] = context.location[key];
+      }
+      throw error;
+    });
     await confirmPortraitRoute(page, routeName, guarded);
     // Both listeners must be installed before the single difficulty-detail click.
     const detailResponse = (endpoint) => page.waitForResponse((item) =>

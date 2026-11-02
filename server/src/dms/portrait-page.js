@@ -1,3 +1,9 @@
+export async function hasVisiblePortraitModal({ page, guarded }) {
+  return await guarded(() => page.locator('.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]')
+    .evaluateAll(elements => elements.some(element => element.getClientRects().length > 0
+      && getComputedStyle(element).visibility !== 'hidden' && /路区画像详情|标签详情/.test(element.textContent))));
+}
+
 export class NeedsLoginError extends Error { constructor() { super('请重新运行 dms:login'); this.name = 'NeedsLoginError'; } }
 export class SelectorError extends Error { constructor(step, options) { super(`页面控件不可用：${step}`, options); this.name = 'SelectorError'; } }
 export class LoadLimitError extends Error { constructor() { super('路区画像请求数超过上限'); this.name = 'LoadLimitError'; } }
@@ -158,9 +164,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       else maxListRequests += pages - 1;
       const initialFilter = response.request().postDataJSON().transitStationCodeList;
       nextPage = previous => control('下一页', async () => {
-        const visible = await guarded(() => page.locator('.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]')
-          .evaluateAll(elements => elements.some(element => element.getClientRects().length > 0
-            && getComputedStyle(element).visibility !== 'hidden' && /路区画像详情|标签详情/.test(element.textContent))));
+        const visible = await hasVisiblePortraitModal({ page, guarded });
         if (visible) throw new SelectorError('画像弹窗未关闭');
         const buttons = page.locator('.vxe-pager .vxe-pager--next-btn:visible'), available = [];
         for (let i = 0; i < await guarded(() => buttons.count()); i++) {

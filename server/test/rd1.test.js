@@ -10,7 +10,7 @@ import { transformRouteDetail } from '../src/transform/route-detail.js';
 import { SchemaError } from '../src/transform/route-profile.js';
 import { StoreError } from '../src/store/route-profiles-file.js';
 import { saveRouteDetail, getRouteDetail, RouteDetailNotFoundError, RouteDetailInvalidError } from '../src/store/route-details-file.js';
-import { captureRouteDetail } from '../src/dms/route-detail-page.js';
+import { captureRouteDetail, classifyClickWaitReason } from '../src/dms/route-detail-page.js';
 import { captureRoutePortrait, NeedsLoginError, CaptureError, SelectorError, LoadLimitError, CircuitBreakerError } from '../src/dms/route-profile-page.js';
 import { runRouteDetailScrape } from '../bin/dms-scrape-route-detail.js';
 import { runRouteDetailsBatch } from '../bin/dms-scrape-route-details.js';
@@ -174,8 +174,10 @@ function pageHarness({ records, login = false, password = false, status, listReq
   countCapacityRequests = false, tabsDelay = 0, bothTabs = false, clickDelay = 0, postalStuck = false, dateStuck = false,
   separateGroups = false, missingLabel = false, inputOnly = false, classOnly = false,
   loadingMs = 0, resetScroll = false, ineffectiveMain = false, actualScroller = false, wheelWorks = false,
-  routeFilter = false, filterLabel = '路区名称', filteredRecords, duplicateRow = false } = {}) {
-  const page = new EventEmitter(), clicks = [], logs = [], waits = [];
+  routeFilter = false, filterLabel = '路区名称', filteredRecords, duplicateRow = false, movingButton = false,
+  actionFailures = 0, requestOnError = false, modalOnError = false, observeRequest = false } = {}) {
+  const page = new EventEmitter(), clicks = [], logs = [], waits = [], stabilityWaits = [];
+  let buttonChecks = 0, failedClicks = 0;
   const listeners = new Set();
   const capacityListeners = new Map();
   const emitCapacity = (endpoint, id = 900101) => {
@@ -275,13 +277,18 @@ function pageHarness({ records, login = false, password = false, status, listReq
         return value;
       }
       if (selector.includes('fixed-right-wrapper')) {
+        buttonChecks++;
         action.visible = !missingAction && waits.length >= actionDelay;
         action.rect = {left: 0, right: 20, top: waits.length < occludedFor ? 110 : (filtered ? 30 : 340) - position, bottom: waits.length < occludedFor ? 130 : (filtered ? 50 : 360) - position};
+        if (movingButton && buttonChecks === 2) { action.rect.top += 5; action.rect.bottom += 5; }
         return evaluate(fn, [fixedBody], arg, waits.length < hitBlockedFor);
       }
       if (selector.endsWith('.vxe-table--body-wrapper')) {
         table.className = 'vxe-table is--virtual-y' + (tabElapsed < loadingMs ? ' is--loading' : '');
         const value = evaluate(fn, [bodyNode], arg); scrolled = true; return value;
+      }
+      if (actionFailures && selector === '.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]' && !arg) {
+        return evaluate(fn, modalOnError ? [modal] : [], arg);
       }
       if (selector.includes('closing')) return evaluate(fn, [labelModal, capacityModal, modal].filter(node => node.getAttribute('data-rd3-modal')), arg);
       if (selector === '.dbuMicroSysApp-modal-content') {
@@ -293,7 +300,7 @@ function pageHarness({ records, login = false, password = false, status, listReq
       }
       return evaluate(fn, missingModal || modalEvaluations++ < modalDelay ? [] : [outer, modal, capacityModal], arg);
     },
-    click: async () => {
+    click: async (options) => {
       if (selector === '[data-rd1-target="difficulty"]') {
         assert.equal(link.getAttribute('data-rd1-target'), 'difficulty');
         assert.ok(modalBody.querySelectorAll('*').filter((node) => node !== link).every((node) => !node.getAttribute('data-rd1-target')));
@@ -331,6 +338,12 @@ function pageHarness({ records, login = false, password = false, status, listReq
         if (changedRowId) assert.equal(row.getAttribute('rowid'), 'new-row');
         assert.equal(action.getAttribute('data-rd1-row-action'), 'portrait');
         assert.equal(hiddenAction.getAttribute('data-rd1-row-action'), null);
+        assert.equal(options.timeout, 3000);
+        if (failedClicks < actionFailures) {
+          failedClicks++;
+          if (requestOnError) page.emit('request', detailRequest('getRoadAreaContent'));
+          throw Object.assign(new Error('locator.click: Timeout 3000ms exceeded\nCall log: element is not stable https://example.invalid/private'), { name: 'TimeoutError' });
+        }
         if (actionError) throw actionError;
         for (let i = 0; i < detailRequests; i++) page.emit('request', detailRequest('getRoadAreaContent'));
         if (status) page.emit('response', { url: () => 'https://example.invalid/prod-api/mock', status: () => status });
@@ -341,6 +354,12 @@ function pageHarness({ records, login = false, password = false, status, listReq
   page.keyboard = { press: async (key) => clicks.push(key) };
   page.mouse = { move: async () => {}, wheel: async (_x, y) => { if (wheelWorks) { position += y; row.scrolled = true; } } };
   page.waitForTimeout = async (milliseconds) => {
+    // Keep stability/observation waits separate from the existing render-phase clock.
+    if (milliseconds === 150) {
+      stabilityWaits.push({ milliseconds, clicks: [...clicks] });
+      if (observeRequest && failedClicks) page.emit('request', detailRequest('getRoadAreaContent'));
+      return;
+    }
     waits.push({ milliseconds, clicks: [...clicks] }); tabElapsed += milliseconds;
     if (pendingSelection && tabElapsed >= pendingSelection.at) { setTabs(pendingSelection.selected); pendingSelection = undefined; }
   };
@@ -382,10 +401,55 @@ function pageHarness({ records, login = false, password = false, status, listReq
   };
   const browserType = { launch: async () => ({ newContext: async () => ({ newPage: async () => page }), close: async () => { closes++; } }) };
   const options = { browserType, statePath: '/synthetic/not-read', baseUrl: 'https://example.invalid/areaDepiction', station: 'SFO01', log: (line) => logs.push(line) };
-  return { clicks, logs, waits, page, get closes() { return closes; },
+  return { clicks, logs, waits, stabilityWaits, page, get closes() { return closes; },
     run: (overrides = {}) => captureRouteDetail({ ...options, routeName: 'MOCK-001', ...overrides }),
     runPortrait: () => captureRoutePortrait(options) };
 }
+
+test('RD3-15 moving buttons wait for stability before a single click', async () => {
+  const h = pageHarness({ movingButton: true });
+  await h.run();
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+  assert.equal(h.stabilityWaits.length, 2);
+  assert.ok(h.waits.some(wait => !wait.clicks.includes('portrait-action')));
+});
+
+test('RD3-15 retries once only without requests or visible modals', async () => {
+  const h = pageHarness({ actionFailures: 1 });
+  const result = await h.run();
+  assert.equal(result.click_retry, 1);
+  assert.equal(result.locateMethod, 'L1');
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 2);
+  assert.equal(h.stabilityWaits.length, 12);
+  for (const options of [{ requestOnError: true }, { modalOnError: true }, { observeRequest: true }]) {
+    const stopped = pageHarness({ actionFailures: 1, ...options });
+    await assert.rejects(stopped.run(), error => error instanceof SelectorError && error.click_retry === 0
+      && error.click_wait_reason === 'not_stable');
+    assert.equal(stopped.clicks.filter(click => click === 'portrait-action').length, 1);
+  }
+});
+
+test('RD3-15 a retry after L5 preserves list restoration', async () => {
+  const h = pageHarness({ ineffectiveMain: true, routeFilter: true, actionFailures: 1 });
+  const result = await h.run();
+  assert.equal(result.click_retry, 1);
+  assert.equal(typeof result.restoreList, 'function');
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 2);
+  assert.equal(h.clicks.filter(click => click === 'query').length, 3);
+  assert.equal(h.clicks.at(-1), 'query');
+});
+
+test('RD3-15 a second failure stops and exports only classified click metadata', async () => {
+  const h = pageHarness({ actionFailures: 2 });
+  await assert.rejects(h.run(), error => error instanceof SelectorError && error.click_retry === 1
+    && error.click_wait_reason === 'not_stable');
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 2);
+  for (const [text, expected] of [
+    ['intercepts pointer events', 'intercepted'], ['element is not stable', 'not_stable'],
+    ['element is not visible', 'not_visible'], ['element is not attached', 'detached'],
+    ['element detached', 'detached'], ['element is not enabled', 'not_enabled'], ['other', 'unknown'],
+  ]) assert.equal(classifyClickWaitReason('Timeout\nCall log: ' + text + ' https://example.invalid/private'), expected);
+});
 
 test('RD3-14 L0 waits for loading to disappear and fails after ten seconds without clicking', async () => {
   const ready = pageHarness({ loadingMs: 2000 });
@@ -1045,7 +1109,7 @@ test('RD1 modal handles missing detail, sanitized errors, backdrop, Esc and stal
 test('RD1 frontend contains no HTML injection or external resources; modal scroll is bounded', async () => {
   for (const name of await fs.readdir(new URL('../../web/', import.meta.url))) {
     const source = await fs.readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /innerHTML|https?:\/\//, name);
+    assert.doesNotMatch(source.replaceAll('http://www.w3.org/2000/svg', ''), /innerHTML|https?:\/\//, name);
   }
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.match(css, /max-height: 85vh/); assert.match(css, /\.detail-table-scroll \{ overflow: auto/);

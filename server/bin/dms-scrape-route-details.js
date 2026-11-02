@@ -94,7 +94,9 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
       onPageFailure: async ({ page, error }) => {
         if (!['capture', 'close_modals', 'delay'].includes(phase)) return;
         diagnostic = await writePageFailureDiagnostic({ runtimeDir, page, error, currentRoute: current,
-          phase, now, fileOps: diagnosticFileOps, errorLog });
+          phase, now, fileOps: diagnosticFileOps, errorLog,
+          fields: { ...(current?.click_retry !== undefined ? { click_retry: current.click_retry } : {}),
+            ...(error.click_wait_reason !== undefined ? { click_wait_reason: error.click_wait_reason } : {}) } });
       } }, async context => {
       total = context.body.data.total;
       const pages = Math.max(1, Math.ceil(total / 100));
@@ -131,6 +133,7 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
             const result = await context.guarded(() => capture(context, { routeName: current.route_name, routeId: current.route_id }));
             current.locate_method = result.locateMethod ?? null;
             current.attempts = result.attempts ?? [];
+            if (result.click_retry !== undefined) current.click_retry = result.click_retry;
             checkInterrupted();
             phase = 'transform'; step = 'transform';
             const { route } = transformRouteDetail(result, { station: options.station, routeId: current.route_id, fetchedAt: now().toISOString() });
@@ -159,6 +162,8 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
             current.locate_method ??= context.location?.locateMethod ?? null;
             current.attempts = context.location?.attempts ?? current.attempts;
             current.attempts = error.attempts ?? current.attempts;
+            const retry = error.click_retry ?? context.location?.click_retry;
+            if (retry !== undefined) current.click_retry = retry;
             current.detail_requests = context.counts().routeDetailRequestCount;
             if (current.result !== 'written') {
               current.result = 'failed';

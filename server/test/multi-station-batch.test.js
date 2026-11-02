@@ -12,6 +12,19 @@ import { saveRouteDetail } from '../src/store/route-details-file.js';
 import { withPortraitPage, SelectorError } from '../src/dms/portrait-page.js';
 import { captureRouteDetailOnPage } from '../src/dms/route-detail-page.js';
 
+test('RD3-15 station failure diagnostics preserve classified retry metadata', async () => {
+  const h = batchFixture();
+  let diagnostic;
+  assert.equal(await h.run({ capture: async () => {
+    throw Object.assign(new SelectorError('portrait', { cause: new Error('Timeout https://example.invalid/private\nCall log: DO_NOT_LOG') }),
+      { click_retry: 1, click_wait_reason: 'not_stable' });
+  }, diagnosticFileOps: { mkdir: async () => {}, rename: async () => {}, rm: async () => {},
+    writeFile: async (_filename, value) => { diagnostic = JSON.parse(value); } } }), 1);
+  assert.equal(diagnostic.click_retry, 1);
+  assert.equal(diagnostic.click_wait_reason, 'not_stable');
+  assert.doesNotMatch(JSON.stringify(diagnostic), /https?:|private|DO_NOT_LOG|Call log/);
+});
+
 test('MS missed automatic list continues through explicit query and records observation', async () => {
   const h = batchFixture({ lists: { MFR01: [record('MFR01', 2)] }, automaticListMissed: true });
   assert.equal(await h.run(), 0);

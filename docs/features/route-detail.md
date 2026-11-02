@@ -395,6 +395,47 @@ Product Owner 要求：目标是只要人工能在当前 DMS 页面打开这条 
 - **记录**：每条 Route 在日志进度行和运行记录 `routes[]` 中记录 `locate_method`（`L1` / `L2` / `L3` / `L5`）以及失败时尝试过的级（例如 `attempts: ["L1", "L2", "L3", "L5:unavailable"]`）。汇总中统计各方法的使用次数，用来判断哪种方法最稳定。
 - 其他规则不变：429 / 5xx / session 失效 / 校验失败立即停止；成功一条立即写入；已有 cache 跳过；4 秒间隔。
 
+### RD3-15 「画像详情」点击稳定性 + 一次有限重试（Product Owner 2026-10-29 批准）
+
+背景：2026-10-29 西雅图片区刷新在 SEA01 的 `SEA01-008`（route_id 857）停止：`capture:SelectorError`，步骤「画像详情」，`locator.click: Timeout 1000ms exceeded`。失败截图显示：表格已加载、没有遮罩或弹窗，SEA01-008 已经滚到主体可视区的第一行，右固定列中的「画像详情」可见。也就是说，预检查（可视矩形和 `elementFromPoint` 命中）已经通过，但 Playwright 在 1 秒内没有完成点击。推测是滚动后虚拟渲染或右固定列同步还没稳定：按钮位置在移动，或者被标记的元素已经被重新渲染替换。日志只记录了错误第一行，无法确认具体原因。与 SC-Q4（SFV01-006）属于同一类问题。
+
+Product Owner 要求：不直接改为“失败就跳过”；先处理定位 / 等待问题；可以增加**一次**有限重试；第二次仍失败时按现有安全规则停止并记录。
+
+修改（单条和批量共用 `clickPortraitRow` / `clickLocatedRow`）：
+
+1. **点击前稳定性检查**：标记按钮后，间隔约 150ms 重新执行同一套检查（重新按 Route Name 取 `rowid`、右固定列唯一按钮、可视矩形、`elementFromPoint` 命中），并且两次按钮中心坐标差 ≤ 1px，才点击。不满足时按现有 L1–L3 的轮询继续等待，不点击，也不计入重试。
+2. 点击 timeout 从 1000ms 改为 3000ms。
+3. **一次有限重试（每条 Route 最多 1 次）**：点击报错后，观察约 1.5 秒。如果同时满足以下条件，判定这次点击没有到达 DMS，重新从 L0 / L1 开始定位并再点击一次：
+   - 从点击前开始，没有任何新的 `/prod-api/` 请求（`prodApiRequestCount` 没有变化）；
+   - 页面上没有出现「路区画像详情」/「标签详情」弹窗。
+
+   否则（有请求或有弹窗，即点击可能已经生效），按现有规则立即停止，不重试。
+4. 重试仍失败 → 按现有规则抛出 `SelectorError`（步骤「画像详情」），批次停止，写诊断文件。不增加其他重试，也不跳过。
+5. **诊断增强**（`station-batch-failure.json` / `route-details-batch-failure.json`）：
+   - 增加 `click_retry`（0 / 1）。
+   - 增加 `click_wait_reason`：从 Playwright 错误的 call log 中分类得到，取值 `intercepted`（intercepts pointer events）/ `not_stable` / `not_visible` / `detached`（not attached / detached）/ `not_enabled` / `unknown`。只记录分类，不记录原文和 URL。
+   - 运行记录 `routes[]` 中，重试过的 Route 记录 `click_retry: 1`。
+6. 其他规则不变：429 / 5xx / session 失效 / 校验失败立即停止；请求上限不变（重试的点击仍计入同一条 Route 的上限）；间隔不变。
+
+验收标准：
+- RD3-15-AC1：按钮位置在两次检查之间移动时，不点击，继续轮询；稳定后只点击一次。
+- RD3-15-AC2：第一次点击超时，且观察期间没有请求、没有弹窗 → 重新定位并点击一次；成功后继续抓取，记录 `click_retry: 1`。
+- RD3-15-AC3：第一次点击超时，但观察期间有 `/prod-api/` 请求或出现弹窗 → 立即停止，不重试。
+- RD3-15-AC4：重试后仍失败 → 停止，抛出 `SelectorError`，诊断中 `click_retry: 1`，并有 `click_wait_reason`。每条 Route 的点击次数不超过 2。
+- RD3-15-AC5：`click_wait_reason` 分类正确，没有原始文本和 URL；现有 RD3 / RD4 / 多站点测试全部通过。
+- RD3-15-AC6：真实验证（需要 Product Owner 同意后才访问 DMS）：只对 SEA01 运行必要范围的批次，确认 SEA01-008 能抓取，或者在新的诊断中得到具体的 `click_wait_reason`。
+
+#### RD3-15 实现记录（Implementation Notes，2026-10-29）
+
+- 共用按钮检查返回中心坐标，150ms 后重新按完整 Route Name 获取 rowid，重新验证右固定列行 / 按钮唯一性、可视区域和命中。两次中心的 x、y 差均不超过 1px 才调用 click，timeout 为 3000ms；移动或检查失败仍交回原定位轮询。
+- 点击前通过 context.counts 保存 prodApiRequestCount。点击异常后在同一 guarded 安全机制下最多观察 1500ms，期间出现请求或可见画像 / 标签弹窗立即原样抛出；无请求和弹窗时只允许从 L0 重定位一次。弹窗判断提取复用原分页检查；L5 首次点击失败后的列表恢复回调保留，避免重试成功后遗留名称筛选。请求预算、间隔、分页顺序和其他停止规则未改。
+- click_wait_reason 只输出六类枚举；失败包装为 SelectorError 后仍保留 click_retry / click_wait_reason。两个批次诊断调用通过 fields 写入有值的字段，路区批次 routes[] 保留重试次数。缓存 / 数据 schema、API、前端和依赖均未修改。
+- 新增六项测试：按钮移动后恢复；无请求和弹窗时重试成功及有请求 / 有弹窗 / 观察期间出现请求时禁止重试；第二次点击失败及六类原因；L5 重试后的列表恢复；路区批次运行记录和诊断；多站点诊断。DOM doubles 继续执行实际检查回调。原 doubles 的渲染时钟按 200ms 等待次数驱动，新增 150ms 等待使原 L0、按钮等待、RD4 标签 / tab 和 RD1 弹窗时序断言偏移；现将稳定性 / 观察等待单独记录在 stabilityWaits，保留原断言，并单独验证新等待次数与 3000ms click timeout。
+- 定向 `node --test server/test/rd1.test.js server/test/route-detail-batch.test.js server/test/multi-station-batch.test.js`：152/152 通过。最终 `npm.cmd test`：628/629 通过，唯一失败是未修改的 `server/test/boundaries-file.test.js:67`，Census features 期望 4542、实际 5147。本次代码 / 测试文件的 `git diff --check` 通过；全工作区检查发现本任务开始前 RD3-15 spec 第 411 行已有尾随空格，遵守保留要求未改动。无 lint / build scripts。
+- AC1–AC5 在 doubles、合成诊断及相关回归范围内通过；AC6 未执行，待后续授权真实验证。未访问 DMS、运行 dms:* / 刷新命令、修改数据库、写入凭据、commit、push 或部署。保留现有 RM12 修改及原 RD3-15 需求 / 验收标准；工作期间新出现的两个 WA geo 文件未作改动。
+
+- RD3-15-AC6 真实验证（2026-10-29，Product Owner 同意后由 Claude 执行）：`dms-scrape-stations --stations SEA01 --new-run`，run `f46835e1-57b2-4421-bee0-9a0f687be801`。SEA01 completed，23 条 Route（新抓 2 条：SEA01-008、SEA01-014；cache 跳过 21 条），完整性检查通过，定位全部是 L1，没有用到重试，没有安全停止。批次共 92 个请求，已恢复原 Station，scrape lock 已释放。SEA01-008 这次第一次点击就成功了，所以无法单独证明是稳定性检查起的作用（原来的失败也可能是偶发的）。如果以后再失败，诊断中的 `click_wait_reason` 会给出具体原因。
+
 ---
 
 ## RD4 — ZIP 日均领件量 + ZIP 表字段调整（**Approved**，Product Owner 2026-10-05）
