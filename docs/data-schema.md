@@ -268,3 +268,16 @@ CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数�
 - `/api/route-map/district` 复用单站地图组装，逐站合并 Route、边界及缺少边界的 ZIP；coverage 汇总 Station–Route–ZIP 行数，跨站重叠按各站分别计数，不擅自判定唯一归属。missing 行增加 `station`，现有单站 API 字段不变。
 - 快照非实时：响应中的 `stations[].fetched_at` 来自各 Station snapshot，地图按当前范围逐站显示更新时间，不生成虚假的统一数据时刻。详情难度仍使用既有 snapshot / detail join。
 - 配置展示顺序独立于批处理抓取顺序；不改变 cache schema、清洗规则或 Tableau 导出结构。
+
+## 12. Route Quotation / DSP 报价（RQ，Draft）
+
+- 规格：`docs/features/route-quotation.md`（Draft 2026-11-05，未实现、未建表）
+- 来源类型：手动维护的 DSP 报价表（「新OA报价模板（含电子围栏报价）」xlsx），后续经 Lark 同步。**不是 DMS**，不写入 DMS snapshot。
+- 粒度：一行 = 某条 Route 下一个 ZIP 的一次报价（逻辑键 `route_id + postal_code`，可有多条历史行）。样例核对确认同一 Route 下不同 ZIP 价格可以不同。
+- 来源文件是**增量变更**（降价、临时报价、切线邮编改动等），只含受影响的行，不是整站完整报价表。
+- 价格：7 个重量段（`0-1(lb)`、`1-5(lb)`、`5-10(lb)`、`10-20(lb)`、`20-30(lb)`、`30-40(lb)`、`40(lb)以上`）× 首票 / 续票，共 14 个，USD，两位小数；重量段标签按原表，不重新解释边界。
+- 有效期：`effective_from`（报价生效日期）、`end_date`（报价结束日期，原表值）；当前价格按洛杉矶自然日推导：有效期内 `effective_from` 最新者生效，支持未来生效。模板没有报价日期列（RQ-Q1）。
+- Station：由 `route_name` 在 DMS active snapshot 中解析出 `route_id` 与 Station；原表 Station 列写法不统一（`OAR` / `SFO02`），只保存原值，不从 `route_name` 解析。
+- 主界面字段：`current_first_0_1lb_price`（首票 0–1 lb）；完整结构只在价格详情接口返回。`DATA_SOURCE=json` 时为 null。
+- 新鲜度：报价的 `effective_from` / `imported_at` 独立于 DMS `fetched_at`。
+- 计划表：`quotation_weight_bands`、`route_quotation_imports`、`route_quotation_lines`、`route_quotation_prices`（migration 005，待批准）。字段与规则见规格第 4 节。
