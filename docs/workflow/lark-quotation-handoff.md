@@ -102,6 +102,20 @@
 - 非标准结构：CNO 无结束日期列表头；PRC、HNL、SAF、`LAX (LAV+ONT+VTC)`、`LAX暂停线路`、`总表解释`、`洛杉矶路线难度` 结构不同或不是报价表；PHX（报价版本）与 Seattle（旧）为隐藏表。
 - 结论：程序必须**按表头文字定位列**，并使用**显式的工作表白名单**（每个工作表单独校验表头），不能对整本表格套固定列号。
 
+### 5.2 全部工作表 dry-run 摸底（Claude 2026-11-06，只读）
+
+用 LQ-T3 的解析器 / 计划对 53 个工作表逐个 dry-run（数据库会话只读，未写库，未改 `.env`，未输出价格）。DMS 当前快照共 52 个站点。
+
+| 类别 | 工作表（sheet_id） | 结果 |
+|---|---|---|
+| 可用 | SFO（`uAaPvG`） | 261 / 269 导入（已上线） |
+| 加州标准表：首票列表头无「首票」字样 | LAX01（`O2LRJs`）、LAX02（`Xwb3cB`）、LAX03（`ZKax98`）、LAV（`3SFlo8`）、CNO（`XxMGq3`，另缺结束日期列）、南加卫星仓 BKD+VTC+SMX+PLM（`XMGqZP`）、FAT（`A3mUei`）、SAN（YUM）（`yzdY0G`）、SMF（`77WmFC`，整体左移一列）、SCK（`paR3us`）、OAR（`iPxkec`）、MOD（`IYjGLx`）、RNO（`UhQKJI`）、RDG（`f7mujs`） | 表头无效（缺 `first.*`）→ LQ-D8 |
+| SFV（`sZuGSc`） | T 列「报价生效日期」和 X 列「生效日期」两个生效日期列；**83 行数据两列全部为空**，U 列结束日期也全为空 | 表头无效 → LQ-Q11 |
+| 加州以外：日期为 `YYYY/M/D` | Denver（`7Tkccp`，159 行）、SLC（`9DqtcI`）、BOI（`xYf0rp`，7 行可导入）、TWF（`mkKf4A`）、PIH（`HJfndG`）、IDA（`GgHu0S`）、LGU（`AIHQOk`）、PHX 财务版本（`pHfo1Y`）、TUC（`g8SHi7`）、STG（`cUq2GC`）、ABQ（`uGYjxq`）、EUG（`He4lV1`）、PDX（`K5trn9`，5 行可导入）、GEG（`nLhNO3`）、YKM（`FzcmFb`）、CYS（`bN6Awd`）、TRC（`sSyIjX`）、MFR（`BRiHpQ`）、BIL（`K94Hw2`）、PAE（`fYBoA2`）、SEA 新版（`BzeCsf`）；Seattle 旧（`14Wssc`） | 几乎全部 `date_invalid` → LQ-D7 |
+| 其他数据问题 | Denver 5 行日期单元格的文本内容就是 `########`（原始值相同，无可恢复日期）；BOI 21 行无数据日期；IDA 9 行、BIL 15 行线路名为空（疑似合并单元格）；FMN（`gO6qvO`）3 行价格超过两位小数 | 拒绝（LQ-D13 / D14 / D15） |
+| DMS 无匹配线路 | IFP（`88QsOy`，DMS 有 IFP01 但线路名一条都对不上）、BZN（`UPoskC`）、GJT（`KC7qyp`） | 跳过（LQ-D18） |
+| 结构特殊 / 不是报价表 | 总表（`iwYw5J`，超过 5000 行）、总表解释（`c1qxNG`）、洛杉矶路线难度（`13Xevs`）、LAX暂停线路（`12UqON`）、LAX (LAV+ONT+VTC)（`0gYGxX`）、HNL（`U5E6B2`）、SAF（`ySnTv7`）、PRC（`joCLhH`）、CGZ+FLG（`vlXZud`）、LAS 财务版本（`11nToa`，缺邮编列）、PHX 报价版本（`L9dOxC`） | 本阶段不接（LQ-D17、LQ-D10） |
+
 ## 6. 字段映射
 
 以下按同类 xlsx 模板（22 列，A–V）整理，作为字段语义参考。**Lark SFO 分表的实际列名和列位置见 5.1 [已验证]**（比模板多一列「是否使用第二票半价」，备注移到 W 列，B 列为「转运中心/Sorting Center」）。程序将按**表头文字**定位列，不按固定列号。

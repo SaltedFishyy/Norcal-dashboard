@@ -235,3 +235,65 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 - UI 核对：3000 线路档案 SFO02 16 / 16 条单价；SFO01 31 条单价、5 条区间（如 SFO01-036 `$1.70–$1.85`）、`SFO01-002`（表中无报价）显示 `—`；价格详情显示 14 档价格、生效 / 结束日期和备注；地图 hover SFO01-004 / 94502 显示 `$1.85`，SFO01-002 / 94619 显示 `—`。3000 只读服务未重启（RQ-T2 API 早已加载，前端静态文件实时读取）。
 - Worker：确认无运行中的刷新后停止 3100 Node 进程，由 `run-service.ps1 -Name worker` 守护在 5 秒后自动重启；capabilities 含 `quotation_sync: true`，`/api/quotation-sync/status` 为 `enabled: true, interval_minutes: 60`。3100 数据状态显示「报价同步 · 定时：每 60 分钟 · 最近成功：2026-11-06 14:22 PST · 最近一次：无变化 · 拒绝行数：8」。
 - Product Owner 2026-11-06 确认功能及 UI。`SFO02-002` 8 行和 V 列 8 行备注文字由表格维护方修正后交给定时同步自然处理，不手工修改数据库（LQ-D6、LQ-Q10）。LQ-Q6 / Q7 保持 open，不阻塞当前功能。
+
+---
+
+## 13. 多工作表扩展（LQ-M，Product Owner 2026-11-06 授权实现）
+
+### 13.1 背景
+
+2026-11-06 对全部 53 个工作表做只读 dry-run 摸底（结果见 `docs/workflow/lark-quotation-handoff.md` 第 5.2 节）：只有 SFO（`uAaPvG`）可直接使用。阻碍主要来自两个系统性格式差异：加州分表的首票列没有「首票」字样；加州以外的分表日期写成 `YYYY/M/D`。本节在**不新增 migration、不改 schema** 的前提下扩展解析和同步范围。实现完成**不等于**把新工作表加入正式白名单：重新摸底后由 Product Owner 按批次决定加入哪些表（修改正式 `.env` 属另行确认）。
+
+### 13.2 决策（Product Owner 2026-11-06）
+
+| # | 决策 |
+|---|---|
+| LQ-D7 | 支持 `YYYY/M/D` 日期（1–2 位月 / 日、4 位年，日历日期必须有效），与现有 `M/D/YYYY` 并存；其他格式仍拒绝 |
+| LQ-D8 | 「按重量段报价」分组下、表头不含「续票 / second」的 7 个重量段识别为首票 |
+| LQ-D9 | 多工作表白名单；每个工作表独立同步 |
+| LQ-D10 | PHX 只用「财务版本」（`pHfo1Y`），「报价版本」（`L9dOxC`）排除 |
+| LQ-D11 | Seattle 只用「新版」（`BzeCsf`），「旧」表（`14Wssc`）排除 |
+| LQ-D12 | 工作表**没有结束日期列**时（如 CNO），所有行按长期有效 |
+| LQ-D13 | 生效日期为空的行拒绝；生效日 = 结束日允许，表示只生效当天（现有规则已满足，补测试） |
+| LQ-D14 | 价格继续只允许两位小数，三位小数拒绝（`price_precision`），不四舍五入（现有规则，不改） |
+| LQ-D15 | 线路名为空（如 IDA / BIL 合并单元格）不自动向下填充，继续拒绝（`route_missing`，现有规则） |
+| LQ-D16 | SFV 两个生效日期列不猜测，保持表头无效，待 Product Owner 看样例后决定（LQ-Q11） |
+| LQ-D17 | 结构特殊的表（总表、总表解释、洛杉矶路线难度、LAX暂停线路、LAX (LAV+ONT+VTC)、HNL、SAF、PRC、CGZ+FLG、LAS、PHX 报价版本）本阶段不接 |
+| LQ-D18 | DMS 中没有匹配线路的表（BZN、GJT、IFP）跳过，不做模糊匹配 |
+| LQ-D19 | **不使用报价日期**：不读取、不写入、不在 API 和页面展示，不参与任何价格判断；当前价格只看生效日期和结束日期。`route_quotation_lines.quotation_date` 列保留（不改 schema），Lark 同步始终写 NULL |
+
+### 13.3 技术说明
+
+- **`########` 日期（Claude 2026-11-06 核实）：** Denver 等表中的 `########` 是单元格里的**文本**本身；不带 `dateTimeRenderOption` 读取时原始值也是字符串 `########`，没有可恢复的日期。因此「读取原始值」无法实现，改为：日期单元格只由 `#` 组成时拒绝该行，原因代码 `date_placeholder`（与普通格式错误 `date_invalid` 区分，方便表格维护方定位）。不增加第二次读取。
+- **首票识别（LQ-D8）：** 表头扫描区域内存在含「按重量段」的单元格，且某列表头规范化后是重量段标签（`0-1(lb)`…`40(lb)以上`）、不含「续票 / second」也不含「首票 / first」时，视为首票该重量段。仍要求每个「票型 × 重量段」恰好一列，否则表头无效。没有「按重量段」标签的表不启用此规则。SFO 现有识别结果不变。
+- **结束日期列可选（LQ-D12）：** `end_date` 从必需列移到可选列。表头里有多个结束日期列仍判为表头无效。没有该列时所有行 `endDate=null`，并在同步结果 `notes` 中加入 `end_date_column_missing`（状态文件白名单同步放行）。
+- **白名单配置（LQ-D9）：** 新增 `LARK_QUOTATION_SHEET_IDS`（逗号分隔，去除空白，按出现顺序去重，每项 `^[A-Za-z0-9]+$`，最多 60 项）。未设置时使用 `LARK_QUOTATION_SHEET_ID`（单个，兼容当前正式配置）。两者都设置时，`LARK_QUOTATION_SHEET_ID` 必须包含在列表中，否则 `config_invalid`。两者都没有时 `config_invalid`。
+- **每表独立：** 每个工作表使用现有 `source_ref = lark:<token>/<sheet_id>`（格式不变，SFO 已有数据继续属于同一来源）、独立事务、独立 advisory lock、独立的 20% 大幅减少阈值；串行执行；一个表失败（读取 / 表头 / 数据库）不影响其他表，也不改动该表已有数据。工作表列表（sheets query）每次运行只查一次。跨表同键（同 route + ZIP + 生效日期）按现有 `conflict_other_source` 拒绝后到的行（现有 `readOtherSourceKeys` 已把其他 `source_ref` 视为其他来源）。
+- **移出白名单：** 被移出白名单的工作表不再同步，其已导入的行**保持不变**（不自动作废）。作废需另行决定。在 spec 和部署文档中写明。
+- **CLI：**
+  - `quotes:lark-check`：检查白名单内每个表，输出每表结果数组。
+  - `quotes:sync-lark [--dry-run] [--sheet <id> ...]`：默认处理全部白名单；`--sheet` 可重复，限定为指定表。**非 dry-run 时 `--sheet` 只能是白名单内的表**，否则 `invalid_arguments`；dry-run 时允许任意 sheet ID（用于摸底）。输出 `{ result, sheets: [每表摘要], totals }`，每表摘要沿用现有字段（不含价格）。退出码：所有表都是 `completed / partial / unchanged` 时为 0，否则为 1。
+- **整体结果：** 所有表成功（含 partial / unchanged）→ 按现有结果合并（有任一 partial → `partial`；全部 unchanged → `unchanged`；否则 `completed`）；有表失败 → `partial_failure`；全部失败 → 取 `failed`。
+- **状态文件：** `quotation-sync-status.json` 升级为 `schema_version: 2`：`last_attempt` 增加 `sheets`（每表 `sheet_id`、`title`、`result`、`stage`、`error_kind`、`counts`、`rejected_count`、`warning_count`、`notes`、`import_id`），`last_success` 只在整体结果不是 `failed` 时更新。读取时兼容 v1（视为单表）。投影白名单同步扩展：`title` 为字符串且截断到 80 字符，其他字段沿用现有白名单。
+- **3100 状态行：** 保持一行：「报价同步 · 定时：每 60 分钟 · 最近成功：<时间> · 最近一次：<整体结果> · 工作表：<成功数>/<总数> · 拒绝行数：<合计>」。有失败表时追加「失败：<表名>（<原因>）」，最多 3 个，其余显示「等 N 个」。
+- **报价日期（LQ-D19）：** 删除价格详情中的「报价日期」行；`/api/route-quotations` 响应中删除 `quotation_date`；DB 数据源不再 SELECT 该列。解析器不读取报价日期列（当前本来不读，补测试：表头含「报价日期」时不影响识别和结果）。
+
+### 13.4 验收标准
+
+- **LQ-AC10** 日期：接受 `M/D/YYYY` 和 `YYYY/M/D`（1–2 位月 / 日），拒绝无效日历日期、2 位年份、`YYYY-MM-DD`、数字序列号；`#` 组成的单元格拒绝为 `date_placeholder`；生效日 = 结束日接受；生效日为空拒绝。
+- **LQ-AC11** 首票表头：用已验证的加州表头结构（如 LAX01：F–L 为 `0 - 1(Ib)`…，M–S 为「续票价格 …」，第 2 行有「按重量段报价」）及 SMF（整体左移一列，R 列为「40(Ib)以上)/Quotation for second…」）作为 fixture 能正确识别 14 列；没有「按重量段」标签时裸重量段不识别；SFO fixture 结果不变；SFV 结构（两个生效日期列）仍为表头无效。
+- **LQ-AC12** 结束日期列缺失（CNO 结构）：表头有效，所有行长期有效，notes 含 `end_date_column_missing`；两个结束日期列 → 表头无效。
+- **LQ-AC13** 配置：`LARK_QUOTATION_SHEET_IDS` 解析、去重、校验、上限；与 `LARK_QUOTATION_SHEET_ID` 的兼容和冲突规则。
+- **LQ-AC14** 多表同步：串行；每表独立事务和 `source_ref`；一表失败不影响其他表且不改其数据；跨表同键拒绝；整体结果合并规则；测试库集成测试覆盖两张表。
+- **LQ-AC15** CLI：`--sheet` 规则（dry-run 任意、正式仅白名单）、多表输出、退出码；`quotes:lark-check` 多表输出。
+- **LQ-AC16** 状态文件 v2 + 兼容 v1；3100 状态行显示工作表成功数和失败表（最多 3 个）；所有结果文案有中文。
+- **LQ-AC17** 报价日期从 API、DB 数据源查询和价格详情中移除；相关现有测试更新。
+- **LQ-AC18** 不新增 migration、不改 schema、不新增依赖；`npm test` 全部通过；`git diff --check` 通过；不修改正式 `.env`、不访问真实 Lark 或正式数据库。
+
+### 13.5 任务
+
+| 任务 | 内容 | 执行者 | 依赖 / 停止条件 |
+|---|---|---|---|
+| LQ-T7 | 第 13.3 节全部改动及测试（LQ-AC10–AC18） | Codex | Product Owner 2026-11-06 已授权 |
+| LQ-T8 | 用新代码对全部 53 个工作表重新 dry-run 摸底，按「可直接接入 / 仍需业务确认 / DMS 不存在而跳过 / 结构特殊暂不支持」分类汇报 | Claude | LQ-T7；只读 |
+| LQ-T9 | 把选定工作表加入正式白名单、首次同步、重启 Worker | Claude | **另行授权**（修改正式配置、写正式库、服务重启） |
