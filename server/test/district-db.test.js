@@ -19,14 +19,14 @@ async function viewRows(client) {
   return rows;
 }
 
-test('DA-T1 migrations 001–004 apply in order and skip on repetition', { skip: dbSkip }, async t => {
+test('DA-T1 migrations 001–005 apply in order and skip on repetition', { skip: dbSkip }, async t => {
   const db = await createTestDb(t), schema = db.schema + '_order', results = [];
   try {
     await migrate(db.owner, { ...db.options, schema, onResult: row => results.push(row) });
-    assert.deepEqual(results, ['001', '002', '003', '004'].map(version => ({ version, result: 'applied' })));
+    assert.deepEqual(results, ['001', '002', '003', '004', '005'].map(version => ({ version, result: 'applied' })));
     results.length = 0;
     await migrate(db.owner, { ...db.options, schema, onResult: row => results.push(row) });
-    assert.deepEqual(results, ['001', '002', '003', '004'].map(version => ({ version, result: 'skipped' })));
+    assert.deepEqual(results, ['001', '002', '003', '004', '005'].map(version => ({ version, result: 'skipped' })));
   } finally { await db.owner.query(`DROP SCHEMA IF EXISTS ${pg.escapeIdentifier(schema)} CASCADE`); }
 });
 
@@ -167,7 +167,7 @@ test('DA-T1 real seed counts order skip reasons and rejection of existing target
   assert.deepEqual(await viewRows(db.reader), before);
   // Independent targets prevent import; membership rows also require their FK parents.
   for (const name of tables) {
-    await db.owner.query('TRUNCATE district_stations, known_stations, districts, district_config_version');
+    await db.owner.query('TRUNCATE route_quotation_prices, route_quotation_lines, route_quotation_imports, district_stations, known_stations, districts, district_config_version');
     if (name === 'districts') await db.owner.query("INSERT INTO districts VALUES ('fixture','x','x',0)");
     if (name === 'known_stations') await db.owner.query("INSERT INTO known_stations(code) VALUES ('ZZZ01')");
     if (name === 'district_stations') {
@@ -185,7 +185,7 @@ test('DA-T1 seed includes historical unassigned codes and rolls back database fa
   assert.equal((await seed(db)).known_stations, 55);
   assert.equal((await db.reader.query("SELECT * FROM v_known_stations WHERE code='ZZZ01'")).rowCount, 1);
   assert.equal((await db.reader.query("SELECT * FROM v_district_stations WHERE station_code='ZZZ01'")).rowCount, 0);
-  await db.owner.query('TRUNCATE district_stations, known_stations, districts, district_config_version');
+  await db.owner.query('TRUNCATE route_quotation_prices, route_quotation_lines, route_quotation_imports, district_stations, known_stations, districts, district_config_version');
   // Force a late database failure after inserts, rather than failing file validation before BEGIN.
   await db.owner.query('ALTER TABLE district_config_version ADD CHECK (version > 1)');
   await assert.rejects(seed(db), { code: '23514' });

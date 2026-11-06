@@ -1,6 +1,6 @@
 # Route Quotation / DSP 报价（RQ）
 
-- **状态：** Approved（设计定稿，Product Owner 2026-11-05）。**未写 migration，未改代码，未建角色，未授权实现。** 实现、正式库 migration、创建角色、导入真实报价均需另行授权。
+- **状态：** In review — RQ-T1 代码与测试完成，待 Product Owner 确认提交（设计 Approved，Product Owner 2026-11-05；同日授权实现 RQ-T1）。RQ-T2 至 T4、正式库 migration、创建角色、导入真实报价均需另行授权。
 - **相关文档：** `docs/data-schema.md` 第 12 节、`docs/features/central-db.md`（数据库角色 / 视图模式）、`docs/features/route-map.md`（地图 tooltip / 选中面板）、`docs/features/route-detail.md`（Route / ZIP 标识）、`docs/open-questions.md`「Route Quotation」。
 - **不做（本阶段）：** Lark Bot / Lark Sheet 同步、xlsx 解析依赖、电子围栏附加费（模板第二个 sheet）、历史价格查询 UI、Station / District 价格汇总、写入 UI、DMS 改动、Route / ZIP snapshot 改动。
 
@@ -147,7 +147,8 @@ route_quotation_prices        价格明细（长表）
 - `v_route_quotation_first_0_1lb`：只有 `route_id, postal_code, price`，供主界面查询。
 - `v_route_quotation_upcoming`：每个键最早的未来生效行（详情中提示「下次生效」）。
 - `v_quotation_weight_bands`。
-- reader 只读上述视图；新增写入角色 `nc_quotation`（与 `nc_warehouse` / `nc_district` 同模式：仅 INSERT 和指定列 UPDATE，读取 `v_active_routes` 以解析 Route）。新增角色和执行 migration 需 Product Owner 批准（`AGENTS.md` 第 2.5 节）。
+- reader 只读上述视图。
+- 写入角色 `nc_quotation`（与 `nc_warehouse` / `nc_district` 同模式：仅 INSERT 和指定列 UPDATE，读取 `v_active_routes` 以解析 Route）**延后到 RQ-T4**，届时用 migration 006 授权（2026-11-05 调整：migration 模板按角色占位符替换，测试库需预先存在对应角色；RQ-T1 不创建任何角色，所以 005 只授 reader 读视图）。在此之前没有应用角色能写入报价表。新增角色和执行 migration 需 Product Owner 批准（`AGENTS.md` 第 2.5 节）。
 
 ## 5. Join 与汇总规则
 
@@ -303,7 +304,7 @@ json 数据源实现同一接口并返回空结果。不把汇总逻辑写进 `r
 
 ## 10. 验收标准（实现阶段）
 
-- **AC1** migration 只新增 4 张表、4 个视图和 `nc_quotation` 角色，不修改现有表；reader 只能读视图。
+- **AC1** migration 005 只新增 4 张表、4 个视图和 reader 的视图读权限，不修改现有表、不引入新角色；reader 只能读视图，不能读写基表。（写入角色在 RQ-T4 / migration 006。）
 - **AC2** 当前价格按 4.2 推导：用固定日期的测试覆盖正常替换、未来生效、临时报价覆盖与结束后恢复、结束日当天仍有效、`end_date` 为空长期有效、过期无后继、作废行；数据库拒绝同键同生效日期的第二条有效行。
 - **AC3** 日期以 `America/Los_Angeles` 自然日计算（测试覆盖 UTC 跨日时刻）。
 - **AC4** `/api/route-profiles` 返回单值 / 区间 / 部分缺价 / 全部缺价四种情况的字段正确。
@@ -324,9 +325,23 @@ RQ-Q1、Q2、Q7、Q9 已由 Product Owner 回答（RQ-D11 至 RQ-D15）。其余
 
 | 任务 | 内容 | 依赖 |
 |---|---|---|
-| RQ-T1 | migration 005 + 视图 + 角色定义 + DB 测试（仅测试库），不在正式库执行、不创建正式角色 | 实现授权 |
+| RQ-T1 | migration 005（表 + 重量段种子 + 视图 + reader 授权）+ DB 测试（仅测试库），不在正式库执行、不创建任何角色 | 已授权（PO 2026-11-05） |
 | RQ-T2 | `server/src/quotations/` 纯函数 + 数据源 + API 字段 + 详情接口 + parity 调整，fixture 测试 | RQ-T1 |
 | RQ-T3 | 线路档案列、地图 tooltip / 面板、价格详情组件 | RQ-T2 |
-| RQ-T4 | 导入入口（Lark 或正式报价文件，RQ-D15），按第 8 节行级部分导入；如需 xlsx 解析依赖另行批准 | 数据源准备好后另行授权 |
+| RQ-T4 | migration 006 写入角色 `nc_quotation` + 导入入口（Lark 或正式报价文件，RQ-D15），按第 8 节行级部分导入；如需 xlsx 解析依赖另行批准 | 数据源准备好后另行授权 |
 
 正式库执行 migration、创建角色、导入真实报价均需 Product Owner 单独批准。
+
+## 13. 实现记录（Implementation Notes）
+
+### RQ-T1（2026-11-05）
+
+- 新增 `005_route_quotations.sql`：4 张报价表、7 行重量段种子、4 个只读视图。当前报价和未来报价统一使用洛杉矶自然日，按第 4 节规则选择最新有效行 / 最早未来行；价格以 JSONB 保留首票、续票各 7 个重量段。
+- 实现 Station 外键、5 位 ZIP 校验、导入内键唯一、未作废行同键同生效日期部分唯一索引、结束日期校验、非负计数 / 价格及来源 / 状态 / 票型 / 重量段约束。增加 `void_reason IS NULL OR voided_at IS NOT NULL`，防止未作废行带作废原因。Route 不加外键。
+- 撤销 PUBLIC 对新增表 / 视图的权限，只给现有 reader 授予 4 个视图的 SELECT；不新增角色或写入授权，不改变 001–004、迁移执行器和现有表 / 视图。与第 4 节设计无偏差。
+- 新增 `route-quotation-db.test.js`，通过现有 `createTestDb` 在 `nc_ops_test` 随机 schema 中验证种子、权限隔离、日期选择 / 临时报价恢复 / 作废、约束、14 个价格与安全投影；日期取数据库洛杉矶当日一次，另验证 UTC 午夜跨日。`server/test/index.js` 仅追加该测试 import，保留已有其他任务的注册。
+- 本轮授权的现有测试调整：`refresh-migration.test.js` 第 22、26、40 行结果列表和第 41 行版本列表包含 005，第 23 行 BEGIN / COMMIT 次数各从 4 改为 5；`warehouse-db.test.js` 第 23、32、34 行版本列表包含 005；`district-db.test.js` 第 26、29 行版本列表包含 005，第 22 行标题更新为 001–005。未发现其他需要调整的同类断言，未改变这些测试的其他逻辑。
+- 报价 DB 测试单独执行：4/4 通过，无跳过。未运行 `db:migrate`、未连接非测试库、未创建角色、未部署到正式库。
+- 全量测试发现现有 district 测试的两处清理逻辑与新增 Station 外键不兼容：`district-db.test.js` 第 170、188 行只 TRUNCATE 原有表，PostgreSQL 因 `route_quotation_lines` 引用 `known_stations` 而报 `0A000`。已单独复现两项失败；修改清理 SQL 不属于本轮仅允许的 migration 数量 / 版本断言例外，故未修改。经 Product Owner 2026-11-05 选择，由 Claude 直接修复：两处 TRUNCATE 增加 `route_quotation_prices, route_quotation_lines, route_quotation_imports`，外键保留。修复后 `npm test` 688/688 通过，0 跳过（含真实测试库 DB 测试）。
+- 运维注意：`route_quotation_lines.station_code` 引用 `known_stations`。今后若手动重置 District 种子（TRUNCATE / 删除 `known_stations`），必须同时处理报价表，否则会被外键拒绝。正式代码中没有 TRUNCATE / DELETE `known_stations` 的路径。
+- 已知覆盖缺口：数据库测试无法控制 `now()`，UTC / 洛杉矶跨日只验证了日期换算表达式，没有在跨日时刻实际查询视图（AC3 部分覆盖）。

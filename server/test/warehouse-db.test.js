@@ -20,7 +20,7 @@ test('WH-T1 real migrations apply in order and temporary schema cleanup removes 
   try {
     const results = [];
     await migrate(db.owner, { ...db.options, schema, onResult: r => results.push(r) });
-    assert.deepEqual(results, ['001', '002', '003', '004'].map(version => ({ version, result: 'applied' })));
+    assert.deepEqual(results, ['001', '002', '003', '004', '005'].map(version => ({ version, result: 'applied' })));
   } finally {
     await db.owner.query(`DROP SCHEMA IF EXISTS ${pg.escapeIdentifier(schema)} CASCADE`);
   }
@@ -29,9 +29,9 @@ test('WH-T1 real migrations apply in order and temporary schema cleanup removes 
 
 test('WH-T1 migration, warehouse CRUD, constraints and role isolation', { skip: dbSkip }, async t => {
   const db = await createTestDb(t), results = [];
-  assert.deepEqual((await db.owner.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r => r.version), ['001', '002', '003', '004']);
+  assert.deepEqual((await db.owner.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r => r.version), ['001', '002', '003', '004', '005']);
   await migrate(db.owner, { ...db.options, onResult: r => results.push(r) });
-  assert.deepEqual(results, ['001', '002', '003', '004'].map(version => ({ version, result: 'skipped' })));
+  assert.deepEqual(results, ['001', '002', '003', '004', '005'].map(version => ({ version, result: 'skipped' })));
   const row = (await db.warehouse.query(insert, values)).rows[0];
   assert.match(row.id, /^[a-f0-9-]{36}$/);
   assert.ok(row.created_at instanceof Date); assert.ok(row.updated_at instanceof Date);
