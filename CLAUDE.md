@@ -147,7 +147,7 @@ DMS / browser automation → transform / normalization → store → API → fro
 - 删除或覆盖文件前先查看目标内容。
 - 如实报告：检查失败或跳过了就说明，不夸大结果。
 - 文档、代码、实际行为不一致时，先指出并请 Product Owner 决定，不自行选择一方。
-- 用中文回复（`AGENTS.md` 第 21 节）。
+- 用中文回复（`AGENTS.md` 第 21 节）。**向 Product Owner 汇报时必须使用中文**（Product Owner 2026-11-06），包括进度说明、审查结果、Plan 完成汇报和停止条件汇报；代码、命令、文件路径、字段名等保持原文。
 
 ---
 
