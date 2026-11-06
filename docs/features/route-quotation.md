@@ -259,6 +259,8 @@ json 数据源实现同一接口：`readCurrentFirstPrices` 返回空，`readRou
 
 ## 8. 导入校验（为后续 Lark / 文件导入定义，本阶段不实现）
 
+> **Lark 来源例外（Product Owner 2026-11-06，LQ-D2）：** `source='lark_sheet'` 的同步采用镜像语义（同键内容不同 → 作废旧行并写入新行；表格中删除的键 → 作废），见 `docs/features/lark-quotation-sync.md` 第 5 节。本节与 RQ-D13 的冲突规则对手动文件导入不变。
+
 ### 8.1 部分导入还是整批拒绝（评估结论：行级部分导入）
 
 现有「整批」语义来自 DMS snapshot：一个 Station 的 Route 列表互相关联（同站 ZIP 唯一归属），缺一行就是不完整的快照，所以 snapshot 必须整批生效。报价数据不同：
