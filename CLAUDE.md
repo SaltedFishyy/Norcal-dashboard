@@ -58,7 +58,7 @@ Product Owner 确认需求后：
 
 ## 4. 启动实现（Codex）
 
-**只有 Product Owner 明确授权进入实现阶段后，才启动 Codex 或输出正式交接**（`AGENTS.md` 第 7.4 节）。不要求固定措辞，“开始做吧”“交给 Codex 实现”“可以开始写了”等语义明确的表达都算；讨论需求、确认理解、保存 spec 不算。拿不准时先问。
+**只有 Product Owner 明确授权进入实现阶段后，才启动 Codex 或输出正式交接**（`AGENTS.md` 第 7.4 节）。不要求固定措辞，“开始做吧”“交给 Codex 实现”“可以开始写了”等语义明确的表达都算；讨论需求、确认理解、保存 spec 不算。拿不准时先问。授权的粒度（单个任务还是整个 Plan）见第 4.1 节。
 
 启动时（详见 `docs/workflow/claude-codex-handoff.md`）：
 
@@ -67,6 +67,32 @@ Product Owner 确认需求后：
    - **Mode A（自动，优先）**：`bash scripts/codex-handoff.sh <task.md>`。完成后读 `last-message.md`、`changes.diff`、实际文件，按第 5 节审查；有问题时写 review 文件，用 `--fix ... --round N` 自动交回，最多两轮。预计超过 10 分钟的任务在后台运行。启动后用 `node scripts/codex-watch.mjs --window <run-dir>` 给 Product Owner 打开只读观察窗口（可选旁观者，不影响交接；失败时给出手动命令，见 `docs/workflow/claude-codex-handoff.md` 第 7 节）。
    - **Mode B（手动，fallback）**：Mode A 失败，或任务需要 Codex 沙箱做不到的操作（如联网安装依赖）时，Claude 输出完整的 Codex task brief（`AGENTS.md` 第 7.2 节），由 Product Owner 在 Codex CLI 中执行，执行后通知 Claude 审查。
 3. 脚本或 Codex 调用失败时，原样报告错误（`stderr.log`、`exit-code`），不得声称交接成功；然后改用 Mode B。
+
+### 4.1 Plan 级连续授权 / Autonomous Continuation（Product Owner 2026-11-06）
+
+目标：没有新的产品决策或高风险操作时，Claude 主动把已批准的计划跑完，而不是每一步等 Product Owner 批准。本节不改变 `AGENTS.md` 的优先级和第 2.5 节风险分级。
+
+1. **一次授权覆盖整个 Plan。** Product Owner 明确批准某个 Feature / Plan 进入实现后，Claude 可以在已批准范围内连续执行全部计划步骤，例如 `T1 → review → T2 → review → T3 → …`，不再逐步询问“是否继续”“是否启动下一步”“是否交给 Codex”。当前步骤 review 通过后直接启动下一步。
+2. **范围判断。**
+   - 授权时 spec 任务表（如 feature spec 的 Codex 任务拆分）中列出的任务属于范围内。
+   - Product Owner 只点名单个任务（如“开始实现 RQ-T2”）时，只授权该任务；说“按 Plan 跑完”“连续做”“整个 Feature 开始实现”等时为整个 Plan。
+   - spec 中标明“另行授权”的任务、或本身需要第 3 条停止条件中操作的任务，不因 Plan 授权而自动开始。
+   - 开始执行时用一句话说明所理解的范围（陈述，不是提问）。
+3. **范围内 Claude 可以自行：** 启动 Codex；review 结果；把普通 bug 交回 Codex 修复（仍最多两轮，第 5 节）；运行 test / build / lint / `git diff --check`；执行普通 Bash / PowerShell 诊断命令；更新对应 spec / docs / 实现记录；对明显安全、符合 spec 的普通技术选择自行决定并在文档中记录；继续下一个任务。
+4. **Stop Conditions：以下情况必须停下来问 Product Owner。**
+   - 正式数据库 migration / data migration
+   - 正式部署或服务重启
+   - 删除文件、删除数据或其他 destructive operation
+   - permissions / accounts / secrets / credentials 修改
+   - dependency 新增、升级、删除
+   - 原 Plan 未授权的 DMS 抓取，或扩大抓取范围
+   - scope 明显扩大或新增功能
+   - spec / requirement 冲突，或无法确定正确的业务规则
+   - 重大安全、数据完整性、架构风险
+   - 两轮修复后仍未通过（`AGENTS.md` 第 7.4 节）；或测试失败且两轮内无法修复
+   - 交接需要改用 Mode B（需要 Product Owner 在 Codex CLI 中手动执行）
+5. **Commit / push 不因连续执行而放宽。** 仍按第 6 节和 `AGENTS.md` 第 2.5 节：低风险文档改动可直接 commit + push；代码 / schema 等改动在执行过程中先不提交，在 Plan 完成或遇到停止条件时，按任务列出提交清单（含需要部分暂存的共享文件），由 Product Owner 一次确认。
+6. **汇报。** 只在遇到停止条件或整个 Plan 完成后集中汇报：完成了哪些任务、每个任务的验收结果、修复轮次、仍存在的问题、待确认的提交清单、UI 预览方法和待签字项。执行中可以发简短进度说明，但不等待回复。
 
 ---
 
@@ -77,9 +103,9 @@ Codex 完成后：
 1. 读取 Codex 的总结、`git diff`（或 handoff 产物中的 `changes.diff`）和实际代码。
 2. 按 `AGENTS.md` 第 8 节清单逐条对照 spec 和验收标准。
 3. 需要时本地运行页面检查（`AGENTS.md` 第 9、10 节）。
-4. 有问题时写清楚：位置、现象、期望、对应验收标准、建议修复方式，交回 Codex。**最多两轮修复**，之后向 Product Owner 汇报。如果发现需求冲突、架构决策、数据/权限问题、重大安全风险或其他需要 Product Owner 决定的问题，立即停止修复并汇报，不让 Codex 猜。
+4. 有问题时写清楚：位置、现象、期望、对应验收标准、建议修复方式，交回 Codex。**最多两轮修复**，之后向 Product Owner 汇报（这是第 4.1 节的停止条件之一）。如果发现需求冲突、架构决策、数据/权限问题、重大安全风险或其他需要 Product Owner 决定的问题，立即停止修复并汇报，不让 Codex 猜。
 5. 审查时不大规模重写 Codex 的代码。
-6. UI 功能：告诉 Product Owner 如何本地预览；Product Owner 签字前不算完成。
+6. UI 功能：告诉 Product Owner 如何本地预览；Product Owner 签字前不算完成。按第 4.1 节连续执行时，不为等待签字而停下，签字项集中在 Plan 完成汇报中；只有后续任务依赖该 UI 决定时才先停下确认。
 
 ### 5.1 代码健康 / 架构检查（Product Owner 2026-10-02）
 
@@ -116,6 +142,7 @@ DMS / browser automation → transform / normalization → store → API → fro
   - 代码逻辑、schema / migration、爬虫逻辑或抓取范围、权限 / 账号 / secret、部署 / 服务重启、dependency 变更、数据迁移、删除文件，以及可能影响现有功能或数据的操作：先给 Product Owner review 或明确确认。
   - 永远不提交 `.env`、密码 / 连接串、DMS session / auth state、runtime data、日志、secrets。
   - push 会带上所有未推送的 commit；其中如果有尚未获准 push 的高风险 commit，先问。
+  - 第 4.1 节的连续执行不绕过以上分级：连续执行授权的是“做”，不是“提交高风险改动”。
 - 不修改产品功能代码（`nc-ops-console-main/`），除非 Product Owner 明确要求 Claude 直接改。轻量改动也一样：Claude 判断属于 lightweight change 后，可以不建 feature spec，但仍然给 Codex 一个简短、明确的 task brief，由 Codex 修改并检查，Claude 做简要 review（`AGENTS.md` 第 7.1 节）。
 - 删除或覆盖文件前先查看目标内容。
 - 如实报告：检查失败或跳过了就说明，不夸大结果。
@@ -140,3 +167,4 @@ DMS / browser automation → transform / normalization → store → API → fro
 4. 只有确实需要访问仓库外的文件（如 `%LOCALAPPDATA%` 下的 runtime 目录）时才用绝对路径。
 5. 不要关闭 `permissions.blockReadsOutsideWorkingDirectories`，保留这层安全保护。
 6. 仓库内的普通 Bash 命令继续按现有权限自动执行，不制造不必要的确认提示。
+7. 权限确认（Product Owner 2026-11-06）：Claude 自己可以安全判断的普通继续确认，不转给 Product Owner；仓库内读文件、test、`git status`、`git diff` 等直接执行。若某个低风险命令被 Claude Code 权限系统反复强制确认，先检查它是否属于已允许的低风险类别，符合时建议加入现有 allow 规则（修改 settings 前告知 Product Owner），不要把普通权限提示当作产品决策反复询问。
