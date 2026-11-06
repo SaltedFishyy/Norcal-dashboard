@@ -38,6 +38,7 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 | 写入角色 | 未建（RQ 第 4.3 节延后到 RQ-T4） | LQ-T1 |
 | Worker | `server/src/worker/worker.js`，无定时任务机制 | LQ-T4 增加可配置定时同步 |
 | Legacy ZIP 价格表 `nc-ops-console-main/data/price_adjustments.csv` | 旧站点使用 | 不动 |
+| Lark 表格结构 | 2026-11-06 只读验证完成：链接中的 `iwYw5J` 是公式汇总的「总表」（只有 7 个重量段、无续票、无日期），不可用；SFO 分表 `uAaPvG` 结构与 RQ 模型一致；53 个分表表头位置 / 列位置不统一 | 按分表白名单 + 表头文字定位读取（交接文档 5.1；LQ-Q9） |
 
 ## 4. 匹配规则
 
@@ -131,7 +132,7 @@ RQ 原设计面向「增量变更文件」（每份文件只含变更行）。La
 
 | 任务 | 内容 | 执行者 | 依赖 / 停止条件 |
 |---|---|---|---|
-| LQ-T0 | Lark 后台配置、表格授权、本机 `.env` 填写（见交接文档） | Product Owner / 管理员（可由 ChatGPT 协助后台操作） | 修改应用权限需 Product Owner 执行或批准 |
+| LQ-T0 | Lark 后台配置、表格授权、本机 `.env` 填写（见交接文档） | Product Owner / 管理员（可由 ChatGPT 协助后台操作） | **2026-11-06 完成**：应用身份取 token、查工作表、读表头均成功（交接文档第 9 节） |
 | LQ-T1 | migration 006：`nc_quotation` 角色权限 + 测试 | Codex | 测试库需先由管理员创建 `nc_test_quotation` 角色（权限操作，停止条件） |
 | LQ-T2 | 导入核心：表头映射、单元格解析、校验、Route 匹配、部分导入 / 幂等 / 镜像、写库事务 | Codex | LQ-T1；LQ-Q1、LQ-Q2 回答 |
 | LQ-T3 | Lark client + `quotes:lark-check` + `quotes:sync-lark --dry-run` | Codex | LQ-T2；真实表头核对需 LQ-T0 完成 |

@@ -20,7 +20,7 @@
 - 开发者后台域名：`open.larkenterprise.com` [据用户提供的后台链接]。
 - **API 域名：`https://open.larkenterprise.com/open-apis/...`**
   - [已验证] 该域名的 `open-apis` 可访问：不带凭据调用 `POST /open-apis/auth/v3/tenant_access_token/internal` 返回 `{"code":10003,"msg":"invalid param"}`；不带 token 调用 `GET /open-apis/sheets/v3/spreadsheets/<token>/sheets/query` 返回 HTTP 400、`code 99991661 Missing access token`，即标准 Lark 开放平台响应。
-  - [待验证] 用本应用真实 App ID / Secret 在该域名取得 token 成功（因为应用注册在 larkenterprise 后台，应使用同一域名；不要换成 open.larksuite.com 或 open.feishu.cn）。
+  - [已验证 2026-11-06] 用本应用真实 App ID / Secret 在该域名取得 token 成功（因为应用注册在 larkenterprise 后台，应使用同一域名；不要换成 open.larksuite.com 或 open.feishu.cn）。
   - 注意：larkenterprise 文档站页面标题为 Feishu Open Platform，文档示例 URL 写的是 `open.feishu.cn`；实际调用请把域名替换为 `open.larkenterprise.com`。
 - 官方文档（larkenterprise 文档站）：
   - 读取单个范围（Sheets v2）：https://open.larkenterprise.com/document/ukTMukTMukTM/ugTMzUjL4EzM14COxMTN
@@ -57,16 +57,54 @@
 
 | 项 | 值 | 状态 |
 |---|---|---|
-| spreadsheet token | `Wa9VsDiaphLSA3tpWzrcvp5lnAh` | 从链接 `/sheets/<token>` 解析 [已验证解析]；可读性 [待验证] |
-| 工作表 ID | `iwYw5J` | 从链接参数 `?sheet=` 解析 [已验证解析]；需用工作表查询接口确认存在 [待验证] |
-| 工作表标题 / 行数 / 冻结行数 | — | [待验证]：工作表查询接口返回 `title`、`grid_properties.row_count`、`frozen_row_count` |
-| 表头行位置 | — | [待验证]。参考：同类 xlsx 模板「新OA报价模板」表头在第 1 行、数据从第 2 行开始；Lark 表格不一定相同 |
-| 读取范围 | 建议 `iwYw5J!A1:<最后一列><row_count>` | [待验证]：列数与行数确认后再定 |
-| 日期返回格式 | — | [待验证]：读取接口的 `dateTimeRenderOption` 等参数对结果的影响，用一次真实读取确认 |
+| spreadsheet token | `Wa9VsDiaphLSA3tpWzrcvp5lnAh` | [已验证] 应用身份可读 |
+| 链接中的工作表 ID | `iwYw5J` | [已验证] = **「总表」**（index 0，5200 行 × 70 列），**不是 SFO 表**，不作为同步来源（见 5.1） |
+| SFO 工作表 | `uAaPvG`「SFO 旧金山 线路&邮编&价格综合表」 | [已验证] 427 行 × 30 列，无冻结行，2 个合并区域 |
+| 表头行位置 | SFO 表：第 1–3 行 | [已验证] 第 1 行标题「DSP报价/Quotation for DSP」（A1:W1 合并）；第 2 行分组表头（F2:V2 合并「按重量段报价」）；第 3 行重量段列名；**数据从第 4 行开始** |
+| 读取范围 | SFO 表：`uAaPvG!A1:W427`（按 `row_count` 动态取） | [已验证] 有效数据 269 行，之后为空行（按「线路名称」为空跳过） |
+| 日期返回格式 | 见下 | [已验证] `dateTimeRenderOption=FormattedString` 时返回字符串 `MM/DD/YYYY`（如 `10/12/2026` = 2026-10-12）；不带该参数时返回日期序列号（1899-12-30 起的天数，如 `46307`）。实现应显式指定参数，并严格解析；其他格式拒绝该行 |
+| 价格返回格式 | number | [已验证] 均为数字，部分带浮点误差（如 16 位小数），四舍五入到 2 位后与分值的误差 < 1e-6 |
+
+### 5.1 只读验证结果（Claude 2026-11-06，应用身份，未写库）
+
+**总表 vs 分表：应读取各站点分表，不读总表。** 依据：
+
+- `iwYw5J`「总表」是公式汇总视图：A 列各段是 `FILTER('<站点分表>'!A4:…)` 公式，从 LAX/LAV、SFV、CNO、…、SFO（自第 1101 行起）等分表拉取数据；A1 有残留文字 `s'f`。ChatGPT 打开链接时看到「总表」从 LAX 开始，与此一致。
+- 总表只有 A–L 列有表头：站点 / 转运中心 / 线路 / 邮编 / 参考邮编 + **7 个重量段（不区分首票 / 续票）**，没有续票价格，没有生效日期 / 结束日期，无法满足 RQ 数据模型（14 个价格 + 日期）。
+- 截图中的 SFO 价格表对应分表 `uAaPvG`，其结构与 RQ 模型一致（下表）。
+
+**SFO 分表实际列映射**（[已验证]）：
+
+| 列 | 实际表头 | 程序字段 | 备注 |
+|---|---|---|---|
+| A | 站点名称/Station | `station_label_raw` | 值为 `SFO02` 或 `SFO`（不是 DMS 站点代码 `SFO01`），只存原值，不用于匹配 |
+| B | 转运中心/Sorting Center | `fleet_name` | 值如 `SFO02-AAS`；列名不是「车队名称/Fleet」，也不是截图中的「转运中心/DSP」 |
+| C | 线路名称/Route | `route_name` → `route_id` | 与 DMS `route_name` 写法一致（如 `SFO01-003`、`SFO02-001`） |
+| D | 邮编/Zipcode | `postal_code` | 数字，全部 5 位 |
+| E | 参考邮编 | `reference_postal_code` | 本表与 D 列全部相同 |
+| F–L | 首票价格 0-1 / 1-5 / 5-10 / 10-20 / 20-30 / 30-40 / 40(lb)以上 | `first.*` | 表头文字含换行和英文，如「首票价格\n0 - 1(lb)/Quotation for the First P…」；有 `(Ib)`（大写 i）笔误，匹配需容错 |
+| M–S | 续票价格 同上 7 段 | `additional.*` | S 列表头为「40(Ib)以上)/Quotation for second and subse…」，缺「续票价格」前缀 |
+| T | 报价生效日期/Quotation Effective Date | `effective_from` | |
+| U | 报价结束日期/Quotation End Date | `end_date` | 本表全部非空 |
+| V | 是否使用第二票半价 | **新字段，模板中没有** | 261 行为「是」；8 行填的是备注文字（数据质量问题）。含义待确认（LQ-Q10） |
+| W | 备注/Remarks | `remarks` | 如「0-20lb以内续票0.5,20lb以上续票半价」 |
+
+**SFO 数据核对**（只统计数量，未输出价格）：
+
+- 269 行有效数据；邮编全部为 5 位数字；价格单元格无空值、无 0、无非数字；日期全部可解析，结束日期均 ≥ 生效日期。
+- 每个「线路 + 邮编」只有一行（表中不含历史）；无重复的「线路 + 邮编 + 生效日期」。
+- 与 DMS 当前线路对比（SFO01 37 条 + SFO02 16 条 = 53 条）：表中 53 条线路，52 条匹配；`SFO02-002`（8 行）不在 DMS 当前线路中，按 RQ 规则拒绝；DMS 有 1 条线路表中无报价。匹配线路的 261 个「线路 + 邮编」全部属于 DMS 该线路的邮编。
+
+**其他分表结构差异**（只读表头，共 53 个工作表）：多数分表沿用 C=线路、D=邮编、F–L 首票、M–S 续票、T 生效、U 结束 的列序，但：
+
+- 表头位置不同：北 / 南加州分表表头在第 2–3 行、数据从第 4 行开始；Denver / SLC / BOI / PDX / SEA 等表头在第 1 行、数据从第 2 行开始。
+- 列位置不同：SMF 整体左移一列（首票从 E 列、日期在 S/T）；LAS、隐藏的 PHX（报价版本）首票从 H 列、日期在 V/W；部分表「续票」相关列多于 7 个。
+- 非标准结构：CNO 无结束日期列表头；PRC、HNL、SAF、`LAX (LAV+ONT+VTC)`、`LAX暂停线路`、`总表解释`、`洛杉矶路线难度` 结构不同或不是报价表；PHX（报价版本）与 Seattle（旧）为隐藏表。
+- 结论：程序必须**按表头文字定位列**，并使用**显式的工作表白名单**（每个工作表单独校验表头），不能对整本表格套固定列号。
 
 ## 6. 字段映射
 
-以下按同类 xlsx 模板（22 列，A–V）整理；**Lark 表格的实际列名和列位置全部 [待验证]**，截图中 DSP 列名为「转运中心/DSP」，与模板「车队名称/Fleet」不同。程序将按**表头文字**定位列，不按固定列号。
+以下按同类 xlsx 模板（22 列，A–V）整理，作为字段语义参考。**Lark SFO 分表的实际列名和列位置见 5.1 [已验证]**（比模板多一列「是否使用第二票半价」，备注移到 W 列，B 列为「转运中心/Sorting Center」）。程序将按**表头文字**定位列，不按固定列号。
 
 | 模板列 | 模板表头 | 程序字段 | 用途 |
 |---|---|---|---|
@@ -119,20 +157,31 @@ NC_DB_QUOTATION_URL=<写入角色连接串，由管理员创建角色后填写>
 | 第 2 步成功但没有 `iwYw5J` | 工作表 ID 不对或该工作表已删除 / 改名后链接失效 |
 | 第 3 步成功但表头不一致 | 表头不在第 1 行、列名不同或有合并单元格 |
 
+**2026-11-06 验证结果**（Claude 在公用电脑用本机 `.env` 中的应用凭据运行临时只读脚本，脚本放在会话临时目录、未进仓库；未输出 token / Secret / 价格值；未写数据库）：
+
+| 步骤 | 结果 |
+|---|---|
+| 1. 取 tenant_access_token（`open.larkenterprise.com`） | 成功，`code 0` |
+| 2. 工作表查询 | 成功，`code 0`；共 53 个工作表；`iwYw5J` 存在，标题为「总表」 |
+| 3. 读表头和样例行 | 成功，`code 0`；总表与 SFO 分表结构见 5.1；SFO 分表表头与第 6 节语义一致，但有一列新增字段 |
+| 4. 判断总表 / 分表 | 应读取站点分表（SFO = `uAaPvG`），不读总表 |
+
+注意：环境变量 `LARK_OPEN_API_BASE` 第 7 节写的是 `https://open.larkenterprise.com`（不含 `/open-apis`），实现时需统一拼接规则。
+
 ## 10. 后台操作清单
 
 | # | 操作 | 状态 | 由谁 |
 |---|---|---|---|
 | 1 | 机器人能力已启用 | 已完成 [据 ChatGPT] | — |
 | 2 | 已有收发消息、Base 等权限 | 已完成 [据 ChatGPT]；本功能不需要 | — |
-| 3 | 应用身份权限页签开通 `sheets:spreadsheet:readonly`，记录是否免审 | 待做 | ChatGPT（云浏览器） |
-| 4 | 删除或不发布 `im.message.receive_v1`；事件订阅方式无需配置 | 待做（建议） | ChatGPT |
-| 5 | 创建版本，可用范围包含表格所有者；提交发布 | 待做 | ChatGPT 提交；如需审核由管理员通过 |
-| 6 | 管理员审批（仅当 scope 需审核） | 视情况 | 租户管理员 |
-| 7 | 表格「添加文档应用」→ 聪明小K → 可阅读 | 待做 | 表格所有者 / 有管理权限的协作者 |
-| 8 | 确认后台是否要求配置数据访问范围 | 待验证 | ChatGPT |
-| 9 | 在公用电脑 `.env` 填写第 7 节变量（Secret 不经聊天） | 待做 | 用户本人 |
-| 10 | 记录工作表标题、行数、表头行、日期格式（第 5 节） | 待做 | 第 9 节验证后由 Claude 整理 |
+| 3 | 应用身份权限页签开通 `sheets:spreadsheet:readonly`，记录是否免审 | 已完成 [据 ChatGPT]；API 读取成功，间接验证 | ChatGPT（云浏览器） |
+| 4 | 删除或不发布 `im.message.receive_v1`；事件订阅方式无需配置 | 未确认（建议） | ChatGPT |
+| 5 | 创建版本，可用范围包含表格所有者；提交发布 | 已完成 [据 ChatGPT]：版本 1.0.2 已发布，可用范围含表格所有者 | ChatGPT |
+| 6 | 管理员审批（仅当 scope 需审核） | 不再阻塞（读取已成功） | 租户管理员 |
+| 7 | 表格「添加文档应用」→ 聪明小K → 可阅读 | 已完成 [据 ChatGPT：显示 Can view]；API 读取成功，间接验证 | 表格所有者 |
+| 8 | 确认后台是否要求配置数据访问范围 | 不再阻塞（读取已成功） | — |
+| 9 | 在公用电脑 `.env` 填写第 7 节变量（Secret 不经聊天） | 部分完成 [已验证]：`LARK_APP_ID`、`LARK_APP_SECRET` 已存在且非空；其余变量待实现时确定 | 用户本人 |
+| 10 | 记录工作表标题、行数、表头行、日期格式（第 5 节） | 已完成（5.1） | Claude |
 
 任何修改应用权限、发布版本的操作都需要用户本人执行或明确批准。
 
@@ -145,4 +194,7 @@ NC_DB_QUOTATION_URL=<写入角色连接串，由管理员创建角色后填写>
 3. 价格 0 是否是合法报价？
 4. 同步频率（建议每 60 分钟，默认关闭，确认后开启）。
 
-开始实现前仍缺：第 5 节全部待验证项（真实表头、列位置、日期格式、行数）；测试库 `nc_test_quotation` 角色（管理员创建）；Product Owner 对 LQ-Q1、LQ-Q2 的回答。
+5. 读取哪些分表（LQ-Q9）：建议第一阶段只读 SFO 分表 `uAaPvG`，其他站点逐个加入白名单。
+6. 「是否使用第二票半价」列的含义（LQ-Q10）。
+
+开始实现前仍缺：测试库 `nc_test_quotation` 角色（管理员创建）；Product Owner 对 LQ-Q1、LQ-Q2（验证结果确认）、LQ-Q9、LQ-Q10 的回答。第 5 节表格结构已于 2026-11-06 验证（5.1）。
