@@ -47,7 +47,7 @@ async function fixture(t, { alive = false, last = null } = {}) {
 test('CD-AC24 Worker binds loopback and ignores LISTEN_HOST; port validation and logs', async t => {
   const f = await fixture(t);
   assert.equal(f.server.address().address, '127.0.0.1');
-  assert.deepEqual((await f.request('/api/capabilities', undefined, {}, 'GET')).body, { refresh: true, warehouse_write: false, route_quotation: false });
+  assert.deepEqual((await f.request('/api/capabilities', undefined, {}, 'GET')).body, { refresh: true, quotation_sync: true, warehouse_write: false, route_quotation: false });
   const logs = [];
   assert.equal(await runWorker({ env: { LISTEN_HOST: '0.0.0.0', RUNTIME_DATA_DIR: f.runtimeDir },
     log: line => logs.push(line), start: async options => {

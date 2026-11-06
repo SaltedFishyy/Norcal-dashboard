@@ -4,6 +4,7 @@ import { SnapshotNotFoundError, StationNotFoundError } from '../store/route-prof
 import { RouteDetailNotFoundError, projectRouteDetail } from '../store/route-details-file.js';
 import { DataSourceUnavailableError } from '../store/data-source.js';
 import { checkReaderWarehouseIsolation } from '../warehouses/warehouse-privileges.js';
+import { readActiveRouteProfiles } from './active-route-profiles.js';
 
 export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
   const { schema: ignored, ...config } = dbConfig('NC_DB_READER_URL', { env, schema });
@@ -71,9 +72,9 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
     readRouteProfiles: () => read(async client => {
       const snapshots = await profiles(client);
       if (!snapshots.rowCount) throw new SnapshotNotFoundError();
-      const routes = await client.query('SELECT station_code,profile FROM v_active_routes ORDER BY station_code,ordinal');
+      const routes = await readActiveRouteProfiles(client);
       return { schema_version: 1, stations: Object.fromEntries(snapshots.rows.map(({ station_code, ...snapshot }) =>
-        [station_code, { ...snapshot, rows: routes.rows.filter(row => row.station_code === station_code).map(row => row.profile) }])) };
+        [station_code, { ...snapshot, rows: routes.filter(row => row.station_code === station_code).map(row => row.profile) }])) };
     }),
     getStationSnapshot: station => read(async client => {
       const snapshots = await profiles(client);
@@ -81,8 +82,8 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
       const found = snapshots.rows.find(row => row.station_code === station);
       if (!found) throw new StationNotFoundError();
       const { station_code, ...snapshot } = found;
-      const routes = await client.query('SELECT profile FROM v_active_routes WHERE station_code=$1 ORDER BY ordinal', [station]);
-      return { ...snapshot, rows: routes.rows.map(row => row.profile) };
+      const routes = await readActiveRouteProfiles(client, station);
+      return { ...snapshot, rows: routes.map(row => row.profile) };
     }),
     getRouteDetail: routeId => read(async client => {
       const routes = await routeDetails(client, routeId);

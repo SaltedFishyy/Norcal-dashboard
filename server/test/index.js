@@ -56,3 +56,14 @@ import './route-quotation-db.test.js';
 
 import './route-quotation.test.js';
 import './route-quotation-web.test.js';
+
+import './lark-sheet-parse.test.js';
+import './quotation-sync-plan.test.js';
+import './quotation-sync-db.test.js';
+import './lark-config.test.js';
+import './lark-client.test.js';
+import './lark-sync.test.js';
+import './quotation-sync-scheduler.test.js';
+import './quotation-sync-job.test.js';
+import './quotation-sync-worker.test.js';
+import './quotation-sync-web.test.js';

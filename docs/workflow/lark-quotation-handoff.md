@@ -143,9 +143,9 @@ NC_DB_QUOTATION_URL=<写入角色连接串，由管理员创建角色后填写>
 
 1. 取 token：`POST /open-apis/auth/v3/tenant_access_token/internal`。
 2. 查工作表：`GET /open-apis/sheets/v3/spreadsheets/Wa9VsDiaphLSA3tpWzrcvp5lnAh/sheets/query`。
-3. 读表头：`GET /open-apis/sheets/v2/spreadsheets/Wa9VsDiaphLSA3tpWzrcvp5lnAh/values/iwYw5J!A1:Z3`。
+3. 读表头：`GET /open-apis/sheets/v2/spreadsheets/Wa9VsDiaphLSA3tpWzrcvp5lnAh/values/uAaPvG!A1:AD3`（2026-11-06 起以 SFO 分表 `uAaPvG` 为准；最初计划读取链接中的 `iwYw5J`，验证后确认它是「总表」，见 5.1）。
 
-**成功标志**：第 1 步 `code 0`；第 2 步 `code 0` 且列表中有 `sheet_id = iwYw5J`；第 3 步 `code 0` 且返回的表头与第 6 节列名一致。
+**成功标志**：第 1 步 `code 0`；第 2 步 `code 0` 且列表中有 `sheet_id = uAaPvG`；第 3 步 `code 0` 且返回的表头与 5.1 节 SFO 列映射一致。实现后用 `npm run quotes:lark-check` 完成同样检查。
 
 **故障区分**（以返回的 `code` / `msg` 原文为准，以下为判断思路）：
 

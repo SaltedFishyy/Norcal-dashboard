@@ -6,10 +6,13 @@ import { createJsonDataSource } from '../src/store/data-source.js';
 import { createDbDataSource } from '../src/db/db-data-source.js';
 import { startWorkerServer } from '../src/worker/worker.js';
 import { setupWarehouses, WarehousePrivilegeError } from '../src/warehouses/warehouse-setup.js';
+import { createQuotationSyncScheduler, quotationSyncInterval } from '../src/quotations/quotation-sync-scheduler.js';
+import { runScheduledQuotationSync } from '../src/quotations/quotation-sync-job.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 export async function runWorker({ env = process.env, log = console.log, errorLog = console.error,
-  start = startWorkerServer, setup = setupWarehouses } = {}) {
+  start = startWorkerServer, setup = setupWarehouses,
+  makeScheduler = createQuotationSyncScheduler, syncJob = runScheduledQuotationSync } = {}) {
   const source = env.DATA_SOURCE ?? 'json';
   const value = env.WORKER_PORT ?? '3100';
   const port = Number(value);
@@ -23,7 +26,15 @@ export async function runWorker({ env = process.env, log = console.log, errorLog
     for (const warning of runtime.warnings) log(warning);
     dataSource = source === 'db' ? createDbDataSource({ env }) : createJsonDataSource({ runtimeDir: runtime.path });
     warehouses = await setup({ env, port, log });
-    const server = await start({ port, runtimeDir: runtime.path, repoRoot, dataSource, log, warehouses });
+    const intervalMinutes = quotationSyncInterval(env, source, log);
+    const server = await start({ port, runtimeDir: runtime.path, repoRoot, dataSource, log, warehouses,
+      quotationSyncIntervalMinutes: intervalMinutes });
+    if (intervalMinutes > 0) {
+      const scheduler = makeScheduler({ intervalMinutes, log,
+        runOnce: () => syncJob({ env, runtimeDir: runtime.path }) });
+      server.once('close', () => scheduler.stop());
+      scheduler.start();
+    }
     server?.once('close', () => { void dataSource.close?.(); });
     server?.once('close', () => { void warehouses.close(); });
     log(`Worker: http://127.0.0.1:${port}（仅本机 localhost-only）`);

@@ -1,17 +1,17 @@
 import { readFile, readdir } from 'node:fs/promises';
 import pg from 'pg';
 
-export async function migrate(client, { schema = 'nc', scraperRole = 'nc_scraper', readerRole = 'nc_reader', warehouseRole = 'nc_warehouse', districtRole = 'nc_district',
+export async function migrate(client, { schema = 'nc', scraperRole = 'nc_scraper', readerRole = 'nc_reader', warehouseRole = 'nc_warehouse', districtRole = 'nc_district', quotationRole = 'nc_quotation',
   onResult = () => {} } = {}) {
   const directory = new URL('../../db/migrations/', import.meta.url);
   const files = (await readdir(directory)).filter(file => /^\d{3}_[a-z0-9_]+\.sql$/.test(file)).sort();
-  const identifiers = { schema, scraper_role: scraperRole, reader_role: readerRole, warehouse_role: warehouseRole, district_role: districtRole };
+  const identifiers = { schema, scraper_role: scraperRole, reader_role: readerRole, warehouse_role: warehouseRole, district_role: districtRole, quotation_role: quotationRole };
   const name = pg.escapeIdentifier(schema);
   let firstResult;
   for (const file of files) {
     const version = file.slice(0, 3);
     const template = await readFile(new URL(file, directory), 'utf8');
-    const sql = template.replace(/\{\{(schema|scraper_role|reader_role|warehouse_role|district_role)\}\}/g,
+    const sql = template.replace(/\{\{(schema|scraper_role|reader_role|warehouse_role|district_role|quotation_role)\}\}/g,
       (_, key) => pg.escapeIdentifier(identifiers[key]));
     let result;
     await client.query('BEGIN');

@@ -7,6 +7,24 @@ const tables = ['quotation_weight_bands', 'route_quotation_imports', 'route_quot
 const views = ['v_route_quotation_current', 'v_route_quotation_first_0_1lb', 'v_route_quotation_upcoming', 'v_quotation_weight_bands'];
 const denied = (client, sql) => assert.rejects(client.query(sql), { code: '42501' });
 
+test('LQ-AC1 migration 006 adds nullable raw text without changing views or reader access', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t);
+  assert.equal((await db.owner.query("SELECT version FROM schema_migrations WHERE version='006'")).rowCount, 1);
+  const column = (await db.owner.query(`SELECT data_type,is_nullable,column_default FROM information_schema.columns
+    WHERE table_schema=$1 AND table_name='route_quotation_lines' AND column_name='second_parcel_half_price_raw'`, [db.schema])).rows;
+  assert.deepEqual(column, [{ data_type: 'text', is_nullable: 'YES', column_default: null }]);
+  await denied(db.reader, 'SELECT second_parcel_half_price_raw FROM route_quotation_lines');
+  const expected = [
+    ['line_id', 'import_id', 'station_code', 'route_id', 'route_name', 'postal_code', 'fleet_name', 'effective_from',
+      'end_date', 'remarks', 'quotation_date', 'imported_at', 'first_prices', 'additional_prices'],
+    ['route_id', 'postal_code', 'price'],
+    ['route_id', 'postal_code', 'station_code', 'effective_from'],
+    ['code', 'ordinal', 'label_zh', 'label_en'],
+  ];
+  for (const [index, view] of views.entries())
+    assert.deepEqual((await db.reader.query(`SELECT * FROM ${view}`)).fields.map(field => field.name), expected[index]);
+});
+
 async function fixture(t) {
   const db = await createTestDb(t);
   const today = (await db.owner.query("SELECT (now() AT TIME ZONE 'America/Los_Angeles')::date::text AS today")).rows[0].today;
@@ -81,7 +99,13 @@ test('RQ-T1 database rejects conflicting keys and invalid quotation values', { s
   const replacement = await db.line(1, -1);
   const sameImport = await db.importRow();
   await db.line(2, -2, null, false, '01234', sameImport);
-  await assert.rejects(db.line(2, -1, null, false, '01234', sameImport), { code: '23505' });
+  await db.line(2, -1, null, false, '01234', sameImport);
+  // Even a voided duplicate is forbidden within one import; the active index is separate.
+  await assert.rejects(db.line(2, -1, null, true, '01234', sameImport), { code: '23505', constraint: 'quotation_import_route_zip_day_key' });
+  const constraints = (await db.owner.query(`SELECT conname,pg_get_constraintdef(oid) AS definition
+    FROM pg_constraint WHERE conrelid='route_quotation_lines'::regclass AND contype='u'`)).rows;
+  assert.deepEqual(constraints, [{ conname: 'quotation_import_route_zip_day_key',
+    definition: 'UNIQUE (import_id, route_id, postal_code, effective_from)' }]);
   for (const zip of ['1234', '123456', 'abcde']) await assert.rejects(db.line(3, -1, null, false, zip), { code: '23514' });
   await assert.rejects(db.line(3, -1, -2), { code: '23514' });
   await assert.rejects(db.line(3, -1, null, false, '01234', null, 'ZZZ02'), { code: '23503' });

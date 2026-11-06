@@ -19,6 +19,8 @@
     "db:import-districts": "node --env-file-if-exists=.env server/bin/db-import-districts.js",
     "db:import-json": "node --env-file-if-exists=.env server/bin/db-import-json.js",
     "db:parity": "node --env-file-if-exists=.env server/bin/db-parity.js",
+    "quotes:lark-check": "node --env-file-if-exists=.env server/bin/quotes-lark-check.js",
+    "quotes:sync-lark": "node --env-file-if-exists=.env server/bin/quotes-sync-lark.js",
     "test": "node --env-file-if-exists=.env --test server/test/"
   },
   "dependencies": {

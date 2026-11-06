@@ -1,4 +1,5 @@
 import { formatUpdated } from './format.js';
+import { createQuotationSyncStatus } from './quotation-sync-status.js';
 
 const brand = ['West Region', ' Ops Dashboard'];
 function renderBrand(doc) {
@@ -57,6 +58,7 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     if (!response.ok) throw new Error('request_failed');
     return response.json();
   };
+  const quotationSync = createQuotationSyncStatus({ document: doc, root, get });
   function dialog(title) {
     const el = node('dialog', undefined, root); el.className = 'data-dialog';
     const heading = node('div', undefined, el); heading.className = 'detail-heading';
@@ -235,7 +237,9 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       (async () => { try { districts = (await get('/api/districts')).districts; renderFreshness(); } catch { districts = []; } })(),
     ]);
     try {
-      if ((await get('/api/capabilities')).refresh === true) {
+      const capabilities = await get('/api/capabilities');
+      await quotationSync.start(capabilities);
+      if (capabilities.refresh === true) {
         refreshButton = button('刷新数据', actions, () => {
           chooseScope(); refresh.open(refreshButton);
         });
@@ -248,11 +252,11 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       }
     } catch { /* A failed capability check must never grant refresh controls. */ }
     const scheduleFresh = () => {
-      if (!disposed) freshTimer = later(async () => { await loadFreshness(); scheduleFresh(); }, 60000);
+      if (!disposed) freshTimer = later(async () => { await Promise.all([loadFreshness(), quotationSync.load()]); scheduleFresh(); }, 60000);
     };
     scheduleFresh();
   }
-  return { start, loadFreshness, loadStatus, dispose() { disposed = true; polling = false; cancel(pollTimer); cancel(freshTimer); } };
+  return { start, loadFreshness, loadStatus, dispose() { disposed = true; quotationSync.dispose(); polling = false; cancel(pollTimer); cancel(freshTimer); } };
 }
 
 if (globalThis.document?.getElementById('data-status')) {

@@ -8,6 +8,7 @@ import { readDistrictConfig, DistrictNotFoundError } from '../store/districts-fi
 import { parseRefreshScope, planRefresh } from '../batch/refresh-plan.js';
 import { processIsAlive } from '../batch/scrape-lock.js';
 import { writeFileAtomic } from '../store/atomic-file.js';
+import { readQuotationSyncStatus } from '../quotations/quotation-sync-status.js';
 
 const progressKeys = ['run_id', 'scope', 'started_at', 'updated_at', 'phase', 'station', 'district',
   'station_index', 'station_total', 'route_index', 'route_total', 'completed', 'skipped', 'failed',
@@ -27,7 +28,7 @@ function forward(stream, log) {
 }
 
 export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districtsPath,
-  spawn = nodeSpawn, isAlive = processIsAlive, log = () => {}, ...options }) {
+  spawn = nodeSpawn, isAlive = processIsAlive, log = () => {}, quotationSyncIntervalMinutes = 0, ...options }) {
   const progressFile = path.join(runtimeDir, 'refresh-progress.json');
   const lockFile = path.join(runtimeDir, 'scrape.lock');
   let child = null, starting = false;
@@ -126,7 +127,11 @@ export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districts
   post.methods = ['POST'];
   server = createApiServer({ ...options, runtimeDir, districtsPath, dataSource, log,
     warehouses: { ...options.warehouses, allowedHosts: () => [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`] },
-    capabilities: { refresh: true }, extraHandlers: new Map([
+    capabilities: { refresh: true, quotation_sync: true }, extraHandlers: new Map([
+      ['/api/quotation-sync/status', async ({ respond }) => respond(200, {
+        enabled: quotationSyncIntervalMinutes > 0, interval_minutes: quotationSyncIntervalMinutes,
+        status: await readQuotationSyncStatus(runtimeDir),
+      })],
       ['/api/refresh/preview', preview], ['/api/refresh', post],
       ['/api/refresh/status', async ({ respond }) => respond(200, await status())],
     ]) });
