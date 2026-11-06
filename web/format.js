@@ -2,10 +2,11 @@ import { difficultyLevel } from './difficulty.js';
 
 // Preserve API order for ties and missing values without changing source rows.
 export function sortRows(rows, sort) {
-  if (!['pickup_volume', 'pph'].includes(sort.key)) return [...rows];
+  if (!['pickup_volume', 'pph', 'price'].includes(sort.key)) return [...rows];
+  const field = sort.key === 'price' ? 'current_first_0_1lb_price_min' : sort.key;
   const valid = value => typeof value === 'number' && Number.isFinite(value);
   return rows.map((row, index) => ({ row, index })).sort((a, b) => {
-    const av = a.row[sort.key], bv = b.row[sort.key];
+    const av = a.row[field], bv = b.row[field];
     if (valid(av) !== valid(bv)) return valid(av) ? -1 : 1;
     if (!valid(av) || av === bv) return a.index - b.index;
     return (av < bv ? -1 : 1) * (sort.dir === 'asc' ? 1 : -1);
@@ -33,6 +34,16 @@ export const profileText = {
 
 export function formatValue(value) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
+}
+
+export function formatPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(2)}` : '—';
+}
+
+export function formatPriceRange(min, max) {
+  const low = formatPrice(min), high = formatPrice(max);
+  if (low === '—') return high;
+  return high === '—' || min === max ? low : `${low}–${high}`;
 }
 
 export function formatPercent(value) {

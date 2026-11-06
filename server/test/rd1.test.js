@@ -1024,7 +1024,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
   await import('../../web/app.js?rd1'); await new Promise((resolve) => setImmediate(resolve));
   const button = elements.rows.children[0].children[0].children[0];
   assert.equal(button.tag, 'button'); assert.equal(button.type, 'button'); assert.equal(button.textContent, 'MOCK-001');
-  assert.equal(elements.rows.children[0].children[5].children[0].className, 'difficulty system-difficulty');
+  assert.equal(elements.rows.children[0].children[6].children[0].className, 'difficulty system-difficulty');
   const pending = button.listeners.click();
   assert.equal(elements['route-detail'].open, true);
   assert.equal(elements['detail-content'].children[1].textContent, '加载中…');
@@ -1041,6 +1041,7 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
     'ZIP 详情更新时间': formatUpdated(metadata.fetchedAt) })) assert.equal(values[label].textContent, expected, label);
   assert.equal(values['线路数据更新时间'].title, metadata.fetchedAt);
   assert.equal(values['线路难度'].children[0].className, 'difficulty system-difficulty');
+  assert.ok(Object.hasOwn(values, '人工难度'), '线路详情保留人工难度');
   assert.equal(values['人工难度'].children[0].textContent, '—');
   assert.equal(values['人工难度'].children[0].className, undefined);
   assert.deepEqual(nodes.filter(node => node.tag === 'th').map(node => node.textContent),

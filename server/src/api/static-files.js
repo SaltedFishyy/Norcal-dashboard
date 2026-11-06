@@ -10,6 +10,7 @@ const files = new Map([
   ['/format.js', ['format.js', 'text/javascript']],
   ['/difficulty.js', ['difficulty.js', 'text/javascript']],
   ['/route-detail.js', ['route-detail.js', 'text/javascript']],
+  ['/price-detail.js', ['price-detail.js', 'text/javascript']],
   ['/map', ['map.html', 'text/html']],
   ['/map.js', ['map.js', 'text/javascript']],
   ['/route-colors.js', ['route-colors.js', 'text/javascript']],

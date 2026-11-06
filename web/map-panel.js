@@ -1,5 +1,6 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
-import { formatNumber, formatUpdated, formatValue } from './format.js';
+import { formatNumber, formatUpdated, formatValue, formatPrice, formatPriceRange } from './format.js';
+import { openPriceDetail } from './price-detail.js';
 import { routeColor } from './route-colors.js';
 import { filteredRoutes, classifyQuery, clearSelection } from './map-state.js';
 import { routeDifficultyText, mapText as t } from './map-text.js';
@@ -69,6 +70,12 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       count.append(text('small', t.mapped(formatValue(route.mapped_count))));
       metrics.append(count, entry(t.pickupVolume, formatNumber(route.pickup_volume, 0)), entry(t.pph, formatNumber(route.pph, 2, 2)), difficultyEntry(t.routeDifficulty, route.route_difficulty));
       element('summary').append(name, owner, metrics);
+      metrics.append(entry(t.firstPrice, formatPriceRange(route.current_first_0_1lb_price_min, route.current_first_0_1lb_price_max)));
+      if (route.quoted_zip_count > 0) {
+        const button = text('button', t.priceDetail, 'price-detail-button'); button.type = 'button';
+        button.addEventListener('click', () => openPriceDetail(route, button, { highlightZip: next.zip?.postal_code }));
+        element('summary').append(button);
+      }
       if (route.mapped_count === 0) element('summary').append(text('p', t.noMapped));
       if (colorMode === 'difficulty') {
         element('summary').append(text('p', route.zip_detail?.status === 'available'
@@ -86,11 +93,12 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       const metrics = text('dl', '', 'map-zip-metrics');
       metrics.append(entry(t.experiencedPph, formatNumber(zip.experienced_pph, 2, 2)), entry(t.pickupDaily, formatNumber(zip.pickup_volume_daily, 0)), entry(t.dsp, zip.dsp_name), difficultyEntry(t.zipDifficulty, zip.zip_difficulty));
       const info = text('dl', '', 'map-zip-info');
+      if (zip.status !== 'multi_station') metrics.append(entry(t.firstPrice, formatPrice(zip.current_first_0_1lb_price)));
       info.append(entry(t.station, zip.station));
       element('selection').append(heading, metrics, info);
       if (zip.status === 'multi_station') {
         const owners = text('ul', '', 'map-zip-owners');
-        for (const owner of zip.owners) owners.append(text('li', owner.station + ' · ' + owner.route_name));
+        for (const owner of zip.owners) owners.append(text('li', owner.station + ' · ' + owner.route_name + ' · ' + formatPrice(owner.current_first_0_1lb_price)));
         element('selection').append(owners);
       }
       if (t.zipNotes[zip.status]) element('selection').append(text('p', t.zipNotes[zip.status], 'snapshot'));

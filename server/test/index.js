@@ -55,3 +55,4 @@ import './district-db.test.js';
 import './route-quotation-db.test.js';
 
 import './route-quotation.test.js';
+import './route-quotation-web.test.js';

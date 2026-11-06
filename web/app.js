@@ -1,5 +1,6 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
-import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone, sortRows, dspOptions } from './format.js';
+import { formatValue, formatNumber, formatUpdated, formatPriceRange, pageState, difficultyTone, sortRows, dspOptions } from './format.js';
+import { openPriceDetail } from './price-detail.js';
 import { openRouteDetail } from './route-detail.js';
 import { chooseSelection, readSelection, saveSelection, populateDistricts, populateStations } from './station-preference.js';
 
@@ -21,7 +22,7 @@ const zipInput = document.getElementById('profile-zip');
 const zipResult = document.getElementById('profile-zip-result');
 const zipButton = zipForm?.querySelector('button');
 let sort = { key: null, dir: 'desc' };
-const sortControls = ['pickup_volume', 'pph'].map(key => ({ key, button: document.getElementById('sort-' + key) }));
+const sortControls = ['pickup_volume', 'pph', 'price'].map(key => ({ key, button: document.getElementById('sort-' + key) }));
 function updateSortHeaders() {
   for (const { key, button } of sortControls) {
     if (!button) continue;
@@ -43,7 +44,7 @@ for (const { key, button } of sortControls) button?.addEventListener('click', ()
 updateSortHeaders();
 const columns = [
   ['route_name'], ['dsp_name'], ['pickup_volume', 'numeric', 0], ['pph', 'numeric', 2],
-  ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'], ['route_difficulty_manual', 'difficulty'],
+  ['price'], ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'],
 ];
 
 function render(result, data) {
@@ -81,6 +82,18 @@ function render(result, data) {
     tr.setAttribute('data-route-id', String(row.route_id));
     renderedRows.set(String(row.route_id), { row, tr });
     for (const [field, style, digits] of columns) {
+      if (field === 'price') {
+        const price = document.createElement('td'); price.className = 'numeric price-column';
+        price.textContent = '—';
+        if (row.quoted_zip_count > 0) {
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'route-link price-link';
+          button.textContent = formatPriceRange(row.current_first_0_1lb_price_min, row.current_first_0_1lb_price_max);
+          button.addEventListener('click', () => openPriceDetail(row, button));
+          price.textContent = ''; price.append(button);
+        }
+        tr.append(price);
+        continue;
+      }
       const td = document.createElement('td');
       const value = row?.[field];
       if (style === 'numeric') td.className = 'numeric';

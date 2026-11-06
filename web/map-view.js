@@ -1,4 +1,5 @@
 import { difficultyColor } from './difficulty.js';
+import { formatPrice } from './format.js';
 import { polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
 
@@ -26,7 +27,7 @@ export const basemaps = [
 
 export function zipDetails(doc, properties, selection = clearSelection(), colorMode = 'route', detail) {
   const node = doc.createElement('dl');
-  for (const [label, value] of [[t.zipLabel, properties.postal_code], [t.route, properties.route_name], [t.dsp, properties.dsp_name]]) {
+  for (const [label, value] of [[t.zipLabel, properties.postal_code], [t.route, properties.route_name], [t.dsp, properties.dsp_name], [t.firstPrice, formatPrice(properties.current_first_0_1lb_price)]]) {
     const entry = doc.createElement('div'), dt = doc.createElement('dt'), dd = doc.createElement('dd');
     dt.textContent = label; dd.textContent = value ?? '—';
     entry.append(dt, dd); node.append(entry);

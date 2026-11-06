@@ -165,7 +165,7 @@ T5 多 Station、Refresh from DMS 按钮、点击时访问 DMS、批量抓取多
 
 范围：只展示已有数据并中文化；不新增 DMS 抓取、不改 API 架构、不改 cache。
 
-- **Route Profile 页面（`/`）中文化**：轻量字符串表（不引入 i18n 框架），`lang="zh-CN"`。标题 “北加州线路画像”；列名：线路名称、DSP、Pickup Volume、PPH、首公里距离 (mi)、线路难度、人工难度；状态 / 错误 / 重试 / 链接等文字改中文。ZIP、DSP、PPH、Pickup Volume、线路 / 站点编号保持原样；不改数据含义。
+- **Route Profile 页面（`/`）中文化**：轻量字符串表（不引入 i18n 框架），`lang="zh-CN"`。标题 “北加州线路画像”；列名：线路名称、DSP、Pickup Volume、PPH、首公里距离 (mi)、线路难度、人工难度；状态 / 错误 / 重试 / 链接等文字改中文。ZIP、DSP、PPH、Pickup Volume、线路 / 站点编号保持原样；不改数据含义。 2026-11-05 起主表列为：线路名称 / DSP / Pickup Volume / PPH / 首票价格 / 首公里距离 (mi) / 线路难度，人工难度仅在线路详情弹窗显示（见 route-quotation spec 7.1）。
 - **Route Detail modal 补全**（数据：基础信息来自已加载的 Route Profile 行，ZIP 表来自现有 `/api/route-details`）：
   - 基础信息：线路名称、Route ID、站点、DSP、Pickup Volume、PPH、首公里距离、线路难度、人工难度、ZIP 数、线路数据更新时间（Route Profile snapshot 的 `fetched_at`）、ZIP 详情更新时间（Route Detail 的 `fetched_at`，有详情时显示）。
   - ZIP 表：ZIP、ZIP 难度、首公里距离 (mi)、熟手 PPH、派送异常率、DNR 率、安全等级；百分比沿用现有 ×100 两位小数；缺失值 `—`；按 `postal_code` 升序（只在展示时排序，不改 cache）；不解释 `postalCodeTag`。

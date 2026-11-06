@@ -179,7 +179,7 @@ test('T7 frontend structure and safe rendering use no external resources', async
   assert.match(html, /West Region Route Profile/);
   assert.match(html, /lang="zh-CN"/);
   for (const label of ['站点', 'profile-station', 'profile-district', '更新时间', '线路总数', 'DMS 快照，非实时数据',
-    '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '人工难度', '重试', '线路地图', '关闭']) {
+    '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '首票价格', '重试', '线路地图', '关闭']) {
     assert.ok(html.includes(label), label);
   }
   assert.equal((html.match(/<th scope=/g) || []).length, 7);
@@ -254,11 +254,10 @@ test('T7 app renders API order and text safely, and handles retries and failures
   assert.equal(elements.total.textContent, '2');
   const rendered = elements.rows.children;
   assert.equal(rendered.length, 2);
-  assert.deepEqual(rendered[0].children.slice(0, 5).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
-    ['Mock Z', malicious, '12,345', '2.35', '1.20']);
-  assert.equal(rendered[0].children[5].children[0].textContent, 'S');
-  assert.equal(rendered[0].children[6].textContent, '—');
-  assert.equal(rendered[0].children[6].children.length, 0);
+  assert.deepEqual(rendered[0].children.slice(0, 6).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
+    ['Mock Z', malicious, '12,345', '2.35', '—', '1.20']);
+  assert.equal(rendered[0].children[6].children[0].textContent, 'S');
+  assert.equal(rendered[0].children.length, 7);
   assert.equal(rendered[1].children[0].children[0].textContent, 'Mock A');
   assert.equal(rendered[1].children[1].textContent, '—');
   for (const value of [null, undefined, '']) {
@@ -268,9 +267,9 @@ test('T7 app renders API order and text safely, and handles retries and failures
     }] }) };
     await elements.retry.listeners.click();
     const cells = elements.rows.children[0].children;
-    assert.deepEqual(cells.slice(0, 5).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
-      ['SFO02-042', '—', '1,150', '30.00', '3.90']);
-    for (const cell of cells.slice(5)) {
+    assert.deepEqual(cells.slice(0, 6).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
+      ['SFO02-042', '—', '1,150', '30.00', '—', '3.90']);
+    for (const cell of cells.slice(6)) {
       assert.equal(cell.textContent, '—');
       assert.equal(cell.children.length, 0);
     }
@@ -282,10 +281,10 @@ test('T7 app renders API order and text safely, and handles retries and failures
   await elements.retry.listeners.click();
   const cells = elements.rows.children[0].children;
   assert.deepEqual(cells.slice(2, 5).map((cell) => cell.textContent), ['—', '—', '—']);
-  for (const [index, expected] of [[5, 'A级 难'], [6, 'B级 中']]) {
+  for (const [index, expected] of [[6, 'A级 难']]) {
     assert.equal(cells[index].children.length, 1);
-    assert.equal(cells[index].children[0].className, index === 6 ? `difficulty tone-${difficultyTone(expected)}` : 'difficulty system-difficulty');
-    if (index === 5) assert.equal(cells[index].children[0].style.backgroundColor, difficultyColor(difficultyLevel(expected)));
+    assert.equal(cells[index].children[0].className, 'difficulty system-difficulty');
+    if (index === 6) assert.equal(cells[index].children[0].style.backgroundColor, difficultyColor(difficultyLevel(expected)));
     assert.equal(cells[index].children[0].textContent, expected);
   }
   for (const [value, tone] of [['D级 极易', 'easy'], ['C级 易', 'easy'], ['B级 中', 'medium'],
@@ -294,7 +293,7 @@ test('T7 app renders API order and text safely, and handles retries and failures
       route_difficulty: value, route_difficulty_manual: value,
     }] }) };
     await elements.retry.listeners.click();
-    for (const [index, cell] of elements.rows.children[0].children.slice(5).entries()) {
+    for (const [index, cell] of elements.rows.children[0].children.slice(6, 7).entries()) {
       assert.equal(cell.children.length, 1);
       assert.equal(cell.children[0].className, index === 1 ? `difficulty tone-${tone}` : 'difficulty system-difficulty');
       if (index === 0) assert.equal(cell.children[0].style.backgroundColor, difficultyColor(difficultyLevel(value)));

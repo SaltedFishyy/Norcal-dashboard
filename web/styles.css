@@ -414,3 +414,16 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 @media (min-width: 2300px) {
   :root { --font-step: 4px; --title-step: 8px; --space-step: 4px; }
 }
+
+/* Route quotation (RQ-T3) */
+.price-column { white-space: nowrap; }
+.price-link { font-variant-numeric: tabular-nums; }
+#price-detail { width: min(900px, calc(100% - 24px)); max-width: calc(100% - 24px); max-height: 85vh; overflow: auto; padding: 20px; border: 1px solid #35415a; border-radius: 8px; background: #101828; color: #e9eef9; }
+#price-detail::backdrop { background: rgb(0 0 0 / 70%); }
+.price-group { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid #35415a; border-radius: 6px; }
+.price-group-highlight { border-color: #65dace; background: #163c42; }
+.price-table-scroll { max-width: 100%; overflow-x: auto; }
+.price-table-scroll table { min-width: 480px; }
+.price-table-scroll tbody th { position: static; font-weight: 400; }
+.price-detail-button { margin: 8px 0; font-size: var(--fs-13); }
+@media (max-width: 600px) { #price-detail { padding: 14px; } .price-group { padding: 8px; } }

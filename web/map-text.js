@@ -2,6 +2,7 @@ import { difficultyLevel } from './difficulty.js';
 import { formatUpdated } from './format.js';
 
 export const mapText = {
+  firstPrice: '首票价格', priceDetail: '价格详情',
   retainedZip: zip => `已保留 ZIP ${zip}，按 Enter 在当前范围重新查询`,
   allDsp: '全部 DSP',
   byRoute: '按线路', byDifficulty: '按难易度', colorMode: '地图颜色模式',

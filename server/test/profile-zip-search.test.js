@@ -286,7 +286,7 @@ test('RM13c profile presentation retains metric values and filter totals', async
   const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
   assert.match(html, /href="\/" aria-current="page">线路档案/);
   assert.match(html, /id="profile-data-summary"/);
-  for (const direction of ['up', 'down']) assert.equal((html.match(new RegExp('class="sort-' + direction + '"', 'g')) || []).length, 2);
+  for (const direction of ['up', 'down']) assert.equal((html.match(new RegExp('class="sort-' + direction + '"', 'g')) || []).length, 3);
   const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   for (const [state, path] of [['ascending', 'up'], ['descending', 'down']]) {
     assert.ok(css.includes('[aria-sort="' + state + '"] .sort-' + path));

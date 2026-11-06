@@ -1,6 +1,6 @@
 # Route Quotation / DSP 报价（RQ）
 
-- **状态：** In review — RQ-T2 代码与测试完成，待 Product Owner 确认提交（RQ-T1 已提交 `6c8cf85`）。RQ-T3、RQ-T4、正式库 migration、创建角色、导入真实报价均需另行授权。
+- **状态：** RQ-T1 至 RQ-T3 完成（Product Owner 2026-11-05 预览签字 RQ-T3；RQ-T1 `6c8cf85`、RQ-T2 `f8bc03b`）。RQ-T4（写入角色 + 导入）、正式库 migration 005、创建角色、导入真实报价均需另行授权；正式库执行 005 并导入报价前，页面价格显示 `—`。
 - **相关文档：** `docs/data-schema.md` 第 12 节、`docs/features/central-db.md`（数据库角色 / 视图模式）、`docs/features/route-map.md`（地图 tooltip / 选中面板）、`docs/features/route-detail.md`（Route / ZIP 标识）、`docs/open-questions.md`「Route Quotation」。
 - **不做（本阶段）：** Lark Bot / Lark Sheet 同步、xlsx 解析依赖、电子围栏附加费（模板第二个 sheet）、历史价格查询 UI、Station / District 价格汇总、写入 UI、DMS 改动、Route / ZIP snapshot 改动。
 
@@ -219,7 +219,8 @@ json 数据源实现同一接口：`readCurrentFirstPrices` 返回空，`readRou
 
 ### 7.1 线路档案（3000 `/`）
 
-- 新增列「首票价格」，位置在 DSP 之后或末尾（实现时按截图 `线路档案.png` 布局确定，预览时由 Product Owner 确认）。表头 `title` 显示完整名称「首票价格 0–1(lb) / Quotation for the First Parcel 0–1(lb)」。
+- 新增列「首票价格」，位于 **PPH 右侧**（Product Owner 2026-11-05 预览后决定）。主表列顺序：线路名称 / DSP / Pickup Volume / PPH / 首票价格 / 首公里距离 (mi) / 线路难度。
+- **同时从主表移除「人工难度」列**（Product Owner 2026-11-05）。仅移除主表展示：线路详情弹窗基础信息中的人工难度、`route_difficulty_manual` 字段的抓取、存储和 API 均保持不变。表头 `title` 显示完整名称「首票价格 0–1(lb) / Quotation for the First Parcel 0–1(lb)」。
 - 单元格：`$1.75` / `$1.75–$1.95` / `—`。有价格时为按钮，点击打开价格详情；`—` 不可点击。
 - 可排序：按最低价排序，无价格排最后。
 - 不显示其他重量段或续票价格。
@@ -332,7 +333,7 @@ RQ-Q1、Q2、Q7、Q9 已由 Product Owner 回答（RQ-D11 至 RQ-D15）。其余
 |---|---|---|
 | RQ-T1 | migration 005（表 + 重量段种子 + 视图 + reader 授权）+ DB 测试（仅测试库），不在正式库执行、不创建任何角色 | 已授权（PO 2026-11-05） |
 | RQ-T2 | `server/src/quotations/` 纯函数 + 数据源 + API 字段 + 详情接口 + 降级 + parity 调整，fixture 测试 | 已授权（PO 2026-11-05） |
-| RQ-T3 | 线路档案列、地图 tooltip / 面板、价格详情组件 | RQ-T2 |
+| RQ-T3 | 线路档案列、地图 tooltip / 面板、价格详情组件 | 已授权（PO 2026-11-05） |
 | RQ-T4 | migration 006 写入角色 `nc_quotation` + 导入入口（Lark 或正式报价文件，RQ-D15），按第 8 节行级部分导入；如需 xlsx 解析依赖另行批准 | 数据源准备好后另行授权 |
 
 正式库执行 migration、创建角色、导入真实报价均需 Product Owner 单独批准。
@@ -363,3 +364,19 @@ RQ-Q1、Q2、Q7、Q9 已由 Product Owner 回答（RQ-D11 至 RQ-D15）。其余
 - 全量测试发现现有 district 测试的两处清理逻辑与新增 Station 外键不兼容：`district-db.test.js` 第 170、188 行只 TRUNCATE 原有表，PostgreSQL 因 `route_quotation_lines` 引用 `known_stations` 而报 `0A000`。已单独复现两项失败；修改清理 SQL 不属于本轮仅允许的 migration 数量 / 版本断言例外，故未修改。经 Product Owner 2026-11-05 选择，由 Claude 直接修复：两处 TRUNCATE 增加 `route_quotation_prices, route_quotation_lines, route_quotation_imports`，外键保留。修复后 `npm test` 688/688 通过，0 跳过（含真实测试库 DB 测试）。
 - 运维注意：`route_quotation_lines.station_code` 引用 `known_stations`。今后若手动重置 District 种子（TRUNCATE / 删除 `known_stations`），必须同时处理报价表，否则会被外键拒绝。正式代码中没有 TRUNCATE / DELETE `known_stations` 的路径。
 - 已知覆盖缺口：数据库测试无法控制 `now()`，UTC / 洛杉矶跨日只验证了日期换算表达式，没有在跨日时刻实际查询视图（AC3 部分覆盖）。
+
+### RQ-T3（2026-11-05）
+
+- 线路档案在 PPH 右侧显示可排序的首票价格列；主表移除人工难度列，人工难度仅在线路详情弹窗显示，按最低价排序、缺价最后、同价保留 API 顺序；排序循环沿用现有降序 / 升序 / API 顺序。仅 `quoted_zip_count > 0` 显示详情按钮，主界面仅展示 0–1(lb) 首票单值或区间。
+- 地图 ZIP tooltip 和单归属 ZIP 面板展示 ZIP 自己的首票价格；多站点 owners 分别展示价格；线路面板展示线路价格区间及详情入口，传入当前 ZIP 以高亮对应报价组。
+- 新增共享 `web/price-detail.js`，动态创建单一原生 dialog，采用与 Route Detail 一致的关闭按钮 / Esc / 遮罩 / 焦点恢复和请求序号机制；加载、空报价、404、503、通用白名单错误及网络错误均有状态，错误可重试。按 API 顺序及 `label_zh` 展示全部重量段与首票 / 续票，完整列出每组 ZIP、元数据、缺价 / 额外 ZIP、未来生效提示及独立报价更新时间。
+- 修改文件：`web/format.js`、`web/app.js`、`web/index.html`、`web/map-view.js`、`web/map-panel.js`、`web/map-text.js`、新 `web/price-detail.js`；`web/styles.css` 仅在末尾追加 `/* Route quotation (RQ-T3) */` 块；`server/src/api/static-files.js` 仅追加新模块静态白名单，未改后端逻辑 / migration / 依赖。
+- 新增 `server/test/route-quotation-web.test.js`（6 项测试）并仅在 `server/test/index.js` 末尾追加注册。现有测试调整限于新增内容：`t7.test.js` 表头数 7 → 8、人工难度检查限定原两列；`profile-zip-search.test.js` 排序箭头数 2 → 3；`route-map-web.test.js` tooltip 行数 3 → 4、tooltip / ZIP 面板预期追加价格。未修改其他任务已有的改动。
+- 与第 7 节的实现细化：按 Product Owner 预览反馈及第 7.1 节将价格列放在 PPH 右侧，主表保留 7 列；详情采用共享原生 dialog（沿用 Route Detail），不另建抽屉系统；适用 ZIP 全部列出，不使用示意图中的截断展示。技术容错：价格区间若只有一端为有限数，展示该端价格；正常 API 两端同时提供或同时为空。
+- 验证：`npm.cmd test` 699/699 通过、0 失败、0 跳过；专项测试单独执行 6/6 通过。项目没有 lint / build 命令。`git diff --check` 通过。使用现有 Playwright 与临时本地 HTTP 服务、合成 fixture 做真实 Chromium 检查：线路档案加载、价格排序入口、两页共享弹窗、7 行价格、Esc / 焦点恢复、地图 ZIP 查询 / 组高亮、390px 窄屏表格横向滚动，未发现 pageerror。截图和临时检查脚本仅保留在忽略的 `.handoff/` 下；未访问 DMS、未导入真实报价、未执行正式库 migration、commit / push / 部署。完整旧地图交互仍由原有自动测试覆盖，未逐一人工操作 legacy 页面或价格 CSV 工作流。
+- 本地预览：运行 `npm run server`（PowerShell 可用 `npm.cmd run server`），打开 `http://127.0.0.1:3000/` 与 `http://127.0.0.1:3000/map`。正式库尚未执行 migration 005 时，价格显示 `—` 且没有详情按钮属正常降级；json 模式同样如此。UI 仍待 Product Owner 本地预览签字，未将 spec AC12 标为完成。
+- Claude review（RQ-T3，2026-11-05）：本机 `npm test` 699/699 通过、0 跳过；代码只用 `textContent` / `createElement`，弹窗行为与 route-detail 一致，样式只在 `web/styles.css` 末尾追加。用本地预览脚本（DMS 数据来自只读库，报价为明显虚构的 $9.xx 示例值，脚本不进仓库、不写库）在无头 Chromium 中检查线路档案价格列（单值 / 区间 / `—`）、价格详情弹窗分组与 7 行价格表、地图页加载，无页面 JS 错误。
+
+- RQ-T3 review r1：更新 `t7.test.js` 的表头数及单元格位置 / 主表难度断言、`route-quotation-web.test.js` 的价格位置与完整 7 列顺序断言、`rd1.test.js` 的主表难度位置并明确断言详情仍有人工难度。仅调整列顺序 / 列数导致受影响的检查。
+- review r1 验证：`npm.cmd test` 699/699 通过，0 失败、0 跳过；`git diff --check` 通过。使用现有 Playwright、临时本地 HTTP 服务和合成 fixture 在 Chromium 中检查主表 7 列顺序、详情保留人工难度、价格排序 / 详情入口、地图 ZIP 高亮与窄屏显示，无 pageerror。项目无 lint / build 命令。本轮未改后端、数据、依赖或 CSS，未 commit / push / 部署；待 Product Owner 再次预览确认。
+- Product Owner 2026-11-05 预览后调整（review r1）：首票价格移到 PPH 右侧，主表移除人工难度（详情弹窗保留）。调整后 Claude 复核 `npm test` 699/699 通过、截图核对列顺序；Product Owner 同日预览签字。

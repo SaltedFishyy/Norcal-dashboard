@@ -537,7 +537,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据']);
   assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('B'));
-  assert.equal(groups[0].layers[0].tooltip.children.length, 3);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 4);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[2].textContent), ['B', 'D']);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[0].style.backgroundColor), [difficultyColor('B'), difficultyColor('D')]);
   assert.equal(map.fits.length, fits); assert.equal(requests.length, calls); assert.equal(groups.length, count);
@@ -546,7 +546,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.equal(legend.children[0].textContent, '颜色：Mock-A 的 ZIP 难度');
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('A'));
   assert.equal(groups[0].layers[1].styles.at(-1).fillColor, difficultyColor(null));
-  assert.equal(groups[0].layers[1].tooltip.children.length, 3);
+  assert.equal(groups[0].layers[1].tooltip.children.length, 4);
   assert.match(allText(e['map-summary']), /已有 1 个 ZIP/); // Cache row count, not profile ZIP count.
   assert.match(allText(e['map-selection']), /ZIP 难度 A级 难/);
   const highlight = groups.filter(group => !group.options.pane).at(-1).layers[0];
@@ -554,7 +554,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   mode.children[0].listeners.click();
   assert.equal(legend.hidden, true);
   assert.equal(highlight.styles.at(-1).fillColor, polygonStyle({route_id: 1}, selectRoute(1)).fillColor);
-  assert.equal(highlight.tooltip.children.length, 3);
+  assert.equal(highlight.tooltip.children.length, 4);
   mode.children[1].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
@@ -576,7 +576,7 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.match(allText(e['map-summary']), /暂无 ZIP 难度数据/);
   assert.doesNotMatch(allText(e['map-summary']), /npm run/);
   assert.ok(groups[0].layers.every(layer => layer.styles.at(-1).fillColor === '#9ca3af'));
-  assert.equal(groups[0].layers[0].tooltip.children.length, 3);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 4);
   const { details } = await import('./route-map-fixtures.js');
   const cache = details(); cache.routes['1'].zips[0].postal_code_difficulty = null;
   const updated = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
@@ -584,7 +584,7 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.doesNotMatch(e['map-message'].textContent, /文件无效/);
   const current = groups.at(-1).layers;
   current[0].listeners.click({});
-  assert.equal(current[0].tooltip.children.length, 3);
+  assert.equal(current[0].tooltip.children.length, 4);
   assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
   current[1].listeners.click({});
   assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
@@ -680,7 +680,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   await restored.page.start(); assert.equal(restored.elements['map-district'].value, 'other'); assert.equal(restored.elements['map-station'].value, 'OTHER');
 });
 
-test('RM6 compact ZIP fields, badges, safe three-row tooltips and shared clear button', async () => {
+test('RM6 compact ZIP fields, badges, safe four-row tooltips and shared clear button', async () => {
   const { elements: e, page, replies, reply, groups, controls } = await fixture();
   const { details } = await import('./route-map-fixtures.js');
   const source = profiles(), cache = details();
@@ -693,13 +693,13 @@ test('RM6 compact ZIP fields, badges, safe three-row tooltips and shared clear b
   for (const mode of [0, 1]) {
     controls[1].children[mode].listeners.click();
     const tooltip = groups[0].layers[0].tooltip;
-    assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>']]);
+    assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>'], ['首票价格', '—']]);
   }
   groups[0].layers[0].listeners.click({});
   assert.equal(e['map-clear'].parentNode, e['map-zip-heading']);
   const nodes = e['map-selection'].children;
   assert.equal(nodes[0].children[0].textContent, '00002');
-  assert.deepEqual(nodes[1].children.map(row => row.children.map(n => n.textContent)), [['熟手 PPH', '0.00'], ['领件量（日均）', '1,234'], ['DSP', '<Mock DSP>'], ['ZIP 难度', 'A级 难']]);
+  assert.deepEqual(nodes[1].children.map(row => row.children.map(n => n.textContent)), [['熟手 PPH', '0.00'], ['领件量（日均）', '1,234'], ['DSP', '<Mock DSP>'], ['ZIP 难度', 'A级 难'], ['首票价格', '—']]);
   assert.deepEqual(nodes[2].children.map(row => row.children.map(n => n.textContent)), [['站点', 'MOCKA']]);
   assert.equal(nodes[1].children[3].children[1].style.backgroundColor, '#dc2626');
   assert.doesNotMatch(allText(e['map-selection']), /地图已定位|DMS 无数据|该 ZIP 不在线路详情/);
