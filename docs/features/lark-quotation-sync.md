@@ -1,6 +1,6 @@
 # Lark 报价表同步 / Lark Quotation Sync（LQ）
 
-- **状态：** Approved（Product Owner 2026-11-06）。已授权实现 LQ-T1 至 LQ-T4（开发、测试、可审核结果）。**未授权**：正式库 migration、数据库角色创建、部署、服务重启、开启定时同步（LQ-T5、LQ-T6 另行授权）。
+- **状态：** Approved（Product Owner 2026-11-06）。LQ-T1 至 LQ-T4、LQ-T6 已实现；LQ-T5（正式库 migration、首次同步、开启 60 分钟定时同步、重启 Worker）经 Product Owner 2026-11-06 授权已执行，见第 12 节 LQ-T5 记录。UI 待 Product Owner 签字。
 - **上游：** `docs/features/route-quotation.md`（RQ）。本功能是 RQ 第 12 节 **RQ-T4（导入入口）** 的具体化：把数据来源从「手动 xlsx 文件」换成「Lark 表格」。RQ 的数据库（migration 005）、当前价格规则（RQ 第 4.2 节）、API（RQ-T2）、地图 hover / 线路档案 / 价格详情（RQ-T3）全部复用，不另建价格缓存或第二套展示。
 - **相关文档：** `docs/data-schema.md` 第 12 节、`docs/deployment.md`（环境变量、角色）、`docs/open-questions.md`「Lark 报价同步」、配置交接与表格验证结果 `docs/workflow/lark-quotation-handoff.md`（第 5.1 节）。
 - **不做：** 聊天机器人、消息事件订阅、长连接 / 回调、AI 模型、自动回复、续票显示到主界面、电子围栏附加费、写回 Lark、自动替换无法匹配的线路。
@@ -224,3 +224,14 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 - 现有首次导入、unchanged、替换历史、删除作废及价格回退用例改用 quotation 客户端执行，reader 验证报价视图。新增权限用例验证禁止操作返回 42501、其他四角色不能写报价、实际序列名及仅 USAGE。refresh-migration / district-db / warehouse-db 的版本列表加入 007，runner BEGIN / COMMIT 次数从 6 调整为 7。
 - 未查看或修改凭据、未访问真实 Lark、未执行正式 migration、未创建角色、未改 Worker / 前端 / 依赖，未提交、推送、部署或重启服务。
 - 验证：`npm.cmd test` 全量 761/761 通过，0 失败、0 跳过，包含专用 quotation 角色的真实测试库用例及 CLI / 调度连接选择回归；`git diff --check` 通过。项目无 lint / build 命令；本任务无 UI 改动，未运行浏览器预览。
+
+### LQ-T5（2026-11-06，Product Owner 授权后由 Claude 执行）
+
+- 正式库（`nc_ops`）执行前核对：已应用 001–004；`nc_quotation` 登录角色已存在，非超级用户、无 CREATEROLE / CREATEDB / BYPASSRLS、无角色成员关系。`npm run db:migrate` 应用 005 / 006 / 007，无错误。
+- 迁移后核对：报价 4 张基表、4 个视图、`route_quotation_lines_id_seq` 存在；`second_parcel_half_price_raw text` 可空；唯一约束 `quotation_import_route_zip_day_key (import_id, route_id, postal_code, effective_from)` 及部分唯一索引 `one_quote_per_key_day` 存在。`nc_quotation` 仅有 `v_active_routes` SELECT、三张报价表 SELECT / INSERT、`route_quotation_lines(voided_at, void_reason)` UPDATE、序列 USAGE；无 DELETE / TRUNCATE、无 `quotation_weight_bands` 写权限。scraper / reader / warehouse / district 对报价表无任何写权限；reader 仅有 4 个报价视图 SELECT。`NC_DB_QUOTATION_URL` 实际登录身份为 `nc_quotation`。
+- 本机 `.env` 增加 `LARK_QUOTATION_SPREADSHEET_TOKEN`、`LARK_QUOTATION_SHEET_ID=uAaPvG`、`LARK_QUOTATION_SYNC_MINUTES=60`；未设置 `LARK_OPEN_API_BASE`，使用默认 `https://open.larkenterprise.com`（连通）。`.env` 中另有一个代码不读取的旧变量 `LARK_BASE_URL`，未改动。
+- `quotes:lark-check`：连接成功，表头有效，269 数据行。dry-run 与 LQ-T0 验证一致：新增 261、拒绝 8（`SFO02-002` `route_not_found`，表格第 25–32 行）、作废 0、警告 8（`half_price_flag_unexpected`，SFO02-027 / SFO02-053 第 221–228 行）。
+- 首次正式同步：`partial`，导入记录 1 条（`source='lark_sheet'`，`imported_by='lark-sync'`），261 行 × 14 价格 = 3654 条价格，覆盖 SFO01 / SFO02 52 条线路；当前 0–1 lb 首票 $1.55–$2.20，无 0 或空价格，无未来报价。随后 dry-run 及 Worker 首次定时同步（22:22Z）均为 `unchanged`（261 不变），验证幂等。
+- UI 核对：3000 线路档案 SFO02 16 / 16 条单价；SFO01 31 条单价、5 条区间（如 SFO01-036 `$1.70–$1.85`）、`SFO01-002`（表中无报价）显示 `—`；价格详情显示 14 档价格、生效 / 结束日期和备注；地图 hover SFO01-004 / 94502 显示 `$1.85`，SFO01-002 / 94619 显示 `—`。3000 只读服务未重启（RQ-T2 API 早已加载，前端静态文件实时读取）。
+- Worker：确认无运行中的刷新后停止 3100 Node 进程，由 `run-service.ps1 -Name worker` 守护在 5 秒后自动重启；capabilities 含 `quotation_sync: true`，`/api/quotation-sync/status` 为 `enabled: true, interval_minutes: 60`。3100 数据状态显示「报价同步 · 定时：每 60 分钟 · 最近成功：2026-11-06 14:22 PST · 最近一次：无变化 · 拒绝行数：8」。
+- 遗留：`SFO02-002` 8 行和 V 列 8 行备注文字需要表格维护方修正（LQ-D6、LQ-Q10）；LQ-Q6 / Q7 仍未决；UI 待 Product Owner 签字。

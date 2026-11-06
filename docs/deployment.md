@@ -43,6 +43,7 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
 | 配置 | 变量名与用途 |
 |---|---|
 | repo 根目录 `.env` | Worker / 抓取：`DATA_SOURCE`、`DB_DUAL_WRITE`、`NC_DB_SCRAPER_URL`、`NC_DB_READER_URL`、`NC_DB_WAREHOUSE_URL`、`DMS_BASE_URL`、`DMS_STATE_PATH`；人工 migration 使用 `NC_DB_OWNER_URL`；可选 `RUNTIME_DATA_DIR`、`WORKER_PORT`。测试使用 `NC_TEST_DB_OWNER_URL`、`NC_TEST_DB_SCRAPER_URL`、`NC_TEST_DB_READER_URL`。 |
+| repo 根目录 `.env`（Lark 报价同步，仅 Worker） | `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_QUOTATION_SPREADSHEET_TOKEN`、`LARK_QUOTATION_SHEET_ID`（第一阶段只允许 SFO 分表 `uAaPvG`）、`NC_DB_QUOTATION_URL`（`nc_quotation` 写入角色，正式同步必需，不回退其他角色）；可选 `LARK_OPEN_API_BASE`（默认 `https://open.larkenterprise.com`，程序拼接 `/open-apis`）、`LARK_QUOTATION_SYNC_MINUTES`（定时同步间隔，未设置或 `0` 为关闭，仅 `DATA_SOURCE=db` 时生效，非法值禁用；当前 60）、`LARK_QUOTATION_MAX_REMOVAL_RATIO`（默认 `0.2`）。测试使用 `NC_TEST_DB_QUOTATION_URL`。不得放入 `readonly.env`。 |
 | 仓库外 `readonly.env` | `DATA_SOURCE`、`NC_DB_READER_URL`、`LISTEN_HOST`、`PORT`，可选 `RUNTIME_DATA_DIR`。只有 reader 只读视图；不得放入 warehouse 凭据，局域网模式会拒绝启动。没有 owner、scraper 或 DMS 配置。 |
 
 配置按 spec 第 22.1 节设为 DB 数据源和双写，局域网只读监听采用架构图地址。只读启动命令显式使用 `--env-file=<readonly.env>`，不读取 repo `.env`。不要用 `npm run server` 替代局域网启动命令，它会加载 repo `.env`。只读子进程还清除继承的 DB / DMS 配置及 `NODE_OPTIONS`，使独立 env 文件成为配置来源。配置文件及 secrets 目录权限只授予当前部署用户，不放入同步目录。
@@ -50,6 +51,8 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
 ## 首次部署顺序
 
 仓库管理升级顺序：先用 `nc_admin` 创建 warehouse 角色（见 [Warehouse spec 第 13 节 T0](features/warehouses.md#13-实现记录)），再由获批的部署操作执行 migration 003，然后重启服务。T2 实现不执行这些部署动作。Worker 的 `.env` 可配置 `NC_DB_WAREHOUSE_URL`，测试使用 `NC_TEST_DB_WAREHOUSE_URL`，只给 Worker（3100）使用，不放进 readonly.env。3100 固定只允许 loopback Host。
+
+报价同步升级顺序（LQ-T5，2026-11-06 已在正式库执行）：管理员先创建 `nc_quotation` 登录角色（无特权、无成员关系），再 `npm run db:migrate` 执行 005 / 006 / 007；`.env` 配置上表 Lark 变量；`npm run quotes:lark-check` → `npm run quotes:sync-lark -- --dry-run` 核对计划 → `npm run quotes:sync-lark` 首次同步；最后设置 `LARK_QUOTATION_SYNC_MINUTES` 并重启 Worker。Worker 启动后 60 秒首跑，之后每次完成后按间隔串行执行；每次尝试写入 runtime 目录 `quotation-sync-status.json`，3100 数据状态显示「报价同步」行。读取 / 表头失败不改库，保留上次成功数据。只读 3000 不接触 Lark 凭据。
 
 启动检查分级：3100 的 warehouse 权限检查通过且使用 DB 数据源时开启写入；只有 `missing_warehouse_privilege`（表或视图不存在、授权不足）或连接失败时，记录一行日志并关闭写入，服务正常启动；任何权限过大问题拒绝启动，只输出一行中文原因。3000 LAN 的 reader 隔离检查在既有 `canWriteRuns` 检查之后执行：只有缺少 warehouse 权限时仍启动（视图未就绪时仓库 GET 返回 503），权限过大时拒绝启动。3000 局域网模式下出现 warehouse 凭据时拒绝启动；本机模式忽略该凭据。
 
