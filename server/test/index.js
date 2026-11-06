@@ -53,3 +53,5 @@ import './warehouse-web.test.js';
 
 import './district-db.test.js';
 import './route-quotation-db.test.js';
+
+import './route-quotation.test.js';

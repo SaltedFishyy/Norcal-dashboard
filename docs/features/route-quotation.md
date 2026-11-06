@@ -1,6 +1,6 @@
 # Route Quotation / DSP 报价（RQ）
 
-- **状态：** In review — RQ-T1 代码与测试完成，待 Product Owner 确认提交（设计 Approved，Product Owner 2026-11-05；同日授权实现 RQ-T1）。RQ-T2 至 T4、正式库 migration、创建角色、导入真实报价均需另行授权。
+- **状态：** In review — RQ-T2 代码与测试完成，待 Product Owner 确认提交（RQ-T1 已提交 `6c8cf85`）。RQ-T3、RQ-T4、正式库 migration、创建角色、导入真实报价均需另行授权。
 - **相关文档：** `docs/data-schema.md` 第 12 节、`docs/features/central-db.md`（数据库角色 / 视图模式）、`docs/features/route-map.md`（地图 tooltip / 选中面板）、`docs/features/route-detail.md`（Route / ZIP 标识）、`docs/open-questions.md`「Route Quotation」。
 - **不做（本阶段）：** Lark Bot / Lark Sheet 同步、xlsx 解析依赖、电子围栏附加费（模板第二个 sheet）、历史价格查询 UI、Station / District 价格汇总、写入 UI、DMS 改动、Route / ZIP snapshot 改动。
 
@@ -171,15 +171,18 @@ route_quotation_prices        价格明细（长表）
 |---|---|
 | `GET /api/route-profiles` 每行 | `current_first_0_1lb_price`（全部 ZIP 一致时为数值，否则 null）、`current_first_0_1lb_price_min`、`current_first_0_1lb_price_max`、`quoted_zip_count`、`unquoted_zip_count` |
 | `GET /api/route-map`、`/api/route-map/district` 的 feature properties | `current_first_0_1lb_price`（ZIP 自己的价格或 null） |
-| `GET /api/route-map/zip` 每个 owner | `current_first_0_1lb_price` |
-| `GET /api/capabilities` | `route_quotation: true \| false`（json 模式为 false） |
+| `GET /api/route-map`、`/api/route-map/district` 的 `routes[]`（选中 Route 面板用） | 与 `/api/route-profiles` 相同的 5 个 Route 级字段 |
+| `GET /api/route-map/zip` | 单一归属时顶层 `current_first_0_1lb_price`，`route` 汇总带 5 个 Route 级字段；多 Station 时每个 owner 带 `current_first_0_1lb_price` |
+| `GET /api/capabilities` | `route_quotation: true \| false`（`DATA_SOURCE=db` 为 true，json 为 false） |
 
-金额以 JSON number 返回（两位小数精度），格式化只在前端做。
+金额以 JSON number 返回（两位小数精度），格式化只在前端做。Route 的 `postal_codes` 缺失（旧 snapshot）时 5 个 Route 级字段全部为 null。报价不可用（json 模式或报价读取失败）时，5 个字段（含两个计数）也全部为 null；报价可用但该 Route 没有报价时，价格为 null、`quoted_zip_count = 0`、`unquoted_zip_count = ZIP 数`。前端据此区分「无数据源」与「无报价」。
+
+**降级规则（2026-11-05，RQ-T2）：** 主接口（profiles / map / district / zip）读取报价失败时（例如正式库尚未执行 migration 005、视图不存在），价格字段一律为 null，主接口照常返回 200，不因报价不可用而 503。报价读取必须与 DMS 数据读取分开（不在同一个数据库事务中），避免一个失败使另一个回滚。详情接口在报价不可用时返回 503。这样 RQ-T2 代码可以先于正式库 migration 上线。
 
 ### 6.2 新增价格详情接口
 
 ```text
-GET /api/route-quotations/:route_id
+GET /api/route-quotations?route_id=<id>    // 与 /api/route-details 一致使用查询参数
 200 {
   route_id, route_name, station,
   weight_bands: [{ code, label_zh, label_en }],           // 按 ordinal
@@ -192,24 +195,25 @@ GET /api/route-quotations/:route_id
   unquoted_postal_codes: [...],     // DMS 当前 Route 有、无当前报价
   extra_quoted_postal_codes: [...], // 有当前报价、DMS 当前 Route 不含
   upcoming: [{ postal_codes, effective_from }],          // 未来生效（只提示日期）
-  updated_at                                             // 最近一次相关导入时间
+  updated_at                                             // 当前报价行（groups + extra）的最大 imported_at；不含 upcoming；无当前报价为 null
 }
+400 invalid_route_id    参数缺失 / 非正整数（规则同 /api/route-details）
 404 route_not_found     Route 不在任何 active snapshot
-503 data_source_unavailable / json 模式
+503 data_source_unavailable   json 模式，或报价视图不可用
 ```
 
-分组键 = 14 个价格 + `effective_from` + `end_date` + `fleet_name` 全部相同。历史查询（`?as_of=`、`/history`）不在本阶段。
+分组键 = 14 个价格 + `effective_from` + `end_date` + `fleet_name` + `remarks` + `quotation_date` 全部相同（避免同组内元数据不一致）。组内 ZIP 按字符串排序，组按最小 ZIP 排序。历史查询（`?as_of=`、`/history`）不在本阶段。
 
 ### 6.3 分层
 
 ```text
-PostgreSQL 视图 → db-data-source（listCurrentFirstPrices / getRouteQuotation）
+PostgreSQL 视图 → db-data-source（readCurrentFirstPrices / readRouteQuotation）
                → server/src/quotations/（汇总、分组、join 规则，纯函数）
                → route-map.js / profile 投影只调用 quotations 模块
                → API
 ```
 
-json 数据源实现同一接口并返回空结果。不把汇总逻辑写进 `route-map.js`。
+json 数据源实现同一接口：`readCurrentFirstPrices` 返回空，`readRouteQuotation` 抛 `DataSourceUnavailableError`。不把汇总逻辑写进 `route-map.js`（route-map 只接收价格索引并调用 quotations 模块）。
 
 ## 7. UI 设计
 
@@ -309,8 +313,9 @@ json 数据源实现同一接口并返回空结果。不把汇总逻辑写进 `r
 - **AC3** 日期以 `America/Los_Angeles` 自然日计算（测试覆盖 UTC 跨日时刻）。
 - **AC4** `/api/route-profiles` 返回单值 / 区间 / 部分缺价 / 全部缺价四种情况的字段正确。
 - **AC5** 地图 feature 的价格为 ZIP 自己的价格；ZIP 切到另一 Route 时不显示旧 Route 价格。
-- **AC6** `/api/route-quotations/:route_id` 按完全相同的价格分组，返回 14 个价格、日期、Fleet、备注、缺价 ZIP、额外 ZIP、未来生效提示；未知 Route 返回 404。
+- **AC6** `/api/route-quotations?route_id=` 按完全相同的价格分组，返回 14 个价格、日期、Fleet、备注、缺价 ZIP、额外 ZIP、未来生效提示；未知 Route 返回 404。
 - **AC7** json 模式下所有价格字段为 null，`route_quotation=false`，UI 显示 `—` 且无详情入口。
+- **AC7b** db 模式下报价视图不可用时，主接口照常 200、价格为 null，详情接口 503。
 - **AC8** 线路档案显示「首票价格」列（`$1.75` / `$1.75–$1.95` / `—`），可排序，点击打开详情；主表不出现其他重量段。
 - **AC9** 地图 tooltip 显示「首票价格」行；Route 面板有详情入口；详情组件两个页面共用。
 - **AC10** 金额统一两位小数加 `$`；重量段标签来自 API。
@@ -326,13 +331,26 @@ RQ-Q1、Q2、Q7、Q9 已由 Product Owner 回答（RQ-D11 至 RQ-D15）。其余
 | 任务 | 内容 | 依赖 |
 |---|---|---|
 | RQ-T1 | migration 005（表 + 重量段种子 + 视图 + reader 授权）+ DB 测试（仅测试库），不在正式库执行、不创建任何角色 | 已授权（PO 2026-11-05） |
-| RQ-T2 | `server/src/quotations/` 纯函数 + 数据源 + API 字段 + 详情接口 + parity 调整，fixture 测试 | RQ-T1 |
+| RQ-T2 | `server/src/quotations/` 纯函数 + 数据源 + API 字段 + 详情接口 + 降级 + parity 调整，fixture 测试 | 已授权（PO 2026-11-05） |
 | RQ-T3 | 线路档案列、地图 tooltip / 面板、价格详情组件 | RQ-T2 |
 | RQ-T4 | migration 006 写入角色 `nc_quotation` + 导入入口（Lark 或正式报价文件，RQ-D15），按第 8 节行级部分导入；如需 xlsx 解析依赖另行批准 | 数据源准备好后另行授权 |
 
 正式库执行 migration、创建角色、导入真实报价均需 Product Owner 单独批准。
 
 ## 13. 实现记录（Implementation Notes）
+
+### RQ-T2 / review r1（2026-11-05）
+
+- 新增 `server/src/quotations/quotations.js`：Route + ZIP 索引、五字段 Route 汇总、完整价格详情分组。索引默认 null 表示不可用；空 Map 表示可用但无报价。不可用时五字段（含计数）全部 null；空 Map 返回 0 个已报价和实际缺价 ZIP 数。
+- profiles、单站/片区地图及 ZIP 查询在 API 装配层合并报价；无归属 ZIP 保留原结构，不新增价格字段。详情接口复用 route-details 的参数校验，提供 200 / 400 / 404 / 503；只匹配 active snapshot 中的 Route。`updated_at` 仅取当前报价行（groups + extra）的最大 imported_at，不含 upcoming，无当前报价为 null。
+- DB 两个报价读取方法各自使用独立 read 事务，与 DMS 读取隔离。SQL 将 date 转 text，bigint / numeric 转 Number，时间转 ISO；未改 migration。JSON 数据源提供空首票列表，详情抛不可用异常；装配层按 source 区分不可用与可用空列表。报价读取任何异常只使主接口报价字段降级，不输出错误详情，DMS 错误仍传播。
+- 共用 API server 为只读服务及 Worker 提供 `route_quotation` capability；parity 递归排除五个报价字段，仍比较其余字段，不调用详情接口。
+- 新增 `route-quotation.test.js`，覆盖纯函数分组/汇总、不可用与空报价区别、当前/extra/upcoming 时间语义、HTTP 字段/状态/两服务 capability、parity 和 createTestDb 随机 schema 的真实 reader 测试。index 仅追加测试注册，保留已有 language-switch 注册。
+- 现有测试仅更新新增字段导致变化的响应断言：`route-map.test.js`、`t6.test.js`、`tableau-export.test.js`；capability 完整对象断言：`freshness.test.js`、`readonly-server.test.js`、`worker.test.js`、`warehouse-setup.test.js`。其余任务已有未提交改动保留。
+- 技术选择：以已更新的第 6.1 / 6.2 节及 review r1 为准，覆盖 brief 中较早的“默认空索引”和“相关行”表述；upcoming 视图没有 imported_at，保持不变。无需求或验收标准变更。
+- 验证结果：`npm.cmd test` 693/693 通过、0 失败、0 跳过；新增 RQ-T2 测试单独执行 5/5 通过、0 跳过，含真实测试库验证。`git diff --check` 通过。PowerShell 拒绝执行 npm.ps1 后使用 npm.cmd，未更改执行策略。项目没有 lint / build；未进行浏览器手工检查，未执行正式库 parity CLI、db:migrate、commit、push 或部署。
+
+- Claude review（2026-11-05）：本机 `npm test` 693/693 通过、0 跳过。用本机 `.env`（`DATA_SOURCE=db`，reader 只读连接，该库尚未执行 migration 005）临时启动只读 server 实测：`/api/capabilities` 含 `route_quotation: true`；`/api/route-profiles`、`/api/route-map` 均 200，五个价格 / 计数字段为 null；`/api/route-quotations` 返回 503 `data_source_unavailable`。与降级规则一致，确认 RQ-T2 代码可先于正式库 migration 上线。
 
 ### RQ-T1（2026-11-05）
 

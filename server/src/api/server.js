@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { StationNotFoundError, SnapshotNotFoundError } from '../store/route-profiles-file.js';
+import { buildPriceIndex, routePriceSummary, buildRouteQuotation, RouteNotFoundError } from '../quotations/quotations.js';
+import { DataSourceUnavailableError } from '../store/data-source.js';
 import { createJsonDataSource } from '../store/data-source.js';
 import { readDistricts, DistrictNotFoundError } from '../store/districts-file.js';
 import { readBoundaries } from '../store/boundaries-file.js';
@@ -21,6 +23,11 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
   leafletDir = defaultLeafletDir, protomapsDir = defaultProtomapsDir,
   basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, districtsPath, log,
   capabilities, extraHandlers = new Map(), warehouses = {}, dataSource = createJsonDataSource({ runtimeDir }) } = {}) {
+  const readPriceIndex = async () => {
+    if (dataSource.source !== 'db') return null;
+    try { return buildPriceIndex(await dataSource.readCurrentFirstPrices()); }
+    catch { return null; } // Isolate quotation failures from DMS reads; never expose driver errors.
+  };
   const districtProfiles = async () => {
     try { return await dataSource.readRouteProfiles(); }
     catch (error) { if (error instanceof SnapshotNotFoundError) return { stations: {} }; throw error; }
@@ -56,15 +63,31 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
     warehouseHandlers.set(pathname, handler);
   }
   return http.createServer(createRequestHandler({
-    capabilities: { refresh: false, ...capabilities, warehouse_write: Boolean(warehouses.writeEnabled) },
+    capabilities: { refresh: false, ...capabilities, warehouse_write: Boolean(warehouses.writeEnabled), route_quotation: dataSource.source === 'db' },
     extraHandlers: warehouseHandlers, readHandlers: createFreshnessHandlers({ dataSource, districtsPath }),
-    getSnapshot: (station) => dataSource.getStationSnapshot(station), log,
+    getSnapshot: async station => {
+      const snapshot = await dataSource.getStationSnapshot(station);
+      const priceIndex = await readPriceIndex();
+      return { ...snapshot, rows: snapshot.rows.map(row => ({ ...row, ...routePriceSummary(priceIndex, row) })) };
+    }, log,
+    getRouteQuotation: async routeId => {
+      let profiles;
+      try { profiles = await dataSource.readRouteProfiles(); }
+      catch (error) { if (error instanceof SnapshotNotFoundError) throw new RouteNotFoundError(); throw error; }
+      const owner = Object.entries(profiles.stations).flatMap(([station, snapshot]) =>
+        snapshot.rows.filter(route => route.route_id === routeId).map(route => ({ route, station })))[0];
+      if (!owner) throw new RouteNotFoundError();
+      let quotation;
+      try { quotation = await dataSource.readRouteQuotation(routeId); }
+      catch { throw new DataSourceUnavailableError(); }
+      return buildRouteQuotation({ ...owner, ...quotation });
+    },
     getRouteDetail: (routeId) => dataSource.getRouteDetail(routeId),
     getRouteMap: async station => {
       const profiles = await dataSource.readRouteProfiles();
       if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
       const boundaries = await readBoundaries({ geoDir });
-      return buildRouteMap({ profiles, station, boundaries, details: await dataSource.readRouteDetailsForMap() });
+      return buildRouteMap({ profiles, station, boundaries, priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() });
     },
     getMapStations: async () => {
       const districts = await readDistricts({ districtsPath, profiles: await dataSource.readRouteProfiles() });
@@ -76,10 +99,10 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
       const districts = await readDistricts({ districtsPath, profiles });
       if (!districts.some(item => item.id === district)) throw new DistrictNotFoundError();
       return buildDistrictMap({ profiles, districts, district, boundaries: await readBoundaries({ geoDir }),
-        details: await dataSource.readRouteDetailsForMap() });
+        priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() });
     },
     getZip: async postalCode => lookupZip({ profiles: await dataSource.readRouteProfiles(),
-      boundaries: await readBoundaries({ geoDir }), postalCode, details: await dataSource.readRouteDetailsForMap() }),
+      boundaries: await readBoundaries({ geoDir }), postalCode, priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() }),
     getStaticFile: createStaticReader(webDir, leafletDir, protomapsDir),
     getBasemap: name => readBasemap({ basemapDir, name }),
   }));

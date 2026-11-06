@@ -1,3 +1,4 @@
+import { routePriceSummary } from '../src/quotations/quotations.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildRouteMap, lookupZip, PostalCodesMissingError, RouteZipConflictError } from '../src/route-map/route-map.js';
@@ -58,8 +59,8 @@ test('route map joins, classifies missing ZIPs, sorts and preserves inputs with 
   assert.deepEqual(result.coverage, { total: 4, mapped: 2, missing: 2, missing_no_zcta: 1, missing_not_checked: 1 });
   assert.equal(result.coverage.mapped + result.coverage.missing, result.coverage.total);
   assert.deepEqual(result.routes, [
-    { route_id: 1, route_name: 'Mock-A', zip_count: 2, mapped_count: 2, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
-    { route_id: 2, route_name: 'Mock-B', zip_count: 2, mapped_count: 0, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
+    { ...routePriceSummary(null, {}), route_id: 1, route_name: 'Mock-A', zip_count: 2, mapped_count: 2, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
+    { ...routePriceSummary(null, {}), route_id: 2, route_name: 'Mock-B', zip_count: 2, mapped_count: 0, station: 'MOCKA', dsp_name: null, pickup_volume: null, pph: null, route_difficulty: null, zip_detail: { status: 'missing', fetched_at: null, zip_count: null } },
   ]);
   assert.deepEqual(result.missing, [
     { postal_code: '00004', route_id: 2, route_name: 'Mock-B', reason: 'no_zcta' },
@@ -67,7 +68,7 @@ test('route map joins, classifies missing ZIPs, sorts and preserves inputs with 
   ]);
   assert.equal(result.features.type, 'FeatureCollection');
   assert.deepEqual(result.features.features.map(f => f.properties), ['00002', '00123'].map(postal_code =>
-    ({ postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA', dsp_name: null, experienced_pph: null, pickup_volume_daily: null, route_difficulty: null, zip_difficulty: null, zip_detail_status: 'missing' })));
+    ({ current_first_0_1lb_price: null, postal_code, route_id: 1, route_name: 'Mock-A', station: 'MOCKA', dsp_name: null, experienced_pph: null, pickup_volume_daily: null, route_difficulty: null, zip_difficulty: null, zip_detail_status: 'missing' })));
   assert.deepEqual(result.features.features[0].geometry, boundary.geojson.features[1].geometry);
   assert.doesNotMatch(JSON.stringify(result), /color|raw|source_url/);
 });
@@ -153,7 +154,7 @@ test('RM5 detail join is exact by route, Station and ZIP, without inference or i
   assert.deepEqual(result.cross_station_conflicts, [{ postal_code: '00002', stations: ['MOCKA', 'MOCKB'] }]);
   const lookup = lookupZip({ profiles: data, boundaries: boundary, postalCode: '00002' });
   assert.equal(lookup.status, 'multi_station'); assert.equal(lookup.station, null); assert.equal(lookup.route, null);
-  assert.deepEqual(lookup.owners, [{ station: 'MOCKA', route_id: 1, route_name: 'Mock-A' }, { station: 'MOCKB', route_id: 3, route_name: 'Mock-C' }]);
+  assert.deepEqual(lookup.owners, [{ station: 'MOCKA', route_id: 1, route_name: 'Mock-A', current_first_0_1lb_price: null }, { station: 'MOCKB', route_id: 3, route_name: 'Mock-C', current_first_0_1lb_price: null }]);
   assert.deepEqual(lookup.geometry, boundary.byZip.get('00002'));
   data.stations.MOCKB.rows.push({ ...data.stations.MOCKB.rows[0], route_id: 4 });
   assert.doesNotThrow(() => build(data));

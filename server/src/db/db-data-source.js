@@ -41,6 +41,24 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
   };
   return {
     source: 'db',
+    readCurrentFirstPrices: () => read(async client => (await client.query(
+      'SELECT route_id,postal_code,price FROM v_route_quotation_first_0_1lb')).rows.map(row => ({
+      route_id: Number(row.route_id), postal_code: row.postal_code, price: row.price == null ? null : Number(row.price) }))),
+    readRouteQuotation: routeId => read(async client => {
+      // Cast dates in SQL to avoid pg's local-time Date parser and UTC date shifts.
+      const current = (await client.query(`SELECT *, effective_from::text AS effective_from,
+        end_date::text AS end_date, quotation_date::text AS quotation_date
+        FROM v_route_quotation_current WHERE route_id=$1`, [routeId])).rows.map(row => ({ ...row,
+        route_id: Number(row.route_id), line_id: Number(row.line_id),
+        imported_at: row.imported_at == null ? null : new Date(row.imported_at).toISOString(),
+        first_prices: Object.fromEntries(Object.entries(row.first_prices).map(([k, v]) => [k, Number(v)])),
+        additional_prices: Object.fromEntries(Object.entries(row.additional_prices).map(([k, v]) => [k, Number(v)])) }));
+      const upcoming = (await client.query(`SELECT *, effective_from::text AS effective_from
+        FROM v_route_quotation_upcoming WHERE route_id=$1`, [routeId])).rows
+        .map(row => ({ ...row, route_id: Number(row.route_id) }));
+      const weightBands = (await client.query('SELECT * FROM v_quotation_weight_bands ORDER BY ordinal')).rows;
+      return { current, upcoming, weightBands };
+    }),
     checkReaderWarehouseIsolation: () => read(client => checkReaderWarehouseIsolation(client)),
     readWarehouses: ({ districtId } = {}) => read(async client => (await client.query(
       'SELECT * FROM v_warehouses WHERE ($1::text IS NULL OR district_id=$1) ORDER BY warehouse_name', [districtId ?? null])).rows),

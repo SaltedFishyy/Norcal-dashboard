@@ -31,7 +31,7 @@ test('CD-AC25/30 JSON capabilities, refresh absence, full station freshness, lim
     { id: 'empty', name_zh: '空', name_en: 'Empty', stations: ['CCC01'] },
   ] }));
   const get = await open(t, f, createJsonDataSource(f));
-  assert.deepEqual((await get('/api/capabilities')).body, { refresh: false, warehouse_write: false });
+  assert.deepEqual((await get('/api/capabilities')).body, { refresh: false, warehouse_write: false, route_quotation: false });
   for (const [pathname, method] of [['/api/refresh', 'POST'], ['/api/refresh/status', 'GET'], ['/api/refresh/preview', 'GET']])
     assert.equal((await get(pathname, method)).status, 404);
   const result = (await get('/api/freshness')).body;

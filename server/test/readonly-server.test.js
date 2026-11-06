@@ -45,7 +45,7 @@ test('CD-AC31 actual test DB scraper refused, reader starts LAN server', async t
       assert.equal(result, 0); assert.equal(server.address().address, '0.0.0.0');
       assert.ok(logs.includes('Server: http://0.0.0.0:3000（局域网只读）'));
       const res = await fetch(`http://127.0.0.1:${server.address().port}/api/capabilities`);
-      assert.deepEqual(await res.json(), { refresh: false, warehouse_write: false });
+      assert.deepEqual(await res.json(), { refresh: false, warehouse_write: false, route_quotation: true });
       await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     }
   }

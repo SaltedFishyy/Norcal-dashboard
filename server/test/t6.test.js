@@ -1,3 +1,4 @@
+import { routePriceSummary } from '../src/quotations/quotations.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -46,7 +47,7 @@ test('T6 health, snapshot preservation, loopback binding and read-only file', as
   await fs.writeFile(filename, content);
   const before = await fs.stat(filename);
   await response(`${url}/api/route-profiles?station=SFO01`, 200,
-    { station: 'SFO01', fetched_at: snapshot.fetched_at, source_as_of: null, total: 1, rows: snapshot.rows.map(({ raw, ...row }) => row) });
+    { station: 'SFO01', fetched_at: snapshot.fetched_at, source_as_of: null, total: 1, rows: snapshot.rows.map(({ raw, ...row }) => ({ ...row, ...routePriceSummary(null, row) })) });
   assert.equal(await fs.readFile(filename, 'utf8'), content);
   assert.equal((await fs.stat(filename)).mtimeMs, before.mtimeMs);
   assert.deepEqual(await fs.readdir(path.dirname(filename)), ['route-profiles.json']);

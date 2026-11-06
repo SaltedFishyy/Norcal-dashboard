@@ -281,5 +281,6 @@ CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数�
 - 导入：行级部分导入。文件级错误整份拒绝；Route 在 DMS active data 中找不到等行级错误只拒绝该行并记录；内容完全相同的重复行跳过，便于修正后整份重导。
 - Station：由 `route_name` 在 DMS active snapshot 中解析出 `route_id` 与 Station；原表 Station 列写法不统一（`OAR` / `SFO02`），只保存原值，不从 `route_name` 解析。
 - 主界面字段：`current_first_0_1lb_price`（首票 0–1 lb）；完整结构只在价格详情接口返回。`DATA_SOURCE=json` 时为 null。
+- RQ-T2 已提供上述主接口字段及 `GET /api/route-quotations?route_id=`；报价不可用时 Route 的五个价格/计数字段均为 null，可用但无报价时返回实际缺价计数；详情 `updated_at` 仅统计当前报价（含 extra ZIP）的最大 `imported_at`，不含 upcoming。
 - 新鲜度：报价的 `effective_from` / `imported_at` 独立于 DMS `fetched_at`。
 - migration 005 已在代码中定义（未部署到正式库）：`quotation_weight_bands`、`route_quotation_imports`、`route_quotation_lines`、`route_quotation_prices`。字段与规则见规格第 4 节。

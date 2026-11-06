@@ -1,3 +1,4 @@
+import { zipFirstPrice, routePriceSummary } from '../quotations/quotations.js';
 import { StationNotFoundError, SnapshotInvalidError } from '../store/route-profiles-file.js';
 import { validatePostalCodes, findPostalCodeConflicts, findCrossStationConflicts } from '../transform/postal-codes.js';
 import { DistrictNotFoundError } from '../store/districts-file.js';
@@ -39,13 +40,13 @@ const difficultyProperties = (row, detail, postalCode) => {
     route_difficulty: row.route_difficulty ?? null, zip_difficulty: zip?.postal_code_difficulty ?? null,
     zip_detail_status: !detail ? 'missing' : zip ? 'available' : 'not_in_detail' };
 };
-const summary = (row, boundaries, mappedCount = row.postal_codes.filter(zip => boundaries.byZip.has(zip)).length, detail = null) => ({ route_id: row.route_id, route_name: row.route_name,
+const summary = (row, boundaries, mappedCount = row.postal_codes.filter(zip => boundaries.byZip.has(zip)).length, detail = null, priceIndex = null) => ({ ...routePriceSummary(priceIndex, row), route_id: row.route_id, route_name: row.route_name,
   station: row.station, dsp_name: row.dsp_name, pickup_volume: row.pickup_volume, pph: row.pph,
   zip_count: row.postal_codes.length, mapped_count: mappedCount, route_difficulty: row.route_difficulty ?? null,
   zip_detail: { status: detail ? 'available' : 'missing', fetched_at: detail?.fetched_at ?? null, zip_count: detail?.zips.length ?? null } });
 const source = boundaries => ({ dataset: boundaries.meta.dataset, vintage: boundaries.meta.vintage });
 
-export function buildRouteMap({ profiles, station, boundaries, details }) {
+export function buildRouteMap({ profiles, station, boundaries, details, priceIndex = null }) {
   if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
   validateProfiles(profiles, station);
   const snapshot = profiles.stations[station];
@@ -56,7 +57,7 @@ export function buildRouteMap({ profiles, station, boundaries, details }) {
     let mapped_count = 0;
     for (const postal_code of row.postal_codes) {
       const properties = { postal_code, route_id: row.route_id, route_name: row.route_name, station,
-        ...difficultyProperties(row, detail, postal_code) };
+        ...difficultyProperties(row, detail, postal_code), current_first_0_1lb_price: zipFirstPrice(priceIndex, row.route_id, postal_code) };
       if (byZip.has(postal_code)) {
         features.push({ type: 'Feature', geometry: byZip.get(postal_code), properties }); mapped_count++;
       } else {
@@ -64,7 +65,7 @@ export function buildRouteMap({ profiles, station, boundaries, details }) {
           reason: boundaries.inScope(postal_code) ? 'no_zcta' : 'not_checked' });
       }
     }
-    routes.push(summary(row, boundaries, mapped_count, detail));
+    routes.push(summary(row, boundaries, mapped_count, detail, priceIndex));
   }
   features.sort((a, b) => compare(a.properties.postal_code, b.properties.postal_code));
   missing.sort((a, b) => compare(a.postal_code, b.postal_code));
@@ -81,11 +82,11 @@ export function buildRouteMap({ profiles, station, boundaries, details }) {
     routes, missing, features: { type: 'FeatureCollection', features } };
 }
 
-export function buildDistrictMap({ profiles, districts, district, boundaries, details }) {
+export function buildDistrictMap({ profiles, districts, district, boundaries, details, priceIndex = null }) {
   const configured = districts.find(item => item.id === district);
   if (!configured) throw new DistrictNotFoundError();
   const maps = configured.stations.filter(({ code }) => Object.hasOwn(profiles.stations, code))
-    .map(({ code }) => buildRouteMap({ profiles, station: code, boundaries, details }));
+    .map(({ code }) => buildRouteMap({ profiles, station: code, boundaries, details, priceIndex }));
   const coverage = { total: 0, mapped: 0, missing: 0, missing_no_zcta: 0, missing_not_checked: 0 };
   for (const map of maps) for (const key of Object.keys(coverage)) coverage[key] += map.coverage[key];
   const members = Object.fromEntries(maps.map(map => [map.station, profiles.stations[map.station]]));
@@ -99,12 +100,13 @@ export function buildDistrictMap({ profiles, districts, district, boundaries, de
       .sort((a, b) => compare(a.postal_code, b.postal_code)) };
 }
 
-export function lookupZip({ profiles, boundaries, postalCode, details }) {
+export function lookupZip({ profiles, boundaries, postalCode, details, priceIndex = null }) {
   validateProfiles(profiles);
   const geometry = boundaries.byZip.get(postalCode) ?? null;
   const owners = Object.entries(profiles.stations).flatMap(([station, snapshot]) => snapshot.rows
     .filter(row => row.postal_codes.includes(postalCode))
-    .map(row => ({ station, route_id: row.route_id, route_name: row.route_name })))
+    .map(row => ({ station, route_id: row.route_id, route_name: row.route_name,
+      current_first_0_1lb_price: zipFirstPrice(priceIndex, row.route_id, postalCode) })))
     .sort((a, b) => compare(a.station, b.station));
   if (owners.length > 1) return { postal_code: postalCode, status: 'multi_station', owners,
     station: null, route_id: null, route_name: null, route: null, fetched_at: null,
@@ -114,7 +116,8 @@ export function lookupZip({ profiles, boundaries, postalCode, details }) {
     const detail = row && detailFor(details, row, station);
     if (row) return { postal_code: postalCode, status: geometry ? 'covered' : 'covered_no_boundary',
       ...difficultyProperties(row, detail, postalCode),
-      station, route_id: row.route_id, route_name: row.route_name, route: summary(row, boundaries, undefined, detail),
+      current_first_0_1lb_price: zipFirstPrice(priceIndex, row.route_id, postalCode),
+      station, route_id: row.route_id, route_name: row.route_name, route: summary(row, boundaries, undefined, detail, priceIndex),
       fetched_at: snapshot.fetched_at, geometry, boundary_source: source(boundaries) };
   }
   return { postal_code: postalCode,

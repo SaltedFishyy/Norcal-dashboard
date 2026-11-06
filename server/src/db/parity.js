@@ -1,7 +1,12 @@
+import { quotationFields } from '../quotations/quotations.js';
 import assert from 'node:assert/strict';
 import { startApiServer } from '../api/server.js';
 import { readDistricts } from '../store/districts-file.js';
 import { readBoundaries } from '../store/boundaries-file.js';
+
+const withoutQuotations = value => Array.isArray(value) ? value.map(withoutQuotations)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !quotationFields.includes(key)).map(([key, item]) => [key, withoutQuotations(item)])) : value;
 
 export async function compareDataSources({ jsonSource, dbSource, runtimeDir, geoDir, districtsPath, log = () => {} }) {
   const servers = [];
@@ -42,7 +47,7 @@ export async function compareDataSources({ jsonSource, dbSource, runtimeDir, geo
       let equal = 0;
       for (const pathname of paths) {
         const responses = await Promise.all(servers.map(server => request(server, pathname)));
-        try { assert.deepStrictEqual(responses[0], responses[1]); equal++; }
+        try { assert.deepStrictEqual(withoutQuotations(responses[0]), withoutQuotations(responses[1])); equal++; }
         catch { mismatches.push(pathname); log(`不一致: ${pathname}`); }
       }
       counts[group] = { total: paths.length, equal };

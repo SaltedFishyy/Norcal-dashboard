@@ -27,13 +27,14 @@ const basemapErrors = new Map([['BasemapNotFoundError', [404, 'basemap_not_found
   ['DataSourceUnavailableError', [503, 'data_source_unavailable']],
   ['BasemapInvalidError', [500, 'basemap_invalid']]]);
 const errorMappings = new Map([
+  ['/api/route-quotations', new Map([...profileErrors, ['RouteNotFoundError', [404, 'route_not_found']]])],
   ['/api/route-profiles', profileErrors], ['/api/route-details', detailErrors],
   ['/api/route-map', mapErrors], ['/api/route-map/zip', mapErrors], ['/api/route-map/stations', mapErrors],
   ['/api/districts', mapErrors], ['/api/route-map/district', mapErrors],
   ...[...basemapPaths.keys()].map(pathname => [pathname, basemapErrors]),
 ]);
 
-export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
+export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuotation, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
   capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
@@ -66,12 +67,12 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
     respond(200, await getDistrictMap(ids[0]));
   };
   const health = ({ respond }) => respond(200, { ok: true });
-  const detail = async ({ url, respond }) => {
+  const routeEndpoint = read => async ({ url, respond }) => {
     const ids = url.searchParams.getAll('route_id');
     if (ids.length !== 1 || !/^\d+$/.test(ids[0]) || !Number.isSafeInteger(Number(ids[0])) || Number(ids[0]) < 1) {
       respond(400, { error: 'invalid_route_id' }); return;
     }
-    respond(200, await getRouteDetail(Number(ids[0])));
+    respond(200, await read(Number(ids[0])));
   };
   const staticFile = async ({ rawPath, res }) => {
     const { body, contentType } = await getStaticFile(rawPath);
@@ -80,7 +81,8 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteMap,
     res.end(body); record(200);
   };
   const handlers = new Map([
-    ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', detail],
+    ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', routeEndpoint(getRouteDetail)],
+    ['/api/route-quotations', routeEndpoint(getRouteQuotation)],
     ['/api/route-map', routeMap], ['/api/route-map/zip', zipLookup], ['/api/route-map/stations', mapStations],
     ['/api/districts', districts], ['/api/route-map/district', districtMap],
   ]);
