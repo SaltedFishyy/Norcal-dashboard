@@ -317,3 +317,23 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 ### LQ-T8（Claude 2026-11-06）
 
 - 用新代码对 53 个工作表 dry-run（只读）。分类结果见 `docs/workflow/lark-quotation-handoff.md` 5.3：A 可直接接入 26 张（含 SFO，新增 901 行）；B 仍需业务确认 / 表格修正 12 张（南加州 8 张生效日期大多为空、STG 两位年份、OAR 40+ 表头、SFV、FMN）；C 跳过 3 张（BZN、GJT、IFP）；D 结构特殊 / 排除 12 张。新问题记入 LQ-Q13。
+
+## 14. 日期 / 表头格式补充（LQ-T10，Product Owner 2026-11-06 决定 LQ-Q13）
+
+| # | 决策 |
+|---|---|
+| LQ-D20 | 接受 `YYYY-MM-DD`（4 位年、1–2 位月 / 日，日历日期必须有效），如 `2026-10-12` |
+| LQ-D21 | 接受两位年份 `M/D/YY`，一律解释为 20YY（`10/26/26` → 2026-10-26）；日历日期必须有效 |
+| LQ-D22 | Excel 日期序列号只在能确认是日期单元格时才转换。Claude 2026-11-06 核实：LAX02 / LAV 的 `46118` 在 `dateTimeRenderOption=FormattedString`、`valueRenderOption=FormattedValue` 和 `ToString` 下都原样返回数字，而真正的日期单元格会返回日期字符串（同表对照行为 `4/6/2026`），说明这些是**普通数字格式单元格**，无法可靠确认是日期，因此**不转换**。日期列中的数字值拒绝，原因代码 `date_not_date_cell`（与 `date_invalid` 区分，方便表格维护方把单元格改成日期格式） |
+| LQ-D23 | 首票 / 续票重量段表头 `40-<n>(lb)` 且 n ≥ 1000（如 OAR 的 `40-999999(Ib)`）视为 `40(lb)以上`（`40_plus`）；不影响 `10-20` 等普通重量段的识别 |
+
+验收标准：
+
+- **LQ-AC19** 日期解析接受 `M/D/YYYY`、`YYYY/M/D`、`YYYY-MM-DD`、`M/D/YY`（→20YY），拒绝无效日历日期（含 `2025-02-29`、`2/29/25`）及其他格式；日期列中的数字值为 `date_not_date_cell`；`#` 单元格仍为 `date_placeholder`。
+- **LQ-AC20** OAR 表头结构（handoff 5.3：首票 F–L，L 为 `40-999999(Ib)`；续票 M–S；T / U 日期）识别出 14 列；`40-999` 不触发该规则；SFO、LAX01、SMF、CNO fixture 结果不变。
+- **LQ-AC21** `web/quotation-sync-status.js` 中所有 `\uXXXX` 中文转义改回中文字面量，行为和测试不变。
+- **LQ-AC22** 不新增 migration / schema / 依赖；`npm test` 全部通过；`git diff --check` 通过。
+
+| 任务 | 内容 | 执行者 |
+|---|---|---|
+| LQ-T10 | 本节 LQ-AC19–AC22 | Codex（Product Owner 2026-11-06 已授权） |
