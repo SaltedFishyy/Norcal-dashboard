@@ -27,7 +27,7 @@ test('LQ parser rejects summary, missing and duplicate columns without confusing
   const duplicate = structuredClone(sfoHeader); duplicate[2].push(duplicate[2][8]);
   assert.ok(parseQuotationSheet(duplicate).detail.includes('first.10_20'));
   const noEnd = structuredClone(sfoHeader); noEnd[2][20] = null;
-  assert.ok(parseQuotationSheet(noEnd).detail.includes('end_date'));
+  assert.deepEqual(parseQuotationSheet(noEnd).notes, ['end_date_column_missing']);
   assert.equal(parseQuotationSheet(sfoHeader, { headerScanRows: 2 }).ok, false);
   const unitless = structuredClone(sfoHeader);
   unitless[2][5] = 'first 0-1';
@@ -85,4 +85,32 @@ test('LQ parser accepts strict decimals, floating noise, leap day and inclusive 
   assert.equal(parsed.rows[0].stationLabelRaw, '123');
   assert.equal(parsed.rows[0].remarks, null);
   assert.deepEqual(parsed.warnings, []);
+});
+
+test('LQ extended dates and California header fixtures', () => {
+  for (const value of ['2024/2/29', '2/29/2024']) {
+    const row = syntheticCells(); row[19] = value; row[20] = value;
+    assert.equal(parse(row).rows[0].endDate, '2024-02-29');
+  }
+  for (const [value, reason] of [['2025/2/29', 'date_invalid'], ['26/1/1', 'date_invalid'], ['########', 'date_placeholder']]) {
+    const row = syntheticCells(); row[19] = value;
+    assert.equal(parse(row).rejected[0].reason, reason);
+  }
+  const lax = structuredClone(sfoHeader);
+  lax[2].splice(5, 7, '0 - 1(Ib)', '1-5(Ib)', '5-10(Ib)', '10-20(lb)', '20-30(lb)', '30-40(lb)', '40(Ib)\u4ee5\u4e0a');
+  assert.equal(parseQuotationSheet([...lax, syntheticCells()]).rows.length, 1);
+  const smf = lax.map(row => row.filter((_, i) => i !== 4));
+  assert.equal(parseQuotationSheet([...smf, syntheticCells().filter((_, i) => i !== 4)]).rows.length, 1);
+  const cno = structuredClone(lax); cno[2][20] = null;
+  const cnoResult = parseQuotationSheet([...cno, syntheticCells()]);
+  assert.equal(cnoResult.rows[0].endDate, null);
+  assert.deepEqual(cnoResult.notes, ['end_date_column_missing']);
+  const ungrouped = structuredClone(lax); ungrouped[1][5] = null;
+  assert.equal(parseQuotationSheet(ungrouped).ok, false);
+  const sfv = structuredClone(lax); sfv[2].push('\u751f\u6548\u65e5\u671f');
+  assert.equal(parseQuotationSheet(sfv).ok, false);
+  const duplicateEnd = structuredClone(lax); duplicateEnd[2].push('\u7ed3\u675f\u65e5\u671f');
+  assert.equal(parseQuotationSheet(duplicateEnd).ok, false);
+  const quotation = structuredClone(sfoHeader); quotation[2].push('\u62a5\u4ef7\u65e5\u671f');
+  assert.deepEqual(parseQuotationSheet([...quotation, syntheticCells()]).rows, parse(syntheticCells()).rows);
 });

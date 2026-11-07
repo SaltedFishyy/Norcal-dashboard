@@ -5,7 +5,7 @@ const text = {
   empty: '该线路暂无报价', missing: '该线路不在当前 DMS 数据中', unavailable: '报价数据暂不可用',
   network: '无法连接本地服务器 (server_unreachable)。', error: code => `无法加载价格详情 (${code})。`,
   zip: '适用 ZIP', fleet: 'Fleet', effective: '生效日期 Effective Date', end: '结束日期',
-  quotation: '报价日期 Quotation Date', permanent: '长期有效', remarks: '备注', weight: '重量段',
+  permanent: '长期有效', remarks: '备注', weight: '重量段',
   first: '首票 / First Parcel', additional: '续票 / Additional', retry: '重试',
   unquoted: zips => `无当前报价的 ZIP：${zips.join(', ')}`,
   extra: zips => `报价中有、DMS 当前不在此线路的 ZIP：${zips.join(', ')}`,
@@ -53,7 +53,6 @@ function render(data, highlightZip) {
     for (const [label, value] of [
       [text.zip, group.postal_codes.join(', ')], [text.fleet, group.fleet_name],
       [text.effective, group.effective_from], [text.end, group.end_date ?? text.permanent],
-      [text.quotation, group.quotation_date],
       ...(group.remarks == null ? [] : [[text.remarks, group.remarks]]),
     ]) {
       const item = element('div'); item.append(element('dt', label), element('dd', formatValue(value))); info.append(item);

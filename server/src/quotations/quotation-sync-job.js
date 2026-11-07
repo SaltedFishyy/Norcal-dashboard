@@ -3,7 +3,7 @@ import { connectDb } from '../db/connection.js';
 import { writeFileAtomic } from '../store/atomic-file.js';
 import { readLarkQuotationConfig } from './lark-config.js';
 import { createLarkClient } from './lark-client.js';
-import { runLarkQuotationSync } from './lark-sync.js';
+import { runLarkQuotationSheets } from './lark-sync.js';
 import { readQuotationSyncStatus, projectQuotationSyncStatus } from './quotation-sync-status.js';
 
 export async function runScheduledQuotationSync({ env = process.env, runtimeDir, connect = connectDb,
@@ -21,7 +21,7 @@ export async function runScheduledQuotationSync({ env = process.env, runtimeDir,
       // The writer reads routes and quotations in the same locked transaction.
       client = await connect('NC_DB_QUOTATION_URL', { env });
       const larkClient = larkClientFactory({ apiBase: config.apiBase, appId: config.appId, appSecret: config.appSecret });
-      summary = await runLarkQuotationSync({ config, larkClient, writeClient: client, dryRun: false });
+      summary = await runLarkQuotationSheets({ config, larkClient, writeClient: client, dryRun: false });
     } catch (error) {
       summary = { result: 'db_failed', stage: 'database', db_code: error?.code };
     } finally { await client?.end().catch(() => {}); }
@@ -29,11 +29,15 @@ export async function runScheduledQuotationSync({ env = process.env, runtimeDir,
   const previous = await readQuotationSyncStatus(runtimeDir);
   const attempt = { started_at, finished_at: new Date(now()).toISOString(), result: summary.result,
     stage: summary.stage, error_kind: summary.errorKind, lark_code: summary.larkCode,
-    http_status: summary.httpStatus, db_code: summary.db_code, counts: summary.counts,
-    rejected_count: summary.rejected?.length ?? 0, warning_count: summary.warnings?.length ?? 0,
-    notes: summary.notes, import_id: summary.importId };
-  const status = projectQuotationSyncStatus({ schema_version: 1, last_attempt: attempt,
-    last_success: ['completed', 'partial', 'unchanged'].includes(attempt.result) ? attempt : previous?.last_success });
+    http_status: summary.httpStatus, db_code: summary.db_code, counts: summary.totals ?? summary.counts,
+    rejected_count: summary.sheets?.reduce((n, sheet) => n + (sheet.rejected?.length ?? 0), 0) ?? 0, warning_count: summary.sheets?.reduce((n, sheet) => n + (sheet.warnings?.length ?? 0), 0) ?? 0,
+    notes: summary.notes, import_id: summary.importId,
+    sheets: summary.sheets?.map(sheet => ({ sheet_id: sheet.sheet.sheetId, title: sheet.sheet.title,
+      result: sheet.result, stage: sheet.stage, error_kind: sheet.errorKind, counts: sheet.counts,
+      rejected_count: sheet.rejected?.length ?? 0, warning_count: sheet.warnings?.length ?? 0,
+      notes: sheet.notes, import_id: sheet.importId })) };
+  const status = projectQuotationSyncStatus({ schema_version: 2, last_attempt: attempt,
+    last_success: ['completed', 'partial', 'unchanged', 'partial_failure'].includes(attempt.result) ? attempt : previous?.last_success });
   await writeFileAtomic(path.join(runtimeDir, 'quotation-sync-status.json'), JSON.stringify(status));
   return status;
 }

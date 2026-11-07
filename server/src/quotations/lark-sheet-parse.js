@@ -2,12 +2,12 @@ export const quotationBands = ['0_1', '1_5', '5_10', '10_20', '20_30', '30_40', 
 const text = value => value == null ? null : String(value).trim() || null;
 const normalize = value => (text(value) ?? '').replace(/\s/g, '').toLowerCase().replaceAll('(ib)', '(lb)');
 const priceCodes = ['first', 'additional'].flatMap(type => quotationBands.map(band => `${type}.${band}`));
-const required = ['route', 'postal_code', ...priceCodes, 'effective_from', 'end_date'];
+const required = ['route', 'postal_code', ...priceCodes, 'effective_from'];
 
-function columnCode(value) {
+function columnCode(value, grouped) {
   const label = normalize(value);
   if (!label) return null;
-  const type = /续票|second/.test(label) ? 'additional' : /首票|first/.test(label) ? 'first' : null;
+  const type = /续票|second/.test(label) ? 'additional' : /首票|first/.test(label) ? 'first' : grouped && /^(?:\d+-\d+\(lb\)|40\(lb\)\u4ee5\u4e0a)(?:\/.*)?$/.test(label) ? 'first' : null;
   if (type) {
     for (const band of quotationBands.slice(0, -1)) {
       if (new RegExp(`(^|[^0-9])${band.replace('_', '-')}(?![0-9])`).test(label)) return `${type}.${band}`;
@@ -28,6 +28,8 @@ function columnCode(value) {
 function date(value) {
   if (typeof value !== 'string') return null;
   const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  const iso = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(value.trim());
+  if (iso) return date(`${iso[2]}/${iso[3]}/${iso[1]}`);
   if (!match) return null;
   const [, month, day, year] = match.map(Number);
   const check = new Date(0);
@@ -50,12 +52,13 @@ function price(value) {
 
 export function parseQuotationSheet(cells, { headerScanRows = 5 } = {}) {
   const columns = new Map();
+  const grouped = cells.slice(0, headerScanRows).some(row => row?.some(value => normalize(value).includes('\u6309\u91cd\u91cf\u6bb5')));
   let headerRowIndex = -1;
   // Stop at the price header so data within the scan window cannot become headers.
   for (let row = 0; row < Math.min(cells.length, headerScanRows); row++) {
     let hasPrices = false;
     (cells[row] ?? []).forEach((value, index) => {
-      const code = columnCode(value);
+      const code = columnCode(value, grouped);
       if (!code) return;
       if (!columns.has(code)) columns.set(code, new Set());
       columns.get(code).add(index);
@@ -64,13 +67,14 @@ export function parseQuotationSheet(cells, { headerScanRows = 5 } = {}) {
     if (hasPrices) { headerRowIndex = row; break; }
   }
   const detail = required.filter(code => columns.get(code)?.size !== 1);
+  if (columns.get('end_date')?.size > 1) detail.push('end_date');
   if (detail.length || headerRowIndex < 0) return { ok: false, error: 'header_invalid', detail };
   const rows = [], rejected = [], warnings = [];
   let blankRowCount = 0, dataRowCount = 0;
   for (let index = headerRowIndex + 1; index < cells.length; index++) {
     const raw = cells[index] ?? [];
     const get = code => raw[[...(columns.get(code) ?? [])][0]];
-    if (required.every(code => text(get(code)) === null)) { blankRowCount++; continue; }
+    if ([...required, 'end_date'].every(code => text(get(code)) === null)) { blankRowCount++; continue; }
     dataRowCount++;
     const identity = { sheetRow: index + 1, routeName: text(get('route')), postalCode: text(get('postal_code')) };
     let reason = !identity.routeName ? 'route_missing' : !/^\d{5}$/.test(identity.postalCode ?? '') ? 'postal_code_invalid' : null;
@@ -83,7 +87,7 @@ export function parseQuotationSheet(cells, { headerScanRows = 5 } = {}) {
     }
     const effectiveFrom = date(get('effective_from'));
     const endDate = text(get('end_date')) === null ? null : date(get('end_date'));
-    if (!reason && (!effectiveFrom || (text(get('end_date')) !== null && !endDate))) reason = 'date_invalid';
+    if (!reason && (!effectiveFrom || (text(get('end_date')) !== null && !endDate))) reason = [get('effective_from'), get('end_date')].some(value => /^#+$/.test(text(value) ?? '')) ? 'date_placeholder' : 'date_invalid';
     if (!reason && endDate && endDate < effectiveFrom) reason = 'end_before_effective';
     if (reason) { rejected.push({ ...identity, reason }); continue; }
     const secondParcelHalfPriceRaw = text(get('half_price'));
@@ -93,5 +97,5 @@ export function parseQuotationSheet(cells, { headerScanRows = 5 } = {}) {
       referencePostalCode: text(get('reference_postal_code')), effectiveFrom, endDate, ...prices,
       secondParcelHalfPriceRaw, remarks: text(get('remarks')) });
   }
-  return { ok: true, headerRowIndex, dataStartRow: headerRowIndex + 2, rows, rejected, warnings, blankRowCount, dataRowCount };
+  return { ok: true, notes: columns.has('end_date') ? [] : ['end_date_column_missing'], headerRowIndex, dataStartRow: headerRowIndex + 2, rows, rejected, warnings, blankRowCount, dataRowCount };
 }

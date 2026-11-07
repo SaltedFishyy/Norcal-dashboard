@@ -238,6 +238,16 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 
 ---
 
+### LQ-T7（2026-11-06）
+
+- 解析支持两种斜杠日期格式及 `date_placeholder`；按重量段分组下的裸重量段识别为首票，结束日期列可选并返回 `end_date_column_missing`。保留重复日期列拒绝、价格精度及空线路拒绝规则，不读取报价日期。
+- 新增多表白名单配置和串行同步编排，工作表目录每轮只查一次，复用原有每表 source_ref、事务、advisory lock 和删除阈值。每表失败独立返回脱敏摘要，继续后续表；跨表冲突复用其他来源保护。移出白名单不处理该表已有数据。
+- CLI 支持重复 `--sheet`，dry-run 可选择白名单外工作表；检查命令输出每表数组，同步输出整体结果、每表摘要和合计。Worker 状态升级为 v2，兼容读取 v1 为单表，保留字段白名单并限制标题 80 字符；3100 显示成功表数及最多三个失败表。
+- 从报价 API、DB 数据源查询和价格详情移除报价日期；保留数据库列和现有 Lark 写入 NULL 行为，无 migration、schema 或依赖修改。部署文档补充白名单及移出行为，未修改正式配置。
+- 测试覆盖合成 LAX01 / SMF / CNO / SFV 表头、扩展日期、配置、CLI、状态投影和页面文案，新增两表测试库集成验证独立来源、失败保留和跨表冲突。使用现有 Playwright + headless Chromium 对合成状态行做浏览器冒烟，通过且无 console / page errors；未访问真实 Lark、非测试数据库或运行中的服务，未查看或修改 `.env`，未提交、推送、部署或重启。
+
+- 最终验证：`npm.cmd test` 全量 768/768 通过，0 失败、0 跳过，包含测试库集成；`git diff --check` 通过。项目无 lint / build 命令。完整业务页面人工预览及 Product Owner UI 签字尚未执行；真实工作表重新摸底和正式白名单启用属于 LQ-T8 / T9。
+
 ## 13. 多工作表扩展（LQ-M，Product Owner 2026-11-06 授权实现）
 
 ### 13.1 背景
@@ -297,3 +307,13 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 | LQ-T7 | 第 13.3 节全部改动及测试（LQ-AC10–AC18） | Codex | Product Owner 2026-11-06 已授权 |
 | LQ-T8 | 用新代码对全部 53 个工作表重新 dry-run 摸底，按「可直接接入 / 仍需业务确认 / DMS 不存在而跳过 / 结构特殊暂不支持」分类汇报 | Claude | LQ-T7；只读 |
 | LQ-T9 | 把选定工作表加入正式白名单、首次同步、重启 Worker | Claude | **另行授权**（修改正式配置、写正式库、服务重启） |
+
+### LQ-T7 review（Claude 2026-11-06）
+
+- 逐条对照 LQ-AC10–AC18：解析（日期、`date_placeholder`、首票分组识别、可选结束日期列）、白名单配置、多表串行与隔离（两表测试库集成、跨表 `conflict_other_source`、`partial_failure` / `failed`）、CLI `--sheet` 规则、状态文件 v2 及 v1 兼容、3100 状态行、报价日期移除均符合 spec；无 migration / schema / 依赖变更。Claude 复跑 `npm test` 768/768、`git diff --check` 通过。修复轮次 0。
+- 小问题（不阻塞）：`web/quotation-sync-status.js` 新增中文文案写成 `\uXXXX` 转义，可读性较差，后续顺手改回中文字面量。
+- 兼容性：正式 `.env` 仍只有 `LARK_QUOTATION_SHEET_ID`，新代码按单表白名单运行，行为与上线版本一致。Worker（3100）和只读服务（3000）重启后才加载新代码（报价日期移除需 3000 重启后生效）；重启属 LQ-T9 另行授权。
+
+### LQ-T8（Claude 2026-11-06）
+
+- 用新代码对 53 个工作表 dry-run（只读）。分类结果见 `docs/workflow/lark-quotation-handoff.md` 5.3：A 可直接接入 26 张（含 SFO，新增 901 行）；B 仍需业务确认 / 表格修正 12 张（南加州 8 张生效日期大多为空、STG 两位年份、OAR 40+ 表头、SFV、FMN）；C 跳过 3 张（BZN、GJT、IFP）；D 结构特殊 / 排除 12 张。新问题记入 LQ-Q13。

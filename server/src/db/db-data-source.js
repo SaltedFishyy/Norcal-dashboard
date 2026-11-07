@@ -48,7 +48,7 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
     readRouteQuotation: routeId => read(async client => {
       // Cast dates in SQL to avoid pg's local-time Date parser and UTC date shifts.
       const current = (await client.query(`SELECT *, effective_from::text AS effective_from,
-        end_date::text AS end_date, quotation_date::text AS quotation_date
+        end_date::text AS end_date
         FROM v_route_quotation_current WHERE route_id=$1`, [routeId])).rows.map(row => ({ ...row,
         route_id: Number(row.route_id), line_id: Number(row.line_id),
         imported_at: row.imported_at == null ? null : new Date(row.imported_at).toISOString(),

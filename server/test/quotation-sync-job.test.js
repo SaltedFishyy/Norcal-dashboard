@@ -5,6 +5,7 @@ import path from 'node:path';
 import { centralFixture } from './central-db-fixtures.js';
 import { sfoHeader, syntheticCells } from './lark-quotation-fixtures.js';
 import { LarkError } from '../src/quotations/lark-client.js';
+import { projectQuotationSyncStatus } from '../src/quotations/quotation-sync-status.js';
 import { runScheduledQuotationSync } from '../src/quotations/quotation-sync-job.js';
 
 const env = { LARK_APP_ID: 'fake', LARK_APP_SECRET: 'SECRET-SENTINEL',
@@ -38,13 +39,13 @@ test('scheduled quotation uses writer only, preserves success on failures and st
       } };
     }, larkClientFactory: () => fakeLark([...sfoHeader, cells]) };
   let result = await runScheduledQuotationSync(options);
-  assert.equal(result.last_attempt.result, 'completed'); assert.equal(result.last_success.import_id, '42');
+  assert.equal(result.last_attempt.result, 'completed'); assert.equal(result.last_success.sheets[0].import_id, '42');
   assert.equal(result.last_success.counts.inserted, 1); assert.equal(ended, 1);
   assert.deepEqual(connections, ['NC_DB_QUOTATION_URL']); assert.ok(queries.includes('COMMIT'));
   const success = result.last_success;
   for (const [factory, expected] of [
-    [() => ({ querySheets: async () => { throw new LarkError('values', 'permission', 403, 7); } }), 'fetch_failed'],
-    [() => fakeLark([['invalid']]), 'header_invalid'],
+    [() => ({ querySheets: async () => { throw new LarkError('values', 'permission', 403, 7); } }), 'failed'],
+    [() => fakeLark([['invalid']]), 'failed'],
   ]) {
     result = await runScheduledQuotationSync({ ...options, larkClientFactory: factory });
     assert.equal(result.last_attempt.result, expected); assert.deepEqual(result.last_success, success);
@@ -64,7 +65,7 @@ test('scheduled quotation uses writer only, preserves success on failures and st
     if (sql.includes('v_active_routes')) throw Object.assign(new Error('SECRET-SENTINEL'), { code: '42501' });
     return { rows: [] };
   } }) });
-  assert.equal(result.last_attempt.result, 'db_failed'); assert.equal(result.last_attempt.db_code, '42501');
+  assert.equal(result.last_attempt.result, 'failed');
   assert.ok(failedQueries.includes('ROLLBACK')); assert.ok(!failedQueries.some(sql => /INSERT|UPDATE|COMMIT/.test(sql)));
   assert.equal(result.last_success.result, 'unchanged');
   const text = await readFile(path.join(f.runtimeDir, 'quotation-sync-status.json'), 'utf8');
@@ -74,4 +75,16 @@ test('scheduled quotation uses writer only, preserves success on failures and st
     last_success: { ...success, token: 'TOKEN-SENTINEL', counts: { ...success.counts, price: 987.65 } } }));
   result = await runScheduledQuotationSync({ ...options, env: {} });
   assert.deepEqual(result.last_success, success);
+});
+
+test('status v2 projects per sheet whitelist and reads v1 as one sheet', () => {
+  const old = projectQuotationSyncStatus({ schema_version: 1, last_attempt: { result: 'unchanged' } });
+  assert.equal(old.schema_version, 2); assert.equal(old.last_attempt.sheets.length, 1);
+  const current = projectQuotationSyncStatus({ schema_version: 2, last_attempt: { result: 'partial_failure', sheets: [{
+    sheet_id: 'ABC', title: 'x'.repeat(100), result: 'db_failed', stage: 'database', error_kind: 'network',
+    price: 987.65, token: 'SECRET', notes: ['end_date_column_missing', 'SECRET'], counts: { inserted: 2, price: 987.65 }
+  }] } });
+  const sheet = current.last_attempt.sheets[0];
+  assert.equal(sheet.title.length, 80); assert.deepEqual(sheet.notes, ['end_date_column_missing']);
+  assert.deepEqual(sheet.counts, { inserted: 2 }); assert.doesNotMatch(JSON.stringify(current), /SECRET|987/);
 });

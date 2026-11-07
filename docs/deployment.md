@@ -154,3 +154,9 @@ $basePath = Join-Path $env:LOCALAPPDATA 'nc-ops-console'
 TD7：repo 当前位于 OneDrive，Product Owner 决定暂不迁移。脚本从自身上两级解析 repo，不写死同步路径；数据库、登录态、readonly 配置、日志和默认 runtime 保持在 `%LOCALAPPDATA%`。OneDrive 同步 repo 的维护风险仍存在，后续迁移需重新注册任务。
 
 CD-AC35 的部署验证留给 Claude review 后执行：检查任务配置，注销重新登录或重启后确认三个进程自动运行、防火墙仅开放 TCP 3000（Private / Domain），再从另一台电脑测试只读访问。CD-AC36 的真实 DMS 刷新及局域网验证也需另行执行。本次脚本语法检查和 npm 测试不能替代这些部署验收。
+
+## Lark 报价多工作表配置（LQ-T7）
+
+`LARK_QUOTATION_SHEET_IDS` 为逗号分隔的工作表白名单，按顺序去重，最多 60 项，仅允许字母和数字。未设置时兼容 `LARK_QUOTATION_SHEET_ID`；两者同时设置时，单表 ID 必须在白名单内。每表独立同步；移出白名单只停止同步，已导入数据保持不变，不自动作废。
+
+`quotes:sync-lark` 默认同步全部白名单，可重复使用 `--sheet <id>` 选择工作表；正式写入只允许白名单内的表，`--dry-run` 可指定白名单外的表。`quotes:lark-check` 检查全部白名单。修改正式白名单、首次正式同步和重启 Worker 仍需另行授权。

@@ -30,7 +30,7 @@ export function buildRouteQuotation({ route, station, current, upcoming, weightB
   for (const row of current) {
     if (!zips.has(row.postal_code)) continue;
     const group = { fleet_name: row.fleet_name ?? null, effective_from: row.effective_from,
-      end_date: row.end_date ?? null, quotation_date: row.quotation_date ?? null, remarks: row.remarks ?? null,
+      end_date: row.end_date ?? null, remarks: row.remarks ?? null,
       first: Object.fromEntries(bands.map(({ code }) => [code, row.first_prices[code]])),
       additional: Object.fromEntries(bands.map(({ code }) => [code, row.additional_prices[code]])) };
     const groupKey = JSON.stringify(group);

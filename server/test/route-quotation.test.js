@@ -44,7 +44,7 @@ test('RQ-T2 detail groups all fourteen prices and metadata, sorts, and separates
   assert.equal(result.updated_at, '2026-02-01T00:00:00.000Z');
   assert.equal(build([], future).updated_at, null);
   assert.equal(build([line('00123')], future).updated_at, '2026-01-01T00:00:00.000Z');
-  for (const field of ['fleet_name', 'remarks', 'quotation_date', 'effective_from', 'end_date'])
+  for (const field of ['fleet_name', 'remarks', 'effective_from', 'end_date'])
     assert.equal(build([line('00123'), line('00002', { [field]: 'different' })]).groups.length, 2);
   for (const kind of ['first_prices', 'additional_prices']) for (const band of bands)
     assert.equal(build([line('00123'), line('00002', { [kind]: { ...line('')[kind], [band]: 9 } })]).groups.length, 2);
@@ -134,7 +134,7 @@ test('RQ-T2 test DB reader normalizes types, separates quotation failure from DM
   assert.deepEqual(await source.readCurrentFirstPrices(), [{ route_id: 1, postal_code: '00123', price: 1.75 }]);
   const data = await source.readRouteQuotation(1), row = data.current[0];
   assert.equal(typeof row.line_id, 'number'); assert.equal(row.route_id, 1);
-  for (const field of ['effective_from', 'end_date', 'quotation_date']) assert.match(row[field], /^\d{4}-\d{2}-\d{2}$/);
+  for (const field of ['effective_from', 'end_date']) assert.match(row[field], /^\d{4}-\d{2}-\d{2}$/);
   assert.match(data.upcoming[0].effective_from, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(row.imported_at, '2026-01-02T03:04:05.000Z');
   assert.equal(row.first_prices['0_1'], 1.75); assert.equal(data.weightBands.length, 7);

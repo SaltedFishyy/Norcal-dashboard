@@ -116,6 +116,26 @@
 | DMS 无匹配线路 | IFP（`88QsOy`，DMS 有 IFP01 但线路名一条都对不上）、BZN（`UPoskC`）、GJT（`KC7qyp`） | 跳过（LQ-D18） |
 | 结构特殊 / 不是报价表 | 总表（`iwYw5J`，超过 5000 行）、总表解释（`c1qxNG`）、洛杉矶路线难度（`13Xevs`）、LAX暂停线路（`12UqON`）、LAX (LAV+ONT+VTC)（`0gYGxX`）、HNL（`U5E6B2`）、SAF（`ySnTv7`）、PRC（`joCLhH`）、CGZ+FLG（`vlXZud`）、LAS 财务版本（`11nToa`，缺邮编列）、PHX 报价版本（`L9dOxC`） | 本阶段不接（LQ-D17、LQ-D10） |
 
+### 5.3 LQ-T7 后重新摸底（Claude 2026-11-06，LQ-T8，只读 dry-run）
+
+命令：`npm run quotes:sync-lark -- --dry-run --sheet <id> …`（53 个工作表，不改 `.env`、不写库）。下列「可导入行」为 dry-run 计划新增数。
+
+**A. 可直接接入（26 张，含已上线的 SFO）**：SMF（`77WmFC`）63、SCK（`paR3us`）35、MOD（`IYjGLx`）29、RNO（`UhQKJI`）33、RDG（`f7mujs`）11（2 行三位小数拒绝）、Denver（`7Tkccp`）154（5 行 `date_placeholder`）、SLC（`9DqtcI`）82、BOI（`xYf0rp`）18、TWF（`mkKf4A`）6、PIH（`HJfndG`）4、IDA（`GgHu0S`）6（9 行线路名为空）、LGU（`AIHQOk`）9、PHX 财务版本（`pHfo1Y`）120、TUC（`g8SHi7`）32、ABQ（`uGYjxq`）28、EUG（`He4lV1`）24、PDX（`K5trn9`）75（7 条 `zip_not_in_route` 警告）、GEG（`nLhNO3`）21、YKM（`FzcmFb`）4、CYS（`bN6Awd`）3、TRC（`sSyIjX`）7、MFR（`BRiHpQ`）9、BIL（`K94Hw2`）5（15 行线路名为空）、PAE（`fYBoA2`）27、SEA 新版（`BzeCsf`）96（2 条 `zip_not_in_route`）。合计新增 901 行。IDA / BIL 因有线路名为空的拒绝行，按 LQ-D2 不执行「删除作废」（`removals_skipped`），直到表格修正。
+
+**B. 仍需业务确认 / 表格修正**
+
+| 工作表 | 现状 |
+|---|---|
+| LAX01（`O2LRJs`）、LAX02（`Xwb3cB`）、LAX03（`ZKax98`）、LAV（`3SFlo8`）、CNO（`XxMGq3`）、南加卫星仓（`XMGqZP`）、FAT（`A3mUei`）、SAN（`yzdY0G`） | 表头已能识别；**生效日期绝大多数为空**（如 LAX01 105/122、CNO 103/103、FAT 67/67、SAN 151/151），需要表格补日期。零散格式：LAX01 17 行 `YYYY-MM-DD`，LAX02 / LAV 各 2 行数字日期序列号，LAV 13 行 `M/D/YYYY`（可用）；LAV 另有 `LAV-016`、`LAV-054` 不在 DMS |
+| STG（`cUq2GC`） | 日期为两位年份 `10/26/26`，当前拒绝 |
+| OAR（`iPxkec`） | 首票最高重量段表头为 `40-999999(Ib)`，不是「40(lb)以上」，表头无效 |
+| SFV（`sZuGSc`） | LQ-Q11：两个生效日期列，且日期全部为空 |
+| FMN（`gO6qvO`） | 3 行全部为三位小数价格，按 LQ-D14 拒绝，需表格修正 |
+
+**C. DMS 不存在 / 线路名对不上而跳过**：BZN（`UPoskC`）、GJT（`KC7qyp`）DMS 无对应站点；IFP（`88QsOy`）表中写作 `IFP01 - 001`（带空格），DMS 为 `IFP01-001`，按 LQ-D18 不做模糊匹配，需表格修正写法。
+
+**D. 结构特殊暂不支持 / 按决定排除**：总表（`iwYw5J`，超过 5000 行）、总表解释、洛杉矶路线难度、LAX暂停线路、LAX (LAV+ONT+VTC)、HNL、SAF、PRC（没有续票列）、CGZ+FLG、LAS 财务版本（没有邮编列）、PHX 报价版本（LQ-D10）、Seattle 旧（`14Wssc`，LQ-D11；可解析但排除）。
+
 ## 6. 字段映射
 
 以下按同类 xlsx 模板（22 列，A–V）整理，作为字段语义参考。**Lark SFO 分表的实际列名和列位置见 5.1 [已验证]**（比模板多一列「是否使用第二票半价」，备注移到 W 列，B 列为「转运中心/Sorting Center」）。程序将按**表头文字**定位列，不按固定列号。

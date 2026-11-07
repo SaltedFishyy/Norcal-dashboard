@@ -22,5 +22,12 @@ test('Lark config rejects invalid values without reflecting inputs', () => {
     for (const value of values) assert.throws(() => readLarkQuotationConfig({ ...fakeLarkEnv, [key]: value }),
       error => error.message === `Invalid ${key}`);
   assert.throws(() => readLarkQuotationConfig({ LARK_APP_SECRET: 'SECRET-SENTINEL-123' }),
-    { message: 'Missing: LARK_APP_ID, LARK_QUOTATION_SPREADSHEET_TOKEN, LARK_QUOTATION_SHEET_ID' });
+    { message: 'Missing: LARK_APP_ID, LARK_QUOTATION_SPREADSHEET_TOKEN' });
+});
+
+test('Lark sheet whitelist normalization and conflicts', () => {
+  assert.deepEqual(readLarkQuotationConfig({ ...fakeLarkEnv, LARK_QUOTATION_SHEET_IDS: ' A, uAaPvG, A,, B ' }).sheetIds, ['A', 'uAaPvG', 'B']);
+  for (const list of ['', 'bad-id', 'A', Array.from({length:61}, (_, i) => `S${i}`).join(',')])
+    assert.throws(() => readLarkQuotationConfig({ ...fakeLarkEnv, LARK_QUOTATION_SHEET_IDS: list }));
+  assert.deepEqual(readLarkQuotationConfig({ ...fakeLarkEnv, LARK_QUOTATION_SHEET_ID: undefined, LARK_QUOTATION_SHEET_IDS: 'A,B' }).sheetIds, ['A', 'B']);
 });

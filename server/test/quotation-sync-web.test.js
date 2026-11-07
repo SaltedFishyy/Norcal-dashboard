@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDataStatus } from '../../web/data-status.js';
-import { quotationSyncResults } from '../../web/quotation-sync-status.js';
+import { createQuotationSyncStatus, quotationSyncResults } from '../../web/quotation-sync-status.js';
 import { formatUpdated } from '../../web/format.js';
 
 class Element {
@@ -34,7 +34,7 @@ test('Worker page shows all quotation results, refreshes and disposes; readonly 
     } else {
       assert.match(root.textContent, /报价同步 · 定时：关闭 · 最近成功：— · 最近一次：—/);
       const tick = async () => { const [key, fn] = timers.entries().next().value; timers.delete(key); await fn(); };
-      const expected = { completed: '完成', partial: '部分完成', rejected: '全部拒绝', unchanged: '无变化', fetch_failed: '读取失败',
+      const expected = { partial_failure: '\u90e8\u5206\u5de5\u4f5c\u8868\u5931\u8d25', failed: '\u5168\u90e8\u5931\u8d25', completed: '完成', partial: '部分完成', rejected: '全部拒绝', unchanged: '无变化', fetch_failed: '读取失败',
         header_invalid: '表头无效', aborted_mass_removal: '删除过多已中止', write_role_missing: '未配置写入账号', config_invalid: '配置无效', db_failed: '数据库错误' };
       assert.deepEqual(quotationSyncResults, expected);
       for (const [code, label] of Object.entries(expected)) {
@@ -48,4 +48,16 @@ test('Worker page shows all quotation results, refreshes and disposes; readonly 
     }
     page.dispose(); assert.equal(timers.size, 0);
   }
+});
+
+test('multi sheet status displays totals, three failed names and remaining count', async () => {
+  const root = new Element('section');
+  const page = createQuotationSyncStatus({ root, document: { createElement: tag => new Element(tag) }, get: async () => ({
+    enabled: true, interval_minutes: 60, status: { last_attempt: { result: 'partial_failure', rejected_count: 4,
+      sheets: [{ result: 'completed', title: 'OK' }, ...['A', 'B', 'C', 'D'].map(title => ({ title, result: 'header_invalid' }))] } }
+  }) });
+  await page.start({ quotation_sync: true });
+  assert.match(root.textContent, /\u5de5\u4f5c\u8868\uff1a1\/5/);
+  assert.match(root.textContent, /A.*B.*C.*\u7b49 1 \u4e2a/);
+  assert.doesNotMatch(root.textContent, /D/);
 });

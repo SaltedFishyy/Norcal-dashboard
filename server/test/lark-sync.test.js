@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readLarkQuotationConfig } from '../src/quotations/lark-config.js';
 import { LarkError } from '../src/quotations/lark-client.js';
-import { runLarkQuotationSync, columnLetters } from '../src/quotations/lark-sync.js';
+import { runLarkQuotationSync, runLarkQuotationSheets, columnLetters } from '../src/quotations/lark-sync.js';
 import { runLarkCommand } from '../src/quotations/lark-cli.js';
 import { applyQuotationSync } from '../src/quotations/quotation-sync-db.js';
 import { sfoHeader, summaryHeader, syntheticCells } from './lark-quotation-fixtures.js';
@@ -51,7 +51,7 @@ test('Lark commands refuse missing writer before any connection and sanitize fai
   outputs.length = 0;
   assert.equal(await runLarkCommand({ check: true, env, log: value => outputs.push(value), makeClient: () => fake(),
     connect: () => { throw new Error('must not connect'); } }), 0);
-  assert.equal(JSON.parse(outputs[0]).dataRows, 1);
+  assert.equal(JSON.parse(outputs[0]).sheets[0].dataRows, 1);
   assert.ok(!outputs.join('').includes('900')); assert.ok(!outputs.join('').includes('SENTINEL'));
   outputs.length = 0;
   await runLarkCommand({ env: { ...env, NC_DB_QUOTATION_URL: 'unused' }, log: value => outputs.push(value), makeClient: () => fake(),
@@ -61,7 +61,7 @@ test('Lark commands refuse missing writer before any connection and sanitize fai
   await runLarkCommand({ check: true, env, log: value => outputs.push(value), makeClient: () => ({
     querySheets: async () => { throw new LarkError('sheet_query', 'permission', 403, 7); }
   }) });
-  assert.deepEqual(JSON.parse(outputs[0]), { connected: false, stage: 'sheet_query', errorKind: 'permission', httpStatus: 403, larkCode: 7 });
+  assert.deepEqual(JSON.parse(outputs[0]), { sheets: [{ sheet: { sheetId: 'uAaPvG' }, connected: false, stage: 'sheet_query', errorKind: 'permission' }] });
 });
 test('Lark dry-run command uses only reader and optional dedicated writer and closes both', async () => {
   const calls = [], closed = [], outputs = [];
@@ -76,7 +76,7 @@ test('Lark dry-run command uses only reader and optional dedicated writer and cl
     log: value => outputs.push(value), connect, makeClient: () => fake() }), 1);
   assert.deepEqual(calls, ['NC_DB_READER_URL', 'NC_DB_QUOTATION_URL']); assert.deepEqual(closed, calls);
   const output = JSON.parse(outputs[0]);
-  assert.equal(output.result, 'rejected'); assert.equal(output.rejected[0].reason, 'route_not_found');
+  assert.equal(output.result, 'failed'); assert.equal(output.sheets[0].rejected[0].reason, 'route_not_found');
   assert.ok(!outputs.join('').includes('900')); assert.ok(!outputs.join('').includes('SENTINEL'));
 });
 test('Lark DB wrapper retains only SQLSTATE', async () => {
@@ -105,4 +105,69 @@ test('Lark sync test DB reader fallback and owner write integration', { skip: db
   assert.equal(applied.result, 'completed'); assert.ok(applied.importId);
   const unchanged = await runLarkQuotationSync({ config, larkClient: fake(), readerClient: db.reader, writeClient: db.owner, dryRun: true });
   assert.equal(unchanged.result, 'unchanged'); assert.deepEqual(unchanged.notes, []);
+});
+
+test('multi sheet serial isolation, query once, safe database errors and aggregation', async () => {
+  let queries = 0, active = 0;
+  const events = [];
+  const larkClient = { querySheets: async () => { queries++; return ['A', 'B', 'C'].map(sheetId => ({ sheetId, title: sheetId, rowCount: 4, columnCount: 23 })); },
+    readValues: async (_, range) => {
+      assert.equal(active++, 0); events.push(range[0]); await Promise.resolve(); active--;
+      if (range.startsWith('B!')) throw new LarkError('values', 'permission');
+      return { values: sfoHeader };
+    } };
+  const readerClient = { query: async () => ({ rows: [] }) };
+  const result = await runLarkQuotationSheets({ config: { ...config, sheetIds: ['A', 'B', 'C'] }, larkClient, readerClient, dryRun: true });
+  assert.equal(queries, 1); assert.deepEqual(events, ['A', 'B', 'C']);
+  assert.equal(result.result, 'partial_failure'); assert.deepEqual(result.sheets.map(s => s.result), ['unchanged', 'fetch_failed', 'unchanged']);
+  assert.equal((await runLarkQuotationSheets({ config: { ...config, sheetIds: ['B'] }, larkClient })).result, 'failed');
+  let failed = false;
+  const writeClient = { query: async sql => {
+    if (sql.includes('v_active_routes') && !failed) { failed = true; throw Object.assign(new Error('PRIVATE-SENTINEL'), { code: '42501' }); }
+    return { rows: [] };
+  } };
+  const isolated = await runLarkQuotationSheets({ config: { ...config, sheetIds: ['A', 'C'] }, larkClient, writeClient });
+  assert.deepEqual(isolated.sheets.map(s => s.result), ['db_failed', 'unchanged']);
+  assert.equal(isolated.result, 'partial_failure'); assert.doesNotMatch(JSON.stringify(isolated), /PRIVATE-SENTINEL/);
+  assert.equal((await runLarkQuotationSheets({ config: { ...config, sheetIds: ['A', 'C'] }, larkClient, writeClient })).result, 'unchanged');
+
+});
+
+test('multi sheet test DB isolates sources, transactions, conflicts and failed headers', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t);
+  await db.owner.query("INSERT INTO known_stations(code) VALUES ('ZZZ01') ON CONFLICT DO NOTHING");
+  await db.owner.query("INSERT INTO stations(code) VALUES ('ZZZ01')");
+  const run = (await db.owner.query(`INSERT INTO scrape_runs(id,trigger,status,requested_stations,options,started_at)
+    VALUES(gen_random_uuid(),'json_import','completed',ARRAY['ZZZ01'],'{}',now()) RETURNING id`)).rows[0].id;
+  const snapshot = (await db.owner.query(`INSERT INTO station_snapshots(station_code,run_id,status,origin,fetched_at,source,total)
+    VALUES('ZZZ01',$1,'active','json_import','synthetic','synthetic',1) RETURNING id`, [run])).rows[0].id;
+  await db.owner.query(`INSERT INTO snapshot_routes(snapshot_id,route_id,ordinal,route_name,profile)
+    VALUES($1,1,0,'Mock Route','{"postal_codes":["12345","12346"]}')`, [snapshot]);
+  let invalidA = false, conflict = false;
+  const larkClient = { querySheets: async () => ['A', 'B'].map(sheetId => ({ sheetId, rowCount: 4, columnCount: 23 })),
+    readValues: async (_, range) => {
+      if (invalidA && range.startsWith('A!')) return { values: [['invalid']] };
+      const row = syntheticCells(); if (range.startsWith('B!') && !conflict) row[3] = '12346';
+      return { values: [...sfoHeader, row] };
+    } };
+  const options = { config: { ...config, sheetIds: ['A', 'B'] }, larkClient, writeClient: db.owner };
+  assert.equal((await runLarkQuotationSheets(options)).result, 'completed');
+  assert.equal((await db.owner.query('SELECT count(DISTINCT source_ref) FROM route_quotation_imports')).rows[0].count, '2');
+  invalidA = true;
+  const partial = await runLarkQuotationSheets(options);
+  assert.equal(partial.result, 'partial_failure'); assert.equal(partial.sheets[1].result, 'unchanged');
+  assert.equal((await db.owner.query('SELECT count(*) FROM route_quotation_lines WHERE voided_at IS NULL')).rows[0].count, '2');
+  conflict = true;
+  const rejected = await runLarkQuotationSheets(options);
+  assert.equal(rejected.sheets[1].rejected[0].reason, 'conflict_other_source');
+});
+
+test('CLI sheet selection accepts dry run outside whitelist and rejects writes', async () => {
+  const output = [];
+  assert.equal(await runLarkCommand({ args: ['--sheet', 'Other'], env: { ...env, NC_DB_QUOTATION_URL: 'unused' }, log: v => output.push(v) }), 1);
+  assert.deepEqual(output, ['invalid_arguments']);
+  output.length = 0;
+  await runLarkCommand({ args: ['--dry-run', '--sheet', 'Other'], env, log: v => output.push(v), makeClient: () => fake(),
+    connect: async () => ({ end: async () => {}, query: async () => ({ rows: [] }) }) });
+  const summary = JSON.parse(output[0]); assert.equal(summary.sheets[0].sheet.sheetId, 'Other'); assert.equal(summary.result, 'failed');
 });

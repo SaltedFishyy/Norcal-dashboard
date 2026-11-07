@@ -67,7 +67,8 @@ test('RQ-T3 shared dialog renders API bands, metadata, highlights, notices and c
   assert.equal(nodes.find(n => n.attributes['aria-live']).attributes['aria-busy'], 'false');
   const body = nodes.find(n => n.tag === 'tbody'); assert.equal(body.children.length, 7);
   assert.deepEqual(body.children[0].children.map(n => n.textContent), ['API label 0', '$1.00', '$0.50']);
-  assert.match(allText(dialog), /长期有效.*报价日期 Quotation Date —/);
+  assert.match(allText(dialog), /\u957f\u671f\u6709\u6548/);
+  assert.doesNotMatch(allText(dialog), /Quotation Date/);
   assert.match(allText(dialog), /适用 ZIP 00123, 00987/);
   assert.ok(!nodes.some(n => n.textContent === '备注'));
   for (const value of ['<mock>', '无当前报价的 ZIP：00001', '报价中有、DMS 当前不在此线路的 ZIP：00002', '下次生效：2026-12-01（2 个 ZIP）', '报价更新于']) assert.ok(allText(dialog).includes(value));
