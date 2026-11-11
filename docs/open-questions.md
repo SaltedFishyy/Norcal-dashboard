@@ -28,7 +28,7 @@
 - [x] D8 多 Station → **已授权（Product Owner 2026-10-06）**：通过页头 Station 下拉框自动切站，双重验证后串行处理 9 个站点；结束时恢复原站点。见 `docs/features/multi-station.md`
 - [x] D9 现在就保存 `roadAreaId` 作为 `route_id`（首选唯一标识）；`station + route_name` 用于展示和校验（2026-09-30）
 - [ ] D5 DMS Route Name 能否与 legacy route（如 `SFO02-042`）对应
-- [ ] D6 Pickup Volume 的统计窗口（目前只确认 `receiptQty` = 页面“领件量”；不猜测，不称为 Daily Volume，保留原值）
+- [ ] D6 Pickup Volume 的统计窗口（目前只确认 `receiptQty` = 页面“领件量”；不猜测，不称为 Daily Volume，保留原值）。线路历史（`docs/features/route-history.md`）同样只显示原值，标签用“领件量”
 - [x] D7 session 和 runtime data 不允许被 OneDrive 同步 → 默认放在 `%LOCALAPPDATA%\nc-ops-console\`，可配置覆盖（2026-09-30）
 
 ## Route Detail / ZIP Profile
@@ -146,3 +146,18 @@
 - [ ] LQ-Q11 SFV 分表（`sZuGSc`）有两个生效日期列：T「报价生效日期」和 X「生效日期」，而且 83 行数据在 T、U（结束日期）、X 三列**全部为空**。是表格还没有填日期，还是日期在别处？在表格维护方补齐日期、并确定以哪一列为准之前，SFV 保持表头无效、不导入（LQ-D16）。（2026-11-06）
 - [ ] LQ-Q12 表格数据修正（由表格维护方处理，修正后定时同步自然生效）：Denver 有 5 行生效 / 结束日期单元格的内容就是文本 `########`（不是列宽导致，原始值相同），修正前按 `date_placeholder` 拒绝；BOI 有 21 行没有日期；IDA / BIL 共 24 行线路名为空（疑似合并单元格，不自动填充，LQ-D15）；IFP 表的线路名与 DMS IFP01 一条都对不上。（2026-11-06）
 - [ ] LQ-Q13 LQ-T7 后摸底发现的格式问题（详见 `docs/workflow/lark-quotation-handoff.md` 5.3）：(a) 是否接受 `YYYY-MM-DD` 日期（LAX01 17 行）？(b) 是否接受两位年份 `MM/DD/YY` 并按 20YY 解释（STG）？(c) 数字日期序列号（LAX02 / LAV 各 2 行）是否继续拒绝？(d) OAR 的 `40-999999(Ib)` 是否视为「40(lb)以上」？(e) 南加州 8 张表的生效日期大多为空、IFP 线路名带空格，需要表格维护方修正。（2026-11-06）
+
+## 每日自动刷新 / Auto Refresh
+
+见 `docs/features/auto-refresh.md`（Product Owner 2026-11-11 批准：每天 17:00 Pacific、全部片区、失败只在看板提示）。
+
+- [ ] AR-Q1 DMS 登录（storageState）一般多久过期？过期后自动刷新每天都会以“需要重新登录”停止，直到有人运行 `npm run dms:login`。上线后观察并记录。（2026-11-11）
+- [ ] AR-Q2 17:00 时 DMS 上当天的领件量等数据是否已经稳定？如果 17:00 之后还会变化，历史中的“当天”数据可能偏小。（2026-11-11）
+- [ ] AR-Q3 抓取会切换 DMS 页头的站点（结束时恢复）。17:00 如果有同事用同一个 DMS 账号在操作页面，页头站点可能被切走。是否只有这台电脑使用这个账号？（2026-11-11）
+- [ ] AR-Q4 公用电脑 17:00 必须开机、不睡眠、用户保持登录（CD-Q5）。错过时 23:00 前补跑，23:00 之后当天不再补跑。（2026-11-11）
+
+## 线路历史 / Route History
+
+见 `docs/features/route-history.md`。
+
+- [ ] RH-Q1 数据保留规则：目前全部保留（Product Owner 2026-11-11）。一年后（约 2027-11）或 DB 超过约 1 GB 时再决定。（2026-11-11）

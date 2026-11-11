@@ -14,9 +14,9 @@
 | 访问许可 | IT 已同意，前提是不影响 DMS 正常运行。使用 Product Owner 本人正常登录后的 session |
 | 数据接口 | 目前没有 API。第一阶段用 Playwright。以后如果有正式 API、导出接口或只读数据库，优先迁移过去 |
 | 范围 | 按 Station 刷新（例如 `SFO01`、`MFR01`，是 Station 不是 Route），抓取所选 Station 下的路区画像（route profile） |
-| 历史 | 不做历史分析。只保存每个 Station 最新一次成功的 snapshot 和 Last Updated |
+| 历史 | 不做历史分析。只保存每个 Station 最新一次成功的 snapshot 和 Last Updated。**已被取代（Product Owner 2026-11-11）：** 被替换的 snapshot 全部保留，线路档案增加 7 / 30 天历史，见 `docs/features/route-history.md` |
 | 使用者 | 第一阶段主要在本机使用，但架构不能写死成单用户；现在不做账号 / 权限系统，也不做复杂部署 |
-| 频率 | 只在用户点击 “Refresh from DMS / 更新数据” 时运行。不定时刷新，不持续轮询 DMS |
+| 频率 | 只在用户点击 “Refresh from DMS / 更新数据” 时运行。不定时刷新，不持续轮询 DMS。**已被修改（Product Owner 2026-11-11）：** 增加每天 17:00（America/Los_Angeles）一次全量自动刷新，见 `docs/features/auto-refresh.md`；仍不持续轮询 |
 | 仓库 | `SaltedFishyy/Norcal-dashboard` 是 private，不开 public GitHub Pages。不再往旧仓库放内部数据。credentials、cookies、session、tokens 绝不提交 |
 | 登录方案 | Phase 1 不做在线登录系统，也不做账号密码自动登录。用 Playwright storageState：第一次手动登录后保存 session state 到本地文件，之后 scraper 直接复用（第 5 节） |
 | 开发顺序 | 先验证 scraper 链路，再接完整 frontend/backend（第 11 节）。第一阶段要证明这条链路稳定：手动登录一次 → 保存 session state → 选择 Station → 抓完整 Route Profile → 输出标准化 JSON |
