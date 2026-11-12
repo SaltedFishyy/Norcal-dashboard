@@ -25,7 +25,7 @@ test('RM13 map presentation keeps warnings visible and the responsive layout sta
   assert.match(block, /\.map-page > p:empty/);
   assert.match(block, /\.data-status > p:not\(:empty\)/);
   assert.match(block, /\.map-mode button\[aria-pressed="true"\]/);
-  assert.match(block, /@media \(max-width: 750px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
+
   const html = await fs.readFile(new URL('../../web/map.html', import.meta.url), 'utf8');
   assert.match(html, /placeholder="搜索线路编号或邮编"/);
   assert.ok(html.indexOf('map-route-panel') < html.indexOf('id="map-zip-panel"'));
@@ -166,10 +166,13 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   const { createMapPage } = await import('../../web/map.js');
   const warehouseModules = await Promise.all([import('../../web/warehouse-layer.js'), import('../../web/warehouse-panel.js')]);
   const ids = ['route-map', ...['district', 'station', 'dsp', 'message', 'retry', 'content', 'selection', 'coverage',
-    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
+    'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'route-count', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
   ids.push(...['date', 'date-field', 'date-notice', 'date-text', 'date-missing', 'date-latest'].map(id => `map-${id}`));
+  ids.push(...['detail-card', 'coverage-toggle', 'coverage-label', 'coverage-dot', 'coverage-panel', 'coverage-control'].map(id => `map-${id}`));
   ids.push('map-warehouses', 'map-warehouse-message', 'map-warehouse-notice');
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
+  elements['map-route-items'] = elements['map-routes'];
+  elements['map-coverage-panel'].hidden = true;
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
   elements['route-map'].getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 });
   elements['route-map'].querySelectorAll = () => [];
@@ -650,7 +653,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('B'));
   assert.equal(groups[0].layers[0].tooltip.children.length, 4);
-  assert.deepEqual(e['map-routes'].children.map(row => row.children[2].textContent), ['B', 'D']);
+  assert.deepEqual(e['map-routes'].children.map(row => row.children[3].textContent), ['B', 'D']);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[0].style.backgroundColor), [difficultyColor('B'), difficultyColor('D')]);
   assert.equal(map.fits.length, fits); assert.equal(requests.length, calls); assert.equal(groups.length, count);
   groups[0].layers[0].listeners.click({});
@@ -773,7 +776,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
   assert.equal(controls[0].children[0].attributes['aria-label'], '定位站点');
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
-  assert.equal(e['map-routes'].children[0].children[1].textContent, 'Mock-C');
+  assert.equal(e['map-routes'].children[0].children[1].children[0].textContent, 'Mock-C');
   const fits = map.fits.length; const requestCount = requests.length;
   await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits + 1); assert.equal(requests.length, requestCount);
   assert.equal(e['map-station'].value, 'MOCKA');
@@ -892,7 +895,7 @@ test('RM7 Station, overview and District changes retain only available DSPs; cro
   assert.equal(e['map-dsp'].value, '');
   e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change(); change('Shared');
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
-  assert.equal(e['map-routes'].children[0].children[1].textContent, 'Mock-C');
+  assert.equal(e['map-routes'].children[0].children[1].children[0].textContent, 'Mock-C');
   await page.searchQuery('Mock-C', true); assert.equal(e['map-summary-panel'].hidden, false);
   e['map-district'].value = 'other'; replies.push(reply(200, buildDistrictMap({ profiles: source, districts, district: 'other', boundaries: boundaries() })));
   await e['map-district'].listeners.change(); assert.equal(e['map-dsp'].value, 'Shared');
@@ -997,12 +1000,12 @@ test('R1b scale overrides stay scoped to the map with bounded responsive sizes a
     assert.doesNotMatch(declarations, /(?:color|background|opacity)\s*:/);
   }
   assert.match(block, /\.map-page \{ max-width: none; font-size: var\(--fs-16\);/);
-  assert.match(block, /\.map-page #route-map \{ height: 78vh; min-height: 480px;/);
-  assert.match(block, /\.map-page \.map-routes \{ max-height: 360px;/);
-  assert.match(block, /@media \(max-width: 750px\)\s*\{\s*\.map-page #route-map \{ height: 60vh; min-height: 360px;/);
+
+
+
   assert.match(block, /@media \(min-width: 751px\)\s*\{\s*\.map-page > \.snapshot \{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
   assert.match(block, /\.map-page > \.snapshot:hover, \.map-page > \.snapshot:focus-within \{ white-space: normal;/);
-  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) 280px/);
+  assert.match(css.split('/* ML:')[1], /\.map-page \.map-layout \{ display: flex; flex: 1; min-height: 0/);
   for (const [selector, size] of [
     ['.map-sidebar .map-route-name', 15], ['.map-sidebar .map-summary-metrics dd', 19],
     ['.map-sidebar .map-zip-info dd', 14], ['.map-sidebar .map-summary-updated', 13],
@@ -1282,7 +1285,7 @@ test('MVR filter is scoped to the basemap tile pane, with an unfiltered ocean ba
   assert.deepEqual(rules.filter(([, , body]) => /(?:^|;)\s*filter:/.test(body)).map(([, selector]) => selector.trim()),
     ['.map-page .leaflet-tile-pane']);
   assert.match(block, /filter: none/);
-  assert.match(block, /\.map-page #route-map \{ background: #93dde5;/);
+
   const grid = await fs.readFile(new URL('../../node_modules/leaflet/src/layer/tile/GridLayer.js', import.meta.url), 'utf8');
   assert.match(grid, /pane: 'tilePane'/);
   const view = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
@@ -1317,7 +1320,7 @@ test('MVR outside labels hide during route selection and return in overview; mix
 
 test('MVR-T3 route legend counts mapped routes by station and DSP, deduplicates and hides without features', async () => {
   const { mapText: t } = await import('../../web/map-text.js');
-  assert.equal(t.legendRouteCount(2), '2 条线路 · 颜色对应右侧列表');
+  assert.equal(t.legendRouteCount(2), '2 条线路 · 颜色对应左侧列表');
   assert.deepEqual(t.legendRouteStates, ['选中', '当前范围', '其他']);
   const { view, data, controls } = await labelFixture();
   const legend = controls.at(-1);
@@ -1374,7 +1377,7 @@ test('MVR-T3 legend CSS scopes the translucent panel and compacts states on narr
   assert.match(css, /max-width: calc\(100vw - 64px\)/);
   assert.match(css, /width: 18px; height: 12px;[^}]*background: #e9e4d8; border-radius: 3px/);
   assert.match(css, /width: 10px; height: 10px; border-radius: 50%/);
-  assert.match(css, /@media \(max-width: 450px\)[\s\S]*margin-bottom: 32px/);
+  assert.match(css, /@media \(max-width: 450px\)[\s\S]*width: 200px/);
   assert.match(css, /\.map-page \.map-legend \.map-legend-state \{ display: none;/);
 });
 
@@ -1401,7 +1404,7 @@ test('MVR-T5 group modes share map, tooltip, list and legend colors and hide lab
       assert.equal(layer.styles.at(-1).fillColor, color);
       assert.equal(layer.tooltip.children[0].children[0].children[0].style.backgroundColor, color);
       const row = e['map-routes'].children.find(row => row.className === 'map-route'
-        && row.children[1].textContent === p.route_name);
+        && row.children[1].children[0].textContent === p.route_name);
       assert.equal(row.children[0].style.backgroundColor, color);
       assert.ok(legend.children[1].children.some(row => row.children[0].style.backgroundColor === color));
     }
@@ -1434,7 +1437,7 @@ test('MVR-T6 legend shares DSP dropdown changes, toggles, retains alternatives a
   assert.equal(e['map-summary-panel'].hidden, true); // RM7-5 clears incompatible selection.
   assert.equal(rows().length, count);
   assert.equal(row('AAA').attributes['aria-pressed'], 'true');
-  assert.ok(e['map-routes'].children.filter(node => node.className === 'map-route').every(node => node.children[1].textContent === data.routes[0].route_name));
+  assert.ok(e['map-routes'].children.filter(node => node.className === 'map-route').every(node => node.children[1].children[0].textContent === data.routes[0].route_name));
   row('AAA').listeners.click(); assert.equal(e['map-dsp'].value, '');
   row('BBB').listeners.click(); assert.equal(e['map-dsp'].value, 'MOCK-BBB');
   e['map-dsp'].value = 'MOCK-AAA'; e['map-dsp'].listeners.change();
@@ -1469,7 +1472,7 @@ test('MVR-T6 DSP list groups sort ZIP totals, code ties and route names; search 
   panel.render(data, { focusStation: null }); panel.setColorMode('dsp');
   const nodes = () => e['map-routes'].children;
   assert.deepEqual(nodes().filter(n => n.tagName === 'h3').map(n => allText(n).trim()), ['AAA · 1 条线路', 'BBB · 2 条线路', '未分配 · 1 条线路']);
-  assert.deepEqual(nodes().filter(n => n.className === 'map-route').map(n => n.children[1].textContent), ['C', 'A', 'Z', 'D']);
+  assert.deepEqual(nodes().filter(n => n.className === 'map-route').map(n => n.children[1].children[0].textContent), ['C', 'A', 'Z', 'D']);
   assert.ok(nodes().filter(n => n.tagName === 'h3').every(n => !n.listeners.click));
   panel.applySelection(selectRoute(data.routes[0]));
   const current = nodes().find(n => n.attributes['aria-pressed'] === 'true');
@@ -1617,4 +1620,142 @@ test('MVR P3 service Range errors restore fallback while zoom cancellation remai
   assert.equal(service._isValidTile(tile),false);
   assert.ok(baselayers[1]._isValidTile(tile));
   assert.equal(e['map-basemap-message'].hidden,false);
+});
+
+
+test('ML-T1 keeps viewport structure, banners outside Leaflet, IDs and responsive scroll areas', async () => {
+  const html = await fs.readFile(new URL('../../web/map.html', import.meta.url), 'utf8');
+  const css = (await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8')).split('/* ML:')[1];
+  assert.match(html, /<header[^>]*map-heading[\s\S]*map-toolbar[\s\S]*<\/header>/);
+  assert.ok(html.indexOf('<aside') < html.indexOf('class="map-canvas"'));
+  assert.match(html, /id="map-routes"[^>]*><div id="map-route-items"><\/div><p id="map-no-match"/);
+  assert.match(html, /id="route-map"[^>]*><\/div>\s*<div class="map-banners">/);
+  for (const id of ['data-status', 'map-message', 'map-retry', 'map-basemap-message', 'map-warehouse-message', 'map-warehouse-notice', 'map-date-notice']) {
+    assert.ok(html.indexOf('id="' + id + '"') > html.indexOf('class="map-banners"'));
+  }
+  const ids = [...html.matchAll(/ id="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.match(css, /height: 100vh; height: 100dvh; overflow: hidden; display: flex/);
+  assert.match(css, /#map-routes \{[^}]*flex: 1; min-height: 0;[^}]*overflow-y: auto/);
+  assert.match(css, /@media \(max-width: 750px\)[\s\S]*height: 60dvh; min-height: 360px/);
+  assert.doesNotMatch(await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8'), /78vh/);
+  const view = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
+  assert.match(view, /new globalThis.ResizeObserver\(\(\) => map.invalidateSize\(\{ pan: false \}\)\)/);
+  assert.match(view, /resizeObserver.observe\(canvas\)/);
+});
+
+test('ML-T1 count follows rendered routes through search, DSP and clear', async () => {
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { doc, elements: e } = await fixture();
+  const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
+  panel.render(payload());
+  const check = () => assert.equal(e['map-route-count'].textContent, e['map-routes'].children.filter(row => row.className === 'map-route').length + ' \u6761\u7ebf\u8def');
+  check(); panel.setDsp('absent'); check(); panel.setDsp(null); check();
+  e['map-search'].value = 'absent'; e['map-search'].listeners.input(); check();
+  panel.clear(); check();
+});
+
+test('ML-T2 rows show metrics, missing values and contrasting difficulty badges in every mode', async () => {
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { difficultyColor } = await import('../../web/difficulty.js');
+  const { modeColor } = await import('../../web/map-state.js');
+  const { doc, elements: e } = await fixture();
+  const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
+  const data = payload();
+  const levels = ['S级 极难', 'A级 难', 'B级 中', 'C级 易', 'D级 极易', 'invalid'];
+  data.routes = levels.map((level, i) => ({ ...data.routes[0], route_id: i + 1, route_name: 'Route-' + i,
+    dsp_name: i === 5 ? null : 'S-AAA', route_difficulty: level, zip_count: 3,
+    pph: i === 5 ? null : 12.5, pickup_volume: i === 5 ? null : 12345 }));
+  panel.render(data, { focusStation: data.routes[0].station });
+  const luminance = hex => {
+    const rgb = hex.slice(1).match(/../g).map(v => parseInt(v, 16) / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+  };
+  for (const mode of ['route', 'station', 'dsp', 'difficulty']) {
+    panel.setColorMode(mode);
+    const rows = e['map-routes'].children.filter(n => n.className === 'map-route');
+    for (const row of rows) {
+      const i = Number(row.children[1].children[0].textContent.slice(-1));
+      const badge = row.children[3], level = ['S', 'A', 'B', 'C', 'D', null][i];
+      assert.equal(badge.textContent, level || '—');
+      assert.equal(badge.style.backgroundColor, difficultyColor(level));
+      const l = [luminance(badge.style.backgroundColor), luminance(badge.style.color)].sort((a,b) => b-a);
+      assert.ok((l[0] + .05) / (l[1] + .05) >= 4.5);
+      assert.equal(row.children[0].style.backgroundColor, modeColor(data.routes[i], mode));
+      assert.equal(row.children[1].children[1].textContent, (i === 5 ? '—' : 'S-AAA') + ' · 3 ZIP');
+      assert.equal(allText(row.children[2]).replaceAll(' ', ''), i === 5 ? '—PPH—件' : '12.50PPH12,345件');
+      assert.match(row.attributes['aria-label'], /DSP .*PPH .*领件量 .*线路难度/);
+    }
+  }
+});
+
+
+test('ML-T3 coverage toggle, Escape, warning dot and detail visibility preserve selection', async () => {
+  const { page, doc, elements: e, replies, reply, groups } = await fixture();
+  const data = payload(); data.cross_station_conflicts = [{ postal_code: '00002', stations: ['MOCKA', 'MOCKB'] }];
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data));
+  await page.start();
+  assert.equal(e['map-detail-card'].hidden, true);
+  assert.equal(e['map-coverage-dot'].hidden, false);
+  const { mapText: t } = await import('../../web/map-text.js');
+  assert.equal(e['map-coverage-label'].textContent, t.coverageToggleValue(e['map-coverage'].textContent));
+  e['map-routes'].children.find(row => row.tagName === 'button').listeners.click();
+  groups[0].layers[0].listeners.click({});
+  assert.equal(e['map-detail-card'].hidden, false);
+  assert.equal(e['map-zip-panel'].hidden, false);
+  assert.equal(e['map-summary-panel'].hidden, false);
+  e['map-coverage-toggle'].listeners.click();
+  assert.equal(e['map-coverage-panel'].hidden, false);
+  assert.equal(e['map-coverage-toggle'].getAttribute('aria-expanded'), 'true');
+  doc.listeners.keydown({ key: 'Escape' });
+  assert.equal(e['map-coverage-panel'].hidden, true);
+  assert.equal(e['map-coverage-toggle'].getAttribute('aria-expanded'), 'false');
+  assert.equal(e['map-coverage-toggle'].focused, true);
+  assert.equal(e['map-detail-card'].hidden, false);
+  let stopped = false;
+  e['map-detail-card'].listeners.wheel({ stopPropagation() { stopped = true; } });
+  assert.equal(stopped, true);
+  doc.listeners.keydown({ key: 'Escape' });
+  assert.equal(e['map-detail-card'].hidden, true);
+  e['map-coverage-toggle'].listeners.click(); e['map-coverage-toggle'].listeners.click();
+  assert.equal(e['map-coverage-panel'].hidden, true);
+});
+
+test('ML-T3 DOM retains coverage contents outside sidebar and responsive overlays', async () => {
+ const html = await fs.readFile(new URL('../../web/map.html', import.meta.url), 'utf8');
+ const css = (await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8')).split('/* ML:')[1];
+ assert.doesNotMatch(html + css, /map-sidebar-details/);
+ const sidebar = html.slice(html.indexOf('<aside'), html.indexOf('</aside>'));
+ assert.doesNotMatch(sidebar, /id="map-(zip-panel|summary-panel|coverage)"/);
+ assert.ok(html.indexOf('id="map-zip-panel"') < html.indexOf('id="map-summary-panel"'));
+ assert.match(html, /aria-controls="map-coverage-panel"/);
+ for(const id of ['coverage','coverage-count','regenerate','source','conflicts-details','missing-details'])
+   assert.ok(html.indexOf(`id="map-${id}"`) > html.indexOf('id="map-coverage-panel"'));
+ assert.match(css, /right: 10px; bottom: 30px/);
+ assert.match(css, /#map-coverage-panel\[hidden\][^}]*display: block !important/);
+ assert.match(css, /map-detail-card \{ position: static; order: 1/);
+ assert.match(await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8'), /legendControl = L.control\(\{ position: 'topright' \}\)/);
+});
+
+
+test('ML-T3 coverage label uses default before loading and for zero total', async () => {
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { mapText: t } = await import('../../web/map-text.js');
+  const { doc, elements: e } = await fixture();
+  const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
+  panel.clear();
+  assert.equal(e['map-coverage'].textContent.codePointAt(0), 0x2014);
+  assert.equal(e['map-coverage-label'].textContent, t.coverageToggle);
+  const data = payload(); data.coverage.total = 0;
+  panel.render(data);
+  assert.equal(e['map-coverage'].textContent, '—');
+  assert.equal(e['map-coverage-label'].textContent, t.coverageToggle);
+});
+
+test('ML-T3 floating panels use compact typography without changing difficulty badges', async () => {
+  const css = (await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8')).split('/* ML:')[1];
+  assert.match(css, /\.map-page \.map-detail-card h2, \.map-page #map-coverage-panel h2 \{ font-size: 16px; font-weight: 600;/);
+  assert.match(css, /\.map-page #map-coverage-panel #map-coverage \{ font-size: 22px;/);
+  assert.match(css, /\.map-page \.map-detail-card \.map-zip-number \{ font-size: 22px;/);
+  assert.match(css, /\.map-page \.map-detail-card \.map-summary-metrics dd:not\(\.difficulty\), \.map-page \.map-detail-card \.map-zip-metrics dd:not\(\.difficulty\) \{ font-size: 16px;/);
 });

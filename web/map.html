@@ -17,7 +17,6 @@
       <p class="console-brand"></p>
       <div class="console-title"><h1 data-map-text="title">线路地图</h1></div>
       <nav class="page-nav" aria-label="页面"><a href="/" data-map-text="profiles">线路档案</a><a href="/map" aria-current="page" data-map-text="title">线路地图</a></nav>
-    </header>
     <section class="map-toolbar" aria-label="地图筛选">
       <label><span>片区</span> <select id="map-district" disabled aria-label="片区"></select></label>
       <label><span data-map-text="station">站点</span> <select id="map-station" disabled aria-label="站点"></select></label>
@@ -29,6 +28,21 @@
         <div id="map-data-actions"></div>
       </div>
     </section>
+    </header>
+    <div class="map-layout" id="map-content" aria-busy="true">
+      <aside class="map-sidebar">
+        <section class="panel map-route-panel"><div class="map-sidebar-heading"><h2 data-map-text="route">线路</h2>
+          <label class="sr-only" for="map-search" data-map-text="search">搜索线路或邮编</label><div class="map-search-field"><svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg><input id="map-search" type="search" placeholder="搜索线路编号或邮编" disabled></div>
+          <p id="map-search-hint" class="snapshot" data-map-text="zipHint" hidden>输入完整 5 位邮编可搜索邮编</p>
+          <p id="map-search-message" role="status" aria-live="polite"></p>
+          <p id="map-route-count" aria-live="polite">0 条线路</p>
+          </div>
+          <div id="map-routes" class="map-routes" aria-label="线路"><div id="map-route-items"></div><p id="map-no-match" data-map-text="noMatch" hidden>未找到匹配线路</p></div>
+        </section>
+      </aside>
+      <div class="map-canvas">
+        <div id="route-map" role="region" aria-label="线路邮编覆盖地图"></div>
+        <div class="map-banners">
     <section id="data-status" class="data-status" aria-label="数据状态"></section>
     <p id="map-date-notice" class="view-date-notice" role="status" hidden><span id="map-date-text"></span> · <button id="map-date-latest" type="button">回到最新</button> · 首票价格为当前报价<span id="map-date-missing"></span></p>
     <p id="map-message" role="status" aria-live="polite" data-map-text="loadingStations">正在加载站点…</p>
@@ -36,17 +50,14 @@
     <p id="map-warehouse-message" class="warehouse-notice" role="status" aria-live="polite"></p>
     <div id="map-warehouse-notice" class="warehouse-notice" role="status" aria-live="polite"></div>
     <button id="map-retry" type="button" hidden data-map-text="retry">重试</button>
-    <div class="map-layout" id="map-content" aria-busy="true">
-      <div id="route-map" role="region" aria-label="线路邮编覆盖地图"></div>
-      <aside class="map-sidebar">
-        <section class="panel map-route-panel"><h2 data-map-text="route">线路</h2>
-          <label class="sr-only" for="map-search" data-map-text="search">搜索线路或邮编</label><div class="map-search-field"><svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg><input id="map-search" type="search" placeholder="搜索线路编号或邮编" disabled></div>
-          <p id="map-search-hint" class="snapshot" data-map-text="zipHint" hidden>输入完整 5 位邮编可搜索邮编</p>
-          <p id="map-search-message" role="status" aria-live="polite"></p>
-          <div id="map-routes" class="map-routes" aria-label="线路"></div><p id="map-no-match" data-map-text="noMatch" hidden>未找到匹配线路</p>
-        </section>
+        </div>
+        <div class="map-detail-card" id="map-detail-card" hidden>
         <section class="panel" id="map-zip-panel" hidden><div class="map-card-heading" id="map-zip-heading"><h2 data-map-text="currentZip">当前邮编</h2><button id="map-clear" type="button" disabled data-map-text="clear">清除选择</button></div><div id="map-selection" aria-live="polite"></div></section>
         <section class="panel" id="map-summary-panel" hidden><div class="map-card-heading" id="map-summary-heading"><h2 data-map-text="summary">线路概览</h2></div><div id="map-summary" aria-live="polite"></div></section>
+        </div>
+        <div class="map-coverage-control" id="map-coverage-control">
+          <button id="map-coverage-toggle" type="button" aria-expanded="false" aria-controls="map-coverage-panel"><span id="map-coverage-label" data-map-text="coverageToggle">地图覆盖率 · 缺少边界的邮编</span><span id="map-coverage-dot" class="map-warning" hidden aria-label="存在跨站冲突">●</span></button>
+          <div id="map-coverage-panel" hidden>
         <section class="panel"><h2 data-map-text="coverage">地图覆盖率</h2><p id="map-coverage">—</p><p id="map-coverage-count"></p><p id="map-regenerate" hidden></p><p id="map-source"></p></section>
         <details class="panel" id="map-conflicts-details" hidden><summary id="map-conflicts-title"></summary><ul id="map-conflicts"></ul></details>
         <details class="panel" id="map-missing-details"><summary id="map-missing-title">缺少边界的邮编 (0)</summary>
@@ -54,7 +65,9 @@
           <p id="map-missing-empty" hidden data-map-text="noMissing">没有缺少边界的邮编。</p>
         </details>
         <p class="snapshot" data-map-text="boundaryNote">ZCTA 是 USPS ZIP 区域的近似边界，不能用于具体地址的线路分配。</p>
-      </aside>
+          </div>
+        </div>
+      </div>
     </div>
     <noscript data-map-text="noscript">请启用 JavaScript 以加载本地线路地图。</noscript>
   </main>

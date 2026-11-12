@@ -122,7 +122,7 @@ test('RQ-T3 map tooltip and route/ZIP panels use their own prices and share high
   const { doc, add, nodes } = fixture(t);
   const tooltip = zipDetails(doc, { postal_code: '00123', current_first_0_1lb_price: 1.75 });
   assert.deepEqual(tooltip.children.at(-1).children.map(n => n.textContent), ['首票价格', '$1.75']);
-  for (const id of ['search', 'routes', 'no-match', 'search-hint', 'clear', 'zip-heading', 'summary-heading', 'summary', 'summary-panel', 'selection', 'zip-panel']) add('map-' + id);
+  for (const id of ['search', 'routes', 'route-items', 'route-count', 'no-match', 'search-hint', 'clear', 'zip-heading', 'summary-heading', 'summary', 'summary-panel', 'selection', 'zip-panel']) add('map-' + id);
   const panel = createMapPanel({ document: doc });
   panel.applySelection({ route: { ...route, current_first_0_1lb_price_min: 1.75, current_first_0_1lb_price_max: 1.95, quoted_zip_count: 2 }, zip: { postal_code: '00123', status: 'covered', current_first_0_1lb_price: 1.75 } });
   assert.match(allText(nodes['map-summary']), /首票价格 \$1.75–\$1.95/);

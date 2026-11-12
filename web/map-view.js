@@ -209,6 +209,12 @@ export function zipDetails(doc, properties, selection = clearSelection(), colorM
 export function createMapView({ leaflet: L, protomaps, document: doc, fetch: request,
   onZip, onClear, onBasemapError, onColorMode, onDsp }) {
   const map = L.map(doc.getElementById('route-map'), { attributionControl: true, zoomControl: false, minZoom: 3, maxZoom: 16 });
+  // Header wrapping can resize the canvas without a window resize event.
+  const canvas = doc.getElementById('route-map').parentElement;
+  if (globalThis.ResizeObserver && canvas) {
+    const resizeObserver = new globalThis.ResizeObserver(() => map.invalidateSize({ pan: false }));
+    resizeObserver.observe(canvas);
+  }
   L.control.zoom({ zoomInTitle: t.zoomIn, zoomOutTitle: t.zoomOut }).addTo(map);
   map.attributionControl.addAttribution('Boundaries: US Census 2020 ZCTA');
   map.setView([37.5, -122], 8);
@@ -276,8 +282,12 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   modeControl.addTo(map);
   const legend = doc.createElement('div'), legendTitle = doc.createElement('strong');
   legend.className = 'map-legend'; legend.hidden = true; legend.append(legendTitle);
-  const legendControl = L.control({ position: 'bottomright' });
-  legendControl.onAdd = () => { L.DomEvent.disableClickPropagation(legend); return legend; };
+  const legendControl = L.control({ position: 'topright' });
+  legendControl.onAdd = () => {
+    L.DomEvent.disableClickPropagation(legend);
+    legend.addEventListener('wheel', event => event.stopPropagation());
+    return legend;
+  };
   legendControl.addTo(map);
   function updateLegend() {
     legend.hidden = layers.length === 0;

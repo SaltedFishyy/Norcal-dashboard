@@ -295,7 +295,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   }
   districtSelect.addEventListener('change', changeDistrict);
   retry.addEventListener('click', () => stationsLoaded ? loadStation() : start());
-  doc.addEventListener('keydown', event => { if (event.key === 'Escape' && !warehousePanel.isOpen()) deselect(); });
+  doc.addEventListener('keydown', event => { if (event.key === 'Escape' && !warehousePanel.isOpen() && !panel.closeCoverage()) deselect(); });
   void initializeWarehouses();
   const basemapReady = view.loadBasemaps();
   return { start, loadStation, searchQuery, map: view.map, basemapReady };

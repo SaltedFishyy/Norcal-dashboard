@@ -28,10 +28,30 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   };
   let data, routeColors, groupColors, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   const search = element('search');
+  const coverageToggle = element('coverage-toggle'), coveragePanel = element('coverage-panel');
+  function setCoverageOpen(open) {
+    if (!coveragePanel) return;
+    coveragePanel.hidden = !open;
+    coverageToggle.setAttribute('aria-expanded', String(open));
+  }
+  coverageToggle?.addEventListener('click', () => setCoverageOpen(coveragePanel.hidden));
+  function syncCoverageControl() {
+    if (!coverageToggle) return;
+    const value = element('coverage').textContent;
+    element('coverage-label').textContent = (!value || value === '—') ? t.coverageToggle : t.coverageToggleValue(value);
+    element('coverage-dot').hidden = element('conflicts-details').hidden;
+  }
+  // These overlays live outside Leaflet; keep wheel and pointer events local.
+  for (const id of ['detail-card', 'coverage-control']) {
+    const node = element(id);
+    for (const type of ['wheel', 'click', 'dblclick', 'pointerdown'])
+      node?.addEventListener(type, event => event.stopPropagation());
+  }
+
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
     const { matches } = filteredRoutes(data?.routes || [], query, focusStation, dsp);
-    element('routes').replaceChildren();
+    element('route-items').replaceChildren();
     element('no-match').hidden = matches.length !== 0;
     element('search-hint').hidden = !classified.zipHint;
     const dspGroups = new Map();
@@ -44,6 +64,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     const groups = colorMode !== 'dsp' && !focusStation && data?.stations;
     const ordered = colorMode === 'dsp' ? sortedGroups.flatMap(([, group]) => group.routes.sort((a, b) => a.route_name.localeCompare(b.route_name)))
       : groups ? data.stations.flatMap(station => matches.filter(route => route.station === station.code)) : matches;
+    element('route-count').textContent = t.routeCount(ordered.length);
     let previous;
     for (const route of ordered) {
       if (colorMode === 'dsp' && previous !== dspColorKey(route.dsp_name)) {
@@ -51,16 +72,29 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
         const heading = text('h3', '', 'map-dsp-group');
         const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = modeColor(route, colorMode, routeColors, groupColors);
         heading.append(swatch, text('span', t.dspRouteGroup(previous ?? t.unassignedDsp, dspGroups.get(previous).routes.length)));
-        element('routes').append(heading);
+        element('route-items').append(heading);
       }
-      if (groups && previous !== route.station) { element('routes').append(text('h3', route.station)); previous = route.station; }
+      if (groups && previous !== route.station) { element('route-items').append(text('h3', route.station)); previous = route.station; }
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
       const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = modeColor(route, colorMode, routeColors, groupColors);
-      button.append(swatch, text('span', query && !focusStation ? route.station + ' · ' + route.route_name : route.route_name));
-      if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
-      button.append(text('span', `${route.zip_count} ZIP`));
-      button.addEventListener('click', () => onRoute(route.route_id)); element('routes').append(button);
+      const name = query && !focusStation ? route.station + ' · ' + route.route_name : route.route_name;
+      const owner = formatValue(route.dsp_name), pph = formatNumber(route.pph, 2, 2), volume = formatNumber(route.pickup_volume, 0);
+      const info = text('span', '', 'map-route-info');
+      info.append(text('span', name, 'map-route-title'), text('span', owner + ' · ' + route.zip_count + ' ZIP', 'map-route-owner'));
+      const metrics = text('span', '', 'map-route-values');
+      const pphLine = text('span', '', 'map-route-metric'), volumeLine = text('span', '', 'map-route-metric');
+      pphLine.append(text('span', pph), text('small', t.pph));
+      volumeLine.append(text('span', volume), text('small', t.pieceUnit));
+      metrics.append(pphLine, volumeLine);
+      const level = difficultyLevel(route.route_difficulty);
+      const badge = text('span', level || '—', 'map-route-difficulty');
+      badge.style.backgroundColor = difficultyColor(level);
+      // White meets 4.5:1 on S/A/C; dark text is needed on B/D/unknown.
+      badge.style.color = ['S', 'A', 'C'].includes(level) ? '#ffffff' : '#111827';
+      button.setAttribute('aria-label', name + ', DSP ' + owner + ', ' + route.zip_count + ' ZIP, ' + t.pph + ' ' + pph + ', ' + t.routePickupVolume + ' ' + volume + ' ' + t.pieceUnit + ', ' + t.routeDifficulty + ' ' + (level || '—'));
+      button.append(swatch, info, metrics, badge);
+      button.addEventListener('click', () => onRoute(route.route_id)); element('route-items').append(button);
     }
   }
   search.addEventListener('input', () => { renderRoutes(); return onSearch(search.value || '', false); });
@@ -71,7 +105,8 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   element('clear').addEventListener('click', onClear);
   function applySelection(next) {
     selection = next; renderRoutes();
-    if (next.route) [...element('routes').children].find(row => row.getAttribute?.('aria-pressed') === 'true')?.scrollIntoView?.({ block: 'nearest' });
+    if (element('detail-card')) element('detail-card').hidden = !next.route && !next.zip;
+    if (next.route) [...element('route-items').children].find(row => row.getAttribute?.('aria-pressed') === 'true')?.scrollIntoView?.({ block: 'nearest' });
     element('clear').disabled = !next.route && !next.zip;
     element(next.zip ? 'zip-heading' : 'summary-heading').append(element('clear'));
     element('summary').replaceChildren();
@@ -135,6 +170,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('missing-title').textContent = t.missingTitle(0);
     element('missing-empty').hidden = true; element('regenerate').hidden = true;
     if (element('station-times')) element('station-times').textContent = '';
+    syncCoverageControl();
     element('source').textContent = ''; element('updated').textContent = '—'; element('updated').removeAttribute('title');
   }
   function render(next, { focusStation: focus = null, routeColors: colors, groupColors: groups } = {}) {
@@ -150,6 +186,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     const { total, mapped, missing_no_zcta, missing_not_checked } = coverage;
     element('coverage').textContent = total > 0 ? `${(mapped / total * 100).toFixed(2)}%` : '—';
     element('coverage-count').textContent = t.coverageCount(mapped, total);
+    syncCoverageControl();
     element('regenerate').hidden = false;
     element('regenerate').textContent = t.missingCount(missing_no_zcta, missing_not_checked);
     element('regenerate').className = missing_not_checked > 0 ? 'map-warning' : '';
@@ -169,5 +206,9 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   }
   function setColorMode(mode) { colorMode = mode; applySelection(selection); }
   function setDsp(value) { dsp = value; renderRoutes(); }
-  return { render, clear, applySelection, searchStatus, setColorMode, setDsp };
+  function closeCoverage() {
+    if (!coveragePanel || coveragePanel.hidden) return false;
+    setCoverageOpen(false); coverageToggle.focus(); return true;
+  }
+  return { render, clear, applySelection, searchStatus, setColorMode, setDsp, closeCoverage };
 }

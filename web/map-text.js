@@ -2,6 +2,10 @@ import { difficultyLevel } from './difficulty.js';
 import { formatUpdated } from './format.js';
 
 export const mapText = {
+  coverageToggle: '地图覆盖率 · 缺少边界的邮编',
+  coverageToggleValue: value => `覆盖率 ${value} · 缺少边界的邮编`,
+  pieceUnit: '件', routePickupVolume: '领件量',
+  routeCount: count => `${count} 条线路`,
   firstPrice: '首票价格', priceDetail: '价格详情',
   retainedZip: zip => `已保留 ZIP ${zip}，按 Enter 在当前范围重新查询`,
   allDsp: '全部 DSP',
@@ -12,7 +16,7 @@ export const mapText = {
   byRoute: '按线路', byDifficulty: '按难易度', colorMode: '地图颜色模式',
   routeDifficulty: '线路难度', zipDifficulty: 'ZIP 难度',
   legendRoute: '颜色：线路难度', legendZip: name => `颜色：${name} 的 ZIP 难度`,
-  legendRouteCount: count => `${count} 条线路 · 颜色对应右侧列表`,
+  legendRouteCount: count => `${count} 条线路 · 颜色对应左侧列表`,
   legendRouteStates: ['选中', '当前范围', '其他'],
   legendItems: ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据'],
   missingDetail: '暂无 ZIP 难度数据',
