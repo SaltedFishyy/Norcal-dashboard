@@ -183,3 +183,11 @@
 - [ ] ML-Q1 列表行是否需要显示首公里距离？地图 API（`/api/route-map*`）的线路数据里没有 `first_mile_distance`，第一版不显示；如果需要，要另开任务给地图 API 加字段。（2026-11-12）
 - [x] ML-Q2 是否把地图底图换成深色（设计稿是深色占位）？→ **换成 Protomaps 官方 dark**（Product Owner 2026-11-12 看过对比截图后决定），见 `docs/features/map-visual-refresh.md` 第 11 节 MVR-P4。（2026-11-12）
 - [ ] ML-Q3 手机宽度（≤ 750px）是否也要一屏固定？Claude 暂定恢复普通页面滚动、地图在上、列表在下（spec 第 4 节）。（2026-11-12）
+
+## 线路档案布局 / Profile Layout
+
+见 `docs/features/profile-layout.md`（Approved 需求，待实现授权，2026-11-12）。
+
+- [ ] PL-Q1 线路档案是否需要全站点汇总（线路数、件量合计、难度分布、平均 PPH）？方案 B 第一版不做。如果要平均 PPH，需要定算法（简单平均还是按件量加权）。（2026-11-12）
+- [ ] PL-Q2 是否在线路详情中显示地址类型分布（`/api/route-profiles` 已返回 `address_type_distribution`，页面目前没有用）？第一版不做。（2026-11-12）
+- [ ] PL-Q3 是否加“在线路地图中查看”跳转？`/map` 目前不支持通过 URL 打开指定线路，需要另开任务。第一版不做。（2026-11-12）
