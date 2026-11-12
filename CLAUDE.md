@@ -78,7 +78,7 @@ Product Owner 确认需求后：
    - Product Owner 只点名单个任务（如“开始实现 RQ-T2”）时，只授权该任务；说“按 Plan 跑完”“连续做”“整个 Feature 开始实现”等时为整个 Plan。
    - spec 中标明“另行授权”的任务、或本身需要第 3 条停止条件中操作的任务，不因 Plan 授权而自动开始。
    - 开始执行时用一句话说明所理解的范围（陈述，不是提问）。
-3. **范围内 Claude 可以自行：** 启动 Codex；review 结果；把普通 bug 交回 Codex 修复（仍最多两轮，第 5 节）；运行 test / build / lint / `git diff --check`；执行普通 Bash / PowerShell 诊断命令；更新对应 spec / docs / 实现记录；对明显安全、符合 spec 的普通技术选择自行决定并在文档中记录；继续下一个任务。
+3. **范围内 Claude 可以自行：** 启动 Codex；review 结果；把普通 bug 交回 Codex 修复（仍最多两轮，第 5 节）；运行 test / build / lint / `git diff --check`；执行普通 Bash / PowerShell 诊断命令（含仓库外普通文件、进程、端口、日志、服务、计划任务的只读查看，见第 7.1 节第 8 条）；更新对应 spec / docs / 实现记录；对明显安全、符合 spec 的普通技术选择自行决定并在文档中记录；继续下一个任务。
 4. **Stop Conditions：以下情况必须停下来问 Product Owner。**
    - 正式数据库 migration / data migration
    - 正式部署或服务重启
@@ -168,3 +168,4 @@ DMS / browser automation → transform / normalization → store → API → fro
 5. 不要关闭 `permissions.blockReadsOutsideWorkingDirectories`，保留这层安全保护。
 6. 仓库内的普通 Bash 命令继续按现有权限自动执行，不制造不必要的确认提示。
 7. 权限确认（Product Owner 2026-11-06）：Claude 自己可以安全判断的普通继续确认，不转给 Product Owner；仓库内读文件、test、`git status`、`git diff` 等直接执行。若某个低风险命令被 Claude Code 权限系统反复强制确认，先检查它是否属于已允许的低风险类别，符合时建议加入现有 allow 规则（修改 settings 前告知 Product Owner），不要把普通权限提示当作产品决策反复询问。
+8. 只读诊断放宽（Product Owner 2026-11-11）：已批准任务里，Claude 需要用 PowerShell、读取仓库外的普通文件 / 目录、查看进程、端口、日志、服务、计划任务（只查询）时，自己判断后直接执行，不再询问。仍必须先停下来问 Product Owner 的：读取 / 打印 secrets、token、密码、连接串（`.env`、`readonly.env`、`%LOCALAPPDATA%\nc-ops-console\secrets\`）；DMS 登录态（`playwright/.auth`）；删除文件或数据；扩大权限（含修改 Claude Code settings 放宽规则）；以及第 4.1 节其他停止条件。对应 settings：用户级 `additionalDirectories` 加入整个 `%LOCALAPPDATA%\nc-ops-console`，并对 `secrets/`、`config/readonly.env`、`playwright/`、仓库 `.env` 设置 `Read` deny；auto mode 的 allow / soft_deny 写入同样的边界；项目 `.claude/settings.local.json` 允许只读 PowerShell（`Get-*`、`Test-Path`、`Select-String`、`netstat`、`tasklist`、`schtasks /Query` 等）。第 5 条仍然有效：不关闭 `blockReadsOutsideWorkingDirectories`，改用 `additionalDirectories` 扩大可读范围。
