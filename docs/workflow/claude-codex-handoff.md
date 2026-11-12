@@ -173,3 +173,19 @@ watcher 的已知限制：
 4. **无参数模式只选启动时的最新 run。** Claude 打开窗口时应传入本次 run 目录（脚本启动时会输出 `输出目录: ...`），避免选到上一次 run。
 
 Claude 的固定做法：后台启动 `codex-handoff.sh` → 从输出中读取 run 目录 → 运行 `node scripts/codex-watch.mjs --window <run-dir>`。打开窗口失败时把手动命令告诉 Product Owner，交接本身照常进行。
+
+## 8. 浏览器检查后的进程清理（Product Owner 2026-11-12）
+
+背景：2026-11-12 ML-T3 的 Playwright 浏览器检查结束后，留下了一个父进程已退出的 `chrome-headless-shell` 渲染进程。它持续占用一个多 CPU 核，内存涨到约 4.6 GB，电脑只剩约 530 MB 空闲内存。局域网只读服务（3000）和 Worker（3100）被换出到磁盘，请求全部超时，看起来像服务被关掉、看板很卡。该进程退出后，两个服务不需要重启就恢复了。
+
+规则：
+
+1. **写浏览器检查脚本（Codex 或 Claude）：** `chromium.launch()` 之后的所有步骤放在 `try { ... } finally { await browser.close(); }` 中，并设置硬超时（例如 `setTimeout` 到时关闭浏览器并退出进程）。脚本中途报错或超时，也必须关闭浏览器。task brief 中要求浏览器检查时，写明这一条。
+2. **每次 Codex 运行或 Claude 自己的浏览器检查结束后，** Claude 检查是否有残留进程：
+
+   ```powershell
+   tasklist | findstr chrome-headless
+   ```
+
+   有残留时，确认是本次测试产生的进程（`ms-playwright` 路径下的 `chrome-headless-shell.exe`，父进程已不存在或属于刚结束的测试），再结束它们。这些进程是测试工具，不是 Product Owner 的浏览器；不要结束 Product Owner 自己的 Chrome / Edge。
+3. **Product Owner 反馈看板很慢、打不开或像被关掉时，** 先检查空闲内存（`Get-CimInstance Win32_OperatingSystem` 的 `FreePhysicalMemory`）、占内存最多的进程和残留的 headless Chrome，再判断是否需要重启服务。服务进程仍在但没有响应时，先排除资源被占满的情况。重启服务仍然要先问 Product Owner（`CLAUDE.md` 第 4.1 节）。

@@ -100,7 +100,7 @@ Product Owner 确认需求后：
 
 Codex 完成后：
 
-1. 读取 Codex 的总结、`git diff`（或 handoff 产物中的 `changes.diff`）和实际代码。
+1. 读取 Codex 的总结、`git diff`（或 handoff 产物中的 `changes.diff`）和实际代码。用过浏览器检查时，先检查并清理残留的 `chrome-headless-shell` 进程（`docs/workflow/claude-codex-handoff.md` 第 8 节）。
 2. 按 `AGENTS.md` 第 8 节清单逐条对照 spec 和验收标准。
 3. 需要时本地运行页面检查（`AGENTS.md` 第 9、10 节）。
 4. 有问题时写清楚：位置、现象、期望、对应验收标准、建议修复方式，交回 Codex。**最多两轮修复**，之后向 Product Owner 汇报（这是第 4.1 节的停止条件之一）。如果发现需求冲突、架构决策、数据/权限问题、重大安全风险或其他需要 Product Owner 决定的问题，立即停止修复并汇报，不让 Codex 猜。
