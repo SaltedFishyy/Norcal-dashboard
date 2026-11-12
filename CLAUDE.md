@@ -64,7 +64,7 @@ Product Owner 确认需求后：
 
 1. 确认 spec 有目标、范围、可检查的验收标准（AC1、AC2…）。
 2. 选择交接方式：
-   - **Mode A（自动，优先）**：`bash scripts/codex-handoff.sh <task.md>`。完成后读 `last-message.md`、`changes.diff`、实际文件，按第 5 节审查；有问题时写 review 文件，用 `--fix ... --round N` 自动交回，最多两轮。预计超过 10 分钟的任务在后台运行。启动后用 `node scripts/codex-watch.mjs --window <run-dir>` 给 Product Owner 打开只读观察窗口（可选旁观者，不影响交接；失败时给出手动命令，见 `docs/workflow/claude-codex-handoff.md` 第 7 节）。
+   - **Mode A（自动，优先）**：`bash scripts/codex-handoff.sh <task.md>`。完成后读 `last-message.md`、`changes.diff`、实际文件，按第 5 节审查；有问题时写 review 文件，用 `--fix ... --round N` 自动交回，最多两轮。预计超过 10 分钟的任务在后台运行。不打开 `codex-watch` 观察窗口（Product Owner 2026-11-12）；该脚本只作为 Product Owner 手动使用的可选工具，见 `docs/workflow/claude-codex-handoff.md` 第 7 节。
    - **Mode B（手动，fallback）**：Mode A 失败，或任务需要 Codex 沙箱做不到的操作（如联网安装依赖）时，Claude 输出完整的 Codex task brief（`AGENTS.md` 第 7.2 节），由 Product Owner 在 Codex CLI 中执行，执行后通知 Claude 审查。
 3. 脚本或 Codex 调用失败时，原样报告错误（`stderr.log`、`exit-code`），不得声称交接成功；然后改用 Mode B。
 

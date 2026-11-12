@@ -136,7 +136,7 @@ bash scripts/codex-handoff.sh docs/features/<slug>.md
 
 `scripts/codex-watch.mjs` 是可选的旁观者：只读取 run 产物，不参与任务执行，不写任何文件，不启动 Codex。它不改变 Mode A 的 artifacts，也不改变 review / fix 流程。关闭 watcher 窗口或按 Ctrl+C 只退出 watcher，不影响后台 Codex。
 
-Claude 可在 Mode A 已生成 run 目录后，自动执行下面的命令打开一个独立 Windows Terminal 窗口；该窗口使用 `--auto-close`，run 结束打印摘要后等待 8 秒自动退出，也可按 Enter 立即关闭（Windows Terminal 默认在进程正常退出时关闭标签页）：
+Claude **不再自动打开**观察窗口（Product Owner 2026-11-12）。Product Owner 需要时可自己执行下面的命令打开一个独立 Windows Terminal 窗口；该窗口使用 `--auto-close`，run 结束打印摘要后等待 8 秒自动退出，也可按 Enter 立即关闭（Windows Terminal 默认在进程正常退出时关闭标签页）：
 
 ```powershell
 node scripts/codex-watch.mjs --window .handoff/runs/<run-name>
@@ -170,9 +170,9 @@ watcher 的已知限制：
 1. **只显示 Codex 用自己的编辑工具改的文件。** Codex 通过 shell 命令写文件时（例如 PowerShell `WriteAllText`），watcher 只显示那条命令，不会显示 `＋ 新增文件` / `✎ 修改文件`。本轮实际改了哪些文件，以 `changes.diff` / `changed-files.txt` 为准。
 2. **显示的是事件，不是逐字输出。** 一条命令只在开始和结束时各显示一行；命令运行期间没有新输出。
 3. **失败命令的退出码以 Codex 报告的为准。** Codex 在 Windows 上通过 PowerShell 包装执行命令，内部的退出码（例如 3）可能显示为 1。
-4. **无参数模式只选启动时的最新 run。** Claude 打开窗口时应传入本次 run 目录（脚本启动时会输出 `输出目录: ...`），避免选到上一次 run。
+4. **无参数模式只选启动时的最新 run。** 手动打开时最好传入本次 run 目录（脚本启动时会输出 `输出目录: ...`），避免选到上一次 run。
 
-Claude 的固定做法：后台启动 `codex-handoff.sh` → 从输出中读取 run 目录 → 运行 `node scripts/codex-watch.mjs --window <run-dir>`。打开窗口失败时把手动命令告诉 Product Owner，交接本身照常进行。
+Claude 的固定做法（Product Owner 2026-11-12 起）：后台启动 `codex-handoff.sh`，等完成通知后审查，**不运行 `codex-watch.mjs`**。2026-10-01 起的“启动后自动打开观察窗口”做法已取消；脚本保留，作为 Product Owner 手动使用的可选工具。
 
 ## 8. 浏览器检查后的进程清理（Product Owner 2026-11-12）
 
