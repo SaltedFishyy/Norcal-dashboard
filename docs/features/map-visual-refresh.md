@@ -346,3 +346,53 @@ Product Owner 2026-11-11：底图希望像参考站点一样饱和度稍高；�
 - 最终检查结果见下方补充；真实底图路名、地形配色、多站点接缝和 Claude / Product Owner 预览签收仍待完成。无运营数据 / schema 改动；无依赖、前端文件或 import 路径新增；未读取 .env / 真实 runtime，未访问 DMS、commit、push 或部署。
 - 最终检查：定向 `node --test server/test/route-map-web.test.js server/test/map-state.test.js server/test/basemap-file.test.js` 87/87 通过；`node --test server/test/` 共 840 项，782 通过、56 跳过、2 失败。失败项为 freshness 的 CD-AC30 和 reader-role 的 CD-AC31，均报告“未配置 NC_TEST_DB_*”；未加载 .env，按 brief 留给 Claude 本机复跑 npm test。项目无 lint / build 命令。`git diff --check` 通过，仅工作区原有 LF/CRLF 警告。
 - 补充 Chromium 实测：真实 renderer 使用合成有效空 MVT，z8 区域瓦片 18 / service 0；服务区内 z14 区域 0 / service 20；平移到服务区外（40, -124）后区域 15 / service 0，console / pageerror 仍为 0。此前合成缺瓦片运行也无错误；增加 Range 失败恢复回退、AbortError 保持取消语义测试。AC1–AC4 的允许测试范围已覆盖；AC5 文档与 diff 检查完成，全量通过仍受测试数据库配置阻挡。完整真实底图视觉、既有全部交互的人工回归及 Product Owner 签收未宣称完成。
+
+## 11. Phase 4 — 深色底图（MVR-P4，**Approved**，Product Owner 2026-11-12）
+
+### 需求
+
+Product Owner 2026-11-12 看过对比截图（`.handoff/basemap-dark/`：当前浅色 / Protomaps 官方 dark / black / dark 下选中线路）后决定：**底图换成 dark**。解决 `docs/features/map-layout.md` 的 ML-Q2。理由：ML 新布局的顶栏、线路栏、浮层都是深色，浅色底图在页面中显得突兀；dark 下线路色块、编号标签、选中白描边都清楚。
+
+范围：只改底图配色和与之相关的色块 / 图例样式数值。Phase 3 的 service 高精度底图、区域底图回退、准入范围、文件白名单逻辑**全部不变**。不改数据、API、选择 / 过滤 / 着色判定、颜色分配算法和 19 色调色板。不新增前端文件、import 路径、依赖。
+
+### P4-1 底图配色
+
+- `web/map-view.js` 的 `BASEMAP_FLAVOR` 改为由本地 `@protomaps/basemaps` 5.7.2 的 `namedFlavor("dark")`（`src/flavors.ts` 的 `DARK`）自动生成，74 个顶层键与 DARK 逐项一致。**不再套用 Phase 3 的浅色覆盖配色**（绿色植被、土黄荒地、蓝色水体、黄橙道路、深灰文字等）。保留 BSD-3-Clause / © Protomaps 来源注释，并说明来源从 light 改为 dark。
+- 为了让底图范围外的区域看起来像水面（同 Phase 3 做法），`background` 设为与 `water` 相同的值 `#31353f`；`.map-page #route-map` 背景同为 `#31353f`。tile-pane filter 保持 `none`。
+- 如果 Phase 3 的覆盖逻辑是独立函数 / 常量，可以保留函数但不再应用，或直接删除；不要留下不会生效的死配置。在实现记录中说明。
+
+### P4-2 色块与图例在深色底上的调整（取代 MVR-C 的对应数值）
+
+| 状态 | fillOpacity | 边框 color / opacity / weight |
+|---|---|---|
+| normal | 0.42（difficultyFillOpacity 0.62） | `#0A101E` / 0.55 / 0.8（不变） |
+| focused | 0.68 | `#0A101E` / 0.6 / 0.8（不变） |
+| selectedRoute | 0.85（不变） | 不变 |
+| selectedZip | 0.9（不变） | **`#e2e8f0`** / 1 / 3 |
+| dimmed | 0.18 | **`#cbd5e1` / 0.22** / 0.6 |
+| outside | 0.06 | **`#cbd5e1` / 0.14** / 0.5 |
+| hover | 不变（+0.2，白色 2px） | 不变 |
+
+- 原因：深色底上 `#0A101E` 边框只在相邻彩色色块之间可见；dimmed / outside 的 ZIP 用深色边框会完全消失，改用浅灰细边框保留轮廓。selectedZip 的深灰描边 `#334155` 在深色底上看不清，改为浅色。
+- 数值都在 `POLYGON_STYLE`，Claude 在 Chrome 中对照后可微调，结果写回本表。
+- 图例状态示例的底图方块 `.map-legend-sample` 背景从 `#e9e4d8` 改为 dark 的 `earth` 值 `#1f1f1f`（或与之接近、能看出方块边界的值，例如加 1px `rgba(255,255,255,.18)` 边框）；三个状态示例继续直接读取 `POLYGON_STYLE`。
+- 线路编号标签（MVR-D 深色胶囊）、tooltip、图例面板、仓库 marker：不改，只在验收时确认清楚。
+
+### P4-3 验收标准
+
+- **P4-AC1** `BASEMAP_FLAVOR` 与 `@protomaps/basemaps` DARK 的 74 个键逐项一致，`background` 和 `water` 例外，均为 `#31353f`；`#route-map` 背景 `#31353f`；tile-pane filter `none`；不再应用浅色覆盖配色。
+- **P4-AC2** `POLYGON_STYLE` 按 P4-2；判定逻辑不变（各状态判定结果与改动前相同）；图例示例方块按 P4-2。
+- **P4-AC3** Phase 3 的 service / 区域底图行为测试全部继续通过（准入、范围外零请求、空瓦片回退、文件缺失回退）。
+- **P4-AC4** Chromium 截图：北加片区总览、SFO01（选中一条线路、选中一个 ZIP）、按难易度模式、按 DSP 模式。底图为深色，线路色块和编号标签清楚，dimmed / outside 轮廓可见，选中 ZIP 描边可见，仓库 marker 可见；console / pageerror 为 0。
+- **P4-AC5** `npm test` 全部通过；因数值改变而失效的断言逐条说明，不删除行为断言；`git diff --check` 通过。
+- **P4-AC6** Claude 在浏览器中对照检查（必要时微调 P4-2 数值），Product Owner 预览签字。
+
+### P4-4 任务
+
+| 任务 | 内容 | 授权 |
+|---|---|---|
+| MVR-T7 | P4-1 + P4-2 | Product Owner 2026-11-12 已授权（“换成 dark”） |
+
+### P4-5 实现记录（Implementation Notes）
+
+（实现后填写）

@@ -181,5 +181,5 @@
 见 `docs/features/map-layout.md`（Approved 需求，待实现授权，2026-11-12）。
 
 - [ ] ML-Q1 列表行是否需要显示首公里距离？地图 API（`/api/route-map*`）的线路数据里没有 `first_mile_distance`，第一版不显示；如果需要，要另开任务给地图 API 加字段。（2026-11-12）
-- [ ] ML-Q2 是否把地图底图换成深色（设计稿是深色占位）？目前保留 Protomaps light + MVR-P2 D1 滤镜；换深色会影响 MVR 已调好的线路色对比，需要单独评估。（2026-11-12）
+- [x] ML-Q2 是否把地图底图换成深色（设计稿是深色占位）？→ **换成 Protomaps 官方 dark**（Product Owner 2026-11-12 看过对比截图后决定），见 `docs/features/map-visual-refresh.md` 第 11 节 MVR-P4。（2026-11-12）
 - [ ] ML-Q3 手机宽度（≤ 750px）是否也要一屏固定？Claude 暂定恢复普通页面滚动、地图在上、列表在下（spec 第 4 节）。（2026-11-12）
