@@ -86,7 +86,7 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
       const highlighted = groups.filter(group => !group.options.pane).at(-2); // Last group is the geometry used solely to compute fit bounds.
       assert.equal(highlighted.front, true);
       assert.equal(highlighted.layers[0].styles[0].weight, status === 'uncovered' ? uncoveredZipStyle().weight : POLYGON_STYLE.selectedZip.weight);
-      assert.equal(highlighted.layers[0].styles[0].color, '#334155');
+      assert.equal(highlighted.layers[0].styles[0].color, status === 'uncovered' ? uncoveredZipStyle().color : POLYGON_STYLE.selectedZip.color);
       if (status === 'uncovered') {
         assert.equal(highlighted.layers[0].styles[0].dashArray, '8 6');
         assert.equal(groups[0].layers[0].styles.at(-1).fillOpacity, POLYGON_STYLE.focused.fillOpacity);
@@ -1285,6 +1285,7 @@ test('MVR filter is scoped to the basemap tile pane, with an unfiltered ocean ba
   assert.deepEqual(rules.filter(([, , body]) => /(?:^|;)\s*filter:/.test(body)).map(([, selector]) => selector.trim()),
     ['.map-page .leaflet-tile-pane']);
   assert.match(block, /filter: none/);
+  assert.match(block, /\.map-page #route-map \{ background: #aadaff; \}/);
 
   const grid = await fs.readFile(new URL('../../node_modules/leaflet/src/layer/tile/GridLayer.js', import.meta.url), 'utf8');
   assert.match(grid, /pane: 'tilePane'/);
@@ -1337,7 +1338,7 @@ test('MVR-T3 route legend counts mapped routes by station and DSP, deduplicates 
     legend.children.slice(2).forEach((row, index) => {
       assert.equal(row.children[0].children[0].style.backgroundColor, `rgba(${palette[0].slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE[states[index]].fillOpacity})`);
       assert.equal(row.children[0].className, 'map-legend-sample');
-      assert.equal(row.children[0].children[0].style.border, `${POLYGON_STYLE[states[index]].weight}px solid rgba(10, 16, 30, ${POLYGON_STYLE[states[index]].opacity})`);
+      assert.equal(row.children[0].children[0].style.border, `${POLYGON_STYLE[states[index]].weight}px solid rgba(${POLYGON_STYLE[states[index]].color.slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE[states[index]].opacity})`);
     });
   };
   view.render(data, { focusStation: null }); check(2);
@@ -1375,7 +1376,7 @@ test('MVR-T3 legend CSS scopes the translucent panel and compacts states on narr
   assert.match(css, /border: 1px solid rgba\(255,255,255,\.12\)/);
   assert.match(css, /backdrop-filter: blur\(4px\)/);
   assert.match(css, /max-width: calc\(100vw - 64px\)/);
-  assert.match(css, /width: 18px; height: 12px;[^}]*background: #e9e4d8; border-radius: 3px/);
+  assert.match(css, /width: 18px; height: 12px;[^}]*background: #f5f3f0; border: 1px solid rgba\(0,0,0,\.12\); border-radius: 3px/);
   assert.match(css, /width: 10px; height: 10px; border-radius: 50%/);
   assert.match(css, /@media \(max-width: 450px\)[\s\S]*width: 200px/);
   assert.match(css, /\.map-page \.map-legend \.map-legend-state \{ display: none;/);
@@ -1543,15 +1544,103 @@ function tileAt(lon, lat, z) {
   return { z, x: Math.floor((lon + 180) / 360 * n), y: Math.floor((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2 * n) };
 }
 
-test('MVR P3 generated service bounds and light flavor keys match local sources', async () => {
+test('MVR P3 generated service bounds and daytime flavor values match local sources', async () => {
   const config = JSON.parse(await fs.readFile(new URL('../../config/basemap-service-region.json', import.meta.url), 'utf8'));
   assert.equal(config.stations.length, 52);
   assert.deepEqual(SERVICE_BOUNDS, config.stations.map(station => station.bbox));
   const keys = object => Object.keys(object).sort();
   assert.deepEqual(keys(BASEMAP_FLAVOR), keys(namedFlavor('light')));
   assert.deepEqual(keys(BASEMAP_FLAVOR.landcover), keys(namedFlavor('light').landcover));
-  assert.equal(BASEMAP_FLAVOR.water, '#93dde5');
-  assert.equal(BASEMAP_FLAVOR.roads_label_minor_halo, '#ffffff');
+  assert.equal(Object.keys(BASEMAP_FLAVOR).length, 74);
+  const overrides = {
+  "background": "#aadaff",
+  "earth": "#f5f3f0",
+  "water": "#aadaff",
+  "park_a": "#c3eccb",
+  "park_b": "#b5e3bd",
+  "wood_a": "#cfe8cf",
+  "wood_b": "#b9dfb9",
+  "zoo": "#c3eccb",
+  "scrub_a": "#e4efdc",
+  "scrub_b": "#dcebd2",
+  "glacier": "#ffffff",
+  "sand": "#f3eedf",
+  "beach": "#f3eedf",
+  "hospital": "#fbe3e3",
+  "industrial": "#ebe9ee",
+  "school": "#efe9de",
+  "pedestrian": "#f1efec",
+  "military": "#eceae6",
+  "aerodrome": "#e9eaf0",
+  "runway": "#d9dbe2",
+  "pier": "#ffffff",
+  "buildings": "#e8e9ed",
+  "tunnel_other_casing": "#dadce0",
+  "tunnel_minor_casing": "#dadce0",
+  "tunnel_link_casing": "#dadce0",
+  "tunnel_major_casing": "#dadce0",
+  "tunnel_highway_casing": "#dadce0",
+  "tunnel_other": "#f1f3f4",
+  "tunnel_minor": "#f1f3f4",
+  "tunnel_link": "#f1f3f4",
+  "tunnel_major": "#f1f3f4",
+  "tunnel_highway": "#f1f3f4",
+  "minor_service_casing": "#e2e3e6",
+  "minor_casing": "#dadce0",
+  "link_casing": "#e9bc62",
+  "major_casing_late": "#dadce0",
+  "major_casing_early": "#dadce0",
+  "highway_casing_late": "#e9bc62",
+  "highway_casing_early": "#e9bc62",
+  "other": "#ffffff",
+  "minor_service": "#ffffff",
+  "minor_a": "#ffffff",
+  "minor_b": "#ffffff",
+  "link": "#fde293",
+  "major": "#ffffff",
+  "highway": "#fdd774",
+  "railway": "#c4c7cc",
+  "boundaries": "#9aa0a6",
+  "bridges_other_casing": "#dadce0",
+  "bridges_minor_casing": "#dadce0",
+  "bridges_link_casing": "#e9bc62",
+  "bridges_major_casing": "#dadce0",
+  "bridges_highway_casing": "#e9bc62",
+  "bridges_other": "#ffffff",
+  "bridges_minor": "#ffffff",
+  "bridges_link": "#fde293",
+  "bridges_major": "#ffffff",
+  "bridges_highway": "#fdd774",
+  "roads_label_minor": "#70757a",
+  "roads_label_minor_halo": "#ffffff",
+  "roads_label_major": "#5f6368",
+  "roads_label_major_halo": "#ffffff",
+  "ocean_label": "#4c7fae",
+  "subplace_label": "#70757a",
+  "subplace_label_halo": "#ffffff",
+  "city_label": "#3c4043",
+  "city_label_halo": "#ffffff",
+  "state_label": "#80868b",
+  "state_label_halo": "#ffffff",
+  "country_label": "#5f6368",
+  "address_label": "#80868b",
+  "address_label_halo": "#ffffff",
+  "landcover": {
+    "grassland": "rgba(212, 238, 205, 1)",
+    "barren": "rgba(240, 236, 226, 1)",
+    "urban_area": "rgba(240, 238, 235, 1)",
+    "farmland": "rgba(232, 240, 220, 1)",
+    "glacier": "rgba(255, 255, 255, 1)",
+    "scrub": "rgba(222, 238, 212, 1)",
+    "forest": "rgba(197, 230, 197, 1)"
+  }
+};
+  const light = namedFlavor('light');
+  for (const key of Object.keys(light)) {
+    assert.deepEqual(BASEMAP_FLAVOR[key], Object.hasOwn(overrides, key) ? overrides[key] : light[key], key);
+  }
+  assert.equal(BASEMAP_FLAVOR.water, '#aadaff');
+  assert.equal(BASEMAP_FLAVOR.roads_label_minor_halo, namedFlavor('light').roads_label_minor_halo);
   const service = basemaps.find(layer => layer.name === 'service');
   assert.equal(service.minZoom, 11); assert.equal(service.maxDataZoom, 14); assert.equal(service.levelDiff, 0);
   const boxes = SERVICE_BOUNDS;

@@ -5,7 +5,7 @@ import { palette, routeColor } from '../../web/route-colors.js';
 import { BASEMAP_FLAVOR } from '../../web/map-view.js';
 
 test('RM2 selection styles preserve route color and distinguish route, ZIP and dimmed polygons', () => {
-  assert.equal(BASEMAP_FLAVOR.water, '#93dde5');
+  assert.equal(BASEMAP_FLAVOR.water, '#aadaff');
   assert.equal(BASEMAP_FLAVOR.roads_label_minor_halo, '#ffffff');
   const properties = { route_id: 1, postal_code: '00001' };
   const normal = polygonStyle(properties), route = polygonStyle(properties, selectRoute(1));
@@ -488,4 +488,16 @@ test('MVR-T5 group modes preserve route state hierarchy, outlines and hover', ()
       }
     }
   }
+});
+
+test('MVR-P4 polygon constants match the daytime basemap specification', () => {
+  assert.deepEqual(POLYGON_STYLE, {
+    normal: { fillOpacity: .34, difficultyFillOpacity: .55, color: '#0A101E', opacity: .55, weight: .8 },
+    focused: { fillOpacity: .6, color: '#0A101E', opacity: .6, weight: .8 },
+    hover: { fillOpacityIncrease: .2, color: '#ffffff', opacity: 1, weight: 2 },
+    selectedRoute: { fillOpacity: .85, color: '#0A101E', opacity: .9, weight: 1.2 },
+    selectedZip: { fillOpacity: .9, color: '#334155', opacity: 1, weight: 3 },
+    dimmed: { fillOpacity: .15, color: '#0A101E', opacity: .25, weight: .6 },
+    outside: { fillOpacity: .05, color: '#0A101E', opacity: .12, weight: .5 },
+  });
 });

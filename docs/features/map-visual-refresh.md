@@ -347,52 +347,109 @@ Product Owner 2026-11-11：底图希望像参考站点一样饱和度稍高；�
 - 最终检查：定向 `node --test server/test/route-map-web.test.js server/test/map-state.test.js server/test/basemap-file.test.js` 87/87 通过；`node --test server/test/` 共 840 项，782 通过、56 跳过、2 失败。失败项为 freshness 的 CD-AC30 和 reader-role 的 CD-AC31，均报告“未配置 NC_TEST_DB_*”；未加载 .env，按 brief 留给 Claude 本机复跑 npm test。项目无 lint / build 命令。`git diff --check` 通过，仅工作区原有 LF/CRLF 警告。
 - 补充 Chromium 实测：真实 renderer 使用合成有效空 MVT，z8 区域瓦片 18 / service 0；服务区内 z14 区域 0 / service 20；平移到服务区外（40, -124）后区域 15 / service 0，console / pageerror 仍为 0。此前合成缺瓦片运行也无错误；增加 Range 失败恢复回退、AbortError 保持取消语义测试。AC1–AC4 的允许测试范围已覆盖；AC5 文档与 diff 检查完成，全量通过仍受测试数据库配置阻挡。完整真实底图视觉、既有全部交互的人工回归及 Product Owner 签收未宣称完成。
 
-## 11. Phase 4 — 深色底图（MVR-P4，**Approved**，Product Owner 2026-11-12）
+## 11. Phase 4 — 谷歌白天风格底图（MVR-P4，**Done**，Product Owner 2026-11-12 批准；MVR-T7 第 1 轮经 Claude review 通过，Product Owner 2026-11-12 预览签字并批准提交）
 
-### 需求
+### 需求与决策过程
 
-Product Owner 2026-11-12 看过对比截图（`.handoff/basemap-dark/`：当前浅色 / Protomaps 官方 dark / black / dark 下选中线路）后决定：**底图换成 dark**。解决 `docs/features/map-layout.md` 的 ML-Q2。理由：ML 新布局的顶栏、线路栏、浮层都是深色，浅色底图在页面中显得突兀；dark 下线路色块、编号标签、选中白描边都清楚。
+- Product Owner 2026-11-12 先选择 Protomaps 官方 **dark**（对比图 `.handoff/basemap-dark/basemap-*.png`），MVR-T7 已按 dark 实现（见 P4-5）。
+- 看到效果后，Product Owner 改为“要像谷歌地图那种”。Claude 做了两种谷歌风格预览（`.handoff/basemap-dark/google-night-*.png`、`google-day-overview.png`），Product Owner 选择 **谷歌白天**（2026-11-12）。**本节以谷歌白天为准，取代前面的 dark 方案。** ML-Q2 的结论同步更新。
+- 风格目标：接近谷歌地图默认浅色样式的观感——米白陆地、浅蓝水面、浅绿公园 / 植被、白色道路配浅灰描边、黄色高速、灰色文字。配色是 Claude 按这个观感自行选的颜色值，不使用谷歌的瓦片、图标或任何素材。
 
-范围：只改底图配色和与之相关的色块 / 图例样式数值。Phase 3 的 service 高精度底图、区域底图回退、准入范围、文件白名单逻辑**全部不变**。不改数据、API、选择 / 过滤 / 着色判定、颜色分配算法和 19 色调色板。不新增前端文件、import 路径、依赖。
+范围不变：只改底图配色，以及把 MVR-T7 中为深色底调整的色块 / 图例数值恢复到适合浅色底的值。Phase 3 的 service 高精度底图、区域底图回退、准入范围、白名单逻辑**全部不变**。不改数据、API、选择 / 过滤 / 着色判定、颜色分配算法和 19 色调色板。不新增前端文件、import 路径、依赖。
 
-### P4-1 底图配色
+### P4-1 底图配色（谷歌白天）
 
-- `web/map-view.js` 的 `BASEMAP_FLAVOR` 改为由本地 `@protomaps/basemaps` 5.7.2 的 `namedFlavor("dark")`（`src/flavors.ts` 的 `DARK`）自动生成，74 个顶层键与 DARK 逐项一致。**不再套用 Phase 3 的浅色覆盖配色**（绿色植被、土黄荒地、蓝色水体、黄橙道路、深灰文字等）。保留 BSD-3-Clause / © Protomaps 来源注释，并说明来源从 light 改为 dark。
-- 为了让底图范围外的区域看起来像水面（同 Phase 3 做法），`background` 设为与 `water` 相同的值 `#31353f`；`.map-page #route-map` 背景同为 `#31353f`。tile-pane filter 保持 `none`。
-- 如果 Phase 3 的覆盖逻辑是独立函数 / 常量，可以保留函数但不再应用，或直接删除；不要留下不会生效的死配置。在实现记录中说明。
+- `BASEMAP_FLAVOR` 以本地 `@protomaps/basemaps` 5.7.2 的 LIGHT（`namedFlavor("light")`）为基础，74 个顶层键，再用下表覆盖。未列出的键保持 LIGHT 原值（包括 `pois`）。
+- `background` 与 `water` 同为 `#aadaff`；`.map-page #route-map` 背景 `#aadaff`；tile-pane filter 保持 `none`。
+- 不恢复 Phase 3 的浅色覆盖值；以本表为准。更新来源注释：基于 LIGHT，覆盖为谷歌白天风格，BSD-3-Clause / © Protomaps。
 
-### P4-2 色块与图例在深色底上的调整（取代 MVR-C 的对应数值）
+| 键 | 值 |
+|---|---|
+| background / water | `#aadaff` |
+| earth | `#f5f3f0` |
+| park_a / park_b / zoo | `#c3eccb` / `#b5e3bd` / `#c3eccb` |
+| wood_a / wood_b | `#cfe8cf` / `#b9dfb9` |
+| scrub_a / scrub_b | `#e4efdc` / `#dcebd2` |
+| glacier / sand / beach | `#ffffff` / `#f3eedf` / `#f3eedf` |
+| hospital / industrial / school / pedestrian / military | `#fbe3e3` / `#ebe9ee` / `#efe9de` / `#f1efec` / `#eceae6` |
+| aerodrome / runway / pier / buildings | `#e9eaf0` / `#d9dbe2` / `#ffffff` / `#e8e9ed` |
+| tunnel_*_casing（5 个） / tunnel_*（5 个） | `#dadce0` / `#f1f3f4` |
+| minor_service_casing / minor_casing / major_casing_late / major_casing_early | `#e2e3e6` / `#dadce0` / `#dadce0` / `#dadce0` |
+| link_casing / highway_casing_late / highway_casing_early | `#e9bc62` |
+| other / minor_service / minor_a / minor_b / major | `#ffffff` |
+| link / highway | `#fde293` / `#fdd774` |
+| railway / boundaries | `#c4c7cc` / `#9aa0a6` |
+| bridges_*_casing：other / minor / major；link / highway | `#dadce0`；`#e9bc62` |
+| bridges_other / bridges_minor / bridges_major；bridges_link；bridges_highway | `#ffffff`；`#fde293`；`#fdd774` |
+| roads_label_minor / _halo；roads_label_major / _halo | `#70757a` / `#ffffff`；`#5f6368` / `#ffffff` |
+| ocean_label | `#4c7fae` |
+| subplace_label / _halo | `#70757a` / `#ffffff` |
+| city_label / _halo | `#3c4043` / `#ffffff` |
+| state_label / _halo；country_label | `#80868b` / `#ffffff`；`#5f6368` |
+| address_label / _halo | `#80868b` / `#ffffff` |
+| landcover（7 个子键） | grassland `rgba(212, 238, 205, 1)`、barren `rgba(240, 236, 226, 1)`、urban_area `rgba(240, 238, 235, 1)`、farmland `rgba(232, 240, 220, 1)`、glacier `rgba(255, 255, 255, 1)`、scrub `rgba(222, 238, 212, 1)`、forest `rgba(197, 230, 197, 1)` |
+
+### P4-2 色块与图例（恢复浅色底数值）
+
+MVR-T7 为深色底调整的数值**全部恢复**到 MVR-T7 之前的值（即 MVR-C / P2 生效的值）：
 
 | 状态 | fillOpacity | 边框 color / opacity / weight |
 |---|---|---|
-| normal | 0.42（difficultyFillOpacity 0.62） | `#0A101E` / 0.55 / 0.8（不变） |
-| focused | 0.68 | `#0A101E` / 0.6 / 0.8（不变） |
-| selectedRoute | 0.85（不变） | 不变 |
-| selectedZip | 0.9（不变） | **`#e2e8f0`** / 1 / 3 |
-| dimmed | 0.18 | **`#cbd5e1` / 0.22** / 0.6 |
-| outside | 0.06 | **`#cbd5e1` / 0.14** / 0.5 |
-| hover | 不变（+0.2，白色 2px） | 不变 |
+| normal | 0.34（difficultyFillOpacity 0.55） | `#0A101E` / 0.55 / 0.8 |
+| focused | 0.6 | `#0A101E` / 0.6 / 0.8 |
+| selectedRoute | 0.85 | `#0A101E` / 0.9 / 1.2 |
+| selectedZip | 0.9 | `#334155` / 1 / 3 |
+| dimmed | 0.15 | `#0A101E` / 0.25 / 0.6 |
+| outside | 0.05 | `#0A101E` / 0.12 / 0.5 |
+| hover | +0.2（上限 0.9） | `#ffffff` / 1 / 2 |
 
-- 原因：深色底上 `#0A101E` 边框只在相邻彩色色块之间可见；dimmed / outside 的 ZIP 用深色边框会完全消失，改用浅灰细边框保留轮廓。selectedZip 的深灰描边 `#334155` 在深色底上看不清，改为浅色。
-- 数值都在 `POLYGON_STYLE`，Claude 在 Chrome 中对照后可微调，结果写回本表。
-- 图例状态示例的底图方块 `.map-legend-sample` 背景从 `#e9e4d8` 改为 dark 的 `earth` 值 `#1f1f1f`（或与之接近、能看出方块边界的值，例如加 1px `rgba(255,255,255,.18)` 边框）；三个状态示例继续直接读取 `POLYGON_STYLE`。
-- 线路编号标签（MVR-D 深色胶囊）、tooltip、图例面板、仓库 marker：不改，只在验收时确认清楚。
+- 图例状态示例的底图方块 `.map-legend-sample`：背景改为谷歌白天的 earth `#f5f3f0`，保留 1px 细边框，颜色改为 `rgba(0,0,0,.12)`（浅底上能看出方块边界）。
+- Claude 在浏览器中对照后可微调，结果写回本表。
 
 ### P4-3 验收标准
 
-- **P4-AC1** `BASEMAP_FLAVOR` 与 `@protomaps/basemaps` DARK 的 74 个键逐项一致，`background` 和 `water` 例外，均为 `#31353f`；`#route-map` 背景 `#31353f`；tile-pane filter `none`；不再应用浅色覆盖配色。
-- **P4-AC2** `POLYGON_STYLE` 按 P4-2；判定逻辑不变（各状态判定结果与改动前相同）；图例示例方块按 P4-2。
-- **P4-AC3** Phase 3 的 service / 区域底图行为测试全部继续通过（准入、范围外零请求、空瓦片回退、文件缺失回退）。
-- **P4-AC4** Chromium 截图：北加片区总览、SFO01（选中一条线路、选中一个 ZIP）、按难易度模式、按 DSP 模式。底图为深色，线路色块和编号标签清楚，dimmed / outside 轮廓可见，选中 ZIP 描边可见，仓库 marker 可见；console / pageerror 为 0。
-- **P4-AC5** `npm test` 全部通过；因数值改变而失效的断言逐条说明，不删除行为断言；`git diff --check` 通过。
-- **P4-AC6** Claude 在浏览器中对照检查（必要时微调 P4-2 数值），Product Owner 预览签字。
+- **P4-AC1** `BASEMAP_FLAVOR` = LIGHT 74 键 + P4-1 覆盖表（逐项测试）；`background` / `water` `#aadaff`；`#route-map` 背景 `#aadaff`；tile-pane filter `none`；不含 DARK 值和 Phase 3 覆盖值。
+- **P4-AC2** `POLYGON_STYLE` 与 P4-2 表一致（与 MVR-T7 之前完全相同）；判定逻辑不变；图例示例方块按 P4-2。
+- **P4-AC3** Phase 3 的 service / 区域底图行为测试全部继续通过。
+- **P4-AC4** Chromium 截图：北加片区总览、SFO01（选中一条线路、再选中一个 ZIP）、按难易度、按 DSP。底图为谷歌白天风格，线路色块和编号标签清楚，选中描边可见，仓库 marker 可见；console / pageerror 为 0；浏览器按 handoff 第 8 节关闭并检查无残留。
+- **P4-AC5** `npm test` 全部通过；MVR-T7 中改过的断言恢复或按本节更新并逐条说明；`git diff --check` 通过。
+- **P4-AC6** Claude 在浏览器中对照检查，Product Owner 预览签字。
 
 ### P4-4 任务
 
 | 任务 | 内容 | 授权 |
 |---|---|---|
-| MVR-T7 | P4-1 + P4-2 | Product Owner 2026-11-12 已授权（“换成 dark”） |
+| MVR-T7 | 第一版：官方 dark（已实现，未提交） | Product Owner 2026-11-12（“换成 dark”） |
+| MVR-T7 第 1 轮 | 改为谷歌白天：P4-1 + P4-2 | Product Owner 2026-11-12（“谷歌白天”） |
 
 ### P4-5 实现记录（Implementation Notes）
 
-（实现后填写）
+### MVR-T7（2026-11-12）
+
+- BASEMAP_FLAVOR 由本地 @protomaps/basemaps 5.7.2 的 namedFlavor("dark") 生成，74 个顶层键及嵌套值与包导出直接深比较，仅 background / water 改为 #31353f。直接移除原浅色覆盖值，无死配置；保留 BSD-3-Clause / © Protomaps 来源注释。
+- 仅调整指定 POLYGON_STYLE、地图背景及图例示例样式；选择、过滤、颜色分配、19 色、标签、tooltip、ML 布局、service / 区域底图准入与回退、API、白名单和依赖未变。
+- 旧断言逐项更新，保留行为检查：
+  1. RM2 / P3：水色 #93dde5 → #31353f，白色道路 halo → DARK 对应值，light 键集合 → dark；新增完整 74 键深比较及容器背景检查。
+  2. RM11 / RM12：focused .6 → .68、dimmed .15 → .18、outside .05 → .06、outside hover .25 → .26；保留选择优先、DSP / Station 过滤与颜色变换检查。
+  3. R1：focused hover 变为 .88，高于 selectedRoute .85；原 route > hover 改为分别检查 route > normal、ZIP > hover、hover > normal > dimmed，保留 hover 增量、上限、颜色及描边检查。
+  4. ZIP 搜索 / RM5 / RM5b：已覆盖 ZIP 选中边框 #334155 → #e2e8f0；未覆盖 ZIP 继续读取 uncoveredZipStyle，原深灰边框和虚线不变。
+  5. 图例边框预期改为读取各状态 color；底色 #e9e4d8 → #1f1f1f，并检查 1px rgba(255,255,255,.18) 边框；新增完整 POLYGON_STYLE 数值表断言。
+- 现有 Playwright headless 访问已运行的 http://127.0.0.1:3000/map，未启动、停止或重启服务，未读取 .env / 真实 runtime 配置或保存 API 数据。npm test 按既有脚本运行（脚本自身加载环境文件），未输出凭据。
+- 截图：`.handoff/MVR-T7-overview.png`（北加全部站点）、`.handoff/MVR-T7-SFO01-route.png`、`.handoff/MVR-T7-SFO01-zip.png`、`.handoff/MVR-T7-difficulty.png`、`.handoff/MVR-T7-dsp.png`。已查看总览、ZIP、难易度和 DSP：深色底图、线路色块、编号、浅色选中描边与仓库图标可见，淡化区域保留细轮廓。SFO01 选择线路后点击 ZIP，ZIP 面板正常显示；检测到 7 个仓库 marker。页面既有自动更新部分失败提示仍显示，未改数据。
+- console error 0、pageerror 0；计算背景 rgb(49,53,63)、tile-pane filter none。launch 后全部步骤有 try/finally 关闭浏览器，设置 120 秒硬超时。结束后运行 `tasklist | findstr chrome-headless` 被环境拒绝（ERROR: Access denied）；替代 `Get-Process -Name '*chrome-headless*'` 检查未发现残留进程。
+- 最终检查：`npm.cmd test` 865/865 通过，0 失败 / 跳过；`git diff --check` 通过，仅 LF/CRLF 提示。无 lint / build 命令。P4-AC1..AC5 已完成本次实现与检查；Claude 视觉复核和 Product Owner 预览签字（P4-AC6）待完成。未 commit / push / 部署，无新增前端文件或 import 路径。
+
+### MVR-T7 第 1 轮修复（2026-11-12）
+
+- 按更新后的 P4-1，将底图改为本地 @protomaps/basemaps 5.7.2 LIGHT 的 74 键加谷歌白天覆盖表，完整内联于 web/map-view.js；未覆盖的 pois 保留 LIGHT 原值。生成时对照 DAY，前端及测试没有 import handoff 文件；来源注释更新为 LIGHT、BSD-3-Clause / © Protomaps。background / water / 地图容器背景为 #aadaff，filter 为 none。
+- POLYGON_STYLE 完整恢复到执行本轮时 HEAD:web/map-state.js 的值（git diff 该文件为空），判定逻辑未变。图例示例背景 #f5f3f0，边框 1px rgba(0,0,0,.12)。数据、API、颜色分配、19 色、标签、tooltip、ML 布局、service / 区域底图逻辑、白名单、依赖均未修改。
+- 上轮 dark 断言逐项恢复 / 更新：
+  1. RM2 水色改为 #aadaff，道路 halo 恢复 #ffffff；P3 逐键对照 LIGHT + 独立内联覆盖表，未覆盖键与 LIGHT 深比较（包含 pois），保留 74 键、landcover 键集合、service bounds 和准入行为检查。
+  2. RM11 / RM12 恢复 focused .6、dimmed .15、outside .05；outside hover 恢复 .25，DSP / Station 过滤和颜色变换断言保留。
+  3. R1 恢复 ZIP > route > hover > normal > dimmed 的完整层级断言，hover 增量、上限、颜色和描边检查保留。
+  4. ZIP 搜索 / RM5 / RM5b 已覆盖 ZIP 描边恢复 #334155；未覆盖 ZIP 继续按 uncoveredZipStyle 检查，虚线不变。
+  5. 新增的完整 POLYGON_STYLE 数值表测试按 P4-2 恢复；图例色块继续检查各状态的边框参数，CSS 测试改为 #f5f3f0 和 1px rgba(0,0,0,.12)；地图容器背景断言改为 #aadaff。
+- 使用已有 Playwright headless 访问正在运行的 3000/map，未重启服务，未读取 .env 或真实 runtime 配置；npm.cmd test 按既有命令运行（该命令自身加载环境文件），未输出凭据。
+- 五个场景截图：.handoff/MVR-T7-r1-overview.png、.handoff/MVR-T7-r1-SFO01-route.png、.handoff/MVR-T7-r1-SFO01-zip.png、.handoff/MVR-T7-r1-difficulty.png、.handoff/MVR-T7-r1-dsp.png。查看总览、ZIP、难易度及 DSP 截图：浅蓝水面、浅绿植被、浅色陆地，色块和编号可见，选中描边可见，总览仓库图标可见。ZIP 面板正常显示；检测到 7 个仓库 marker。页面既有自动更新部分失败提示仍显示，本轮未改动。
+- console error 0、pageerror 0；计算背景 rgb(170,218,255)，tile-pane filter none。launch 后所有步骤使用 try/finally 关闭浏览器，120 秒硬超时。浏览器脚本退出码 0。tasklist 被环境拒绝（Access denied）；随后 Get-Process -Name '*chrome-headless*' 以及 chrome 进程中 ms-playwright 路径检查均无残留。
+- 最终检查：npm.cmd test 865/865 通过，0 失败 / 跳过；git diff --check 通过（仅 LF/CRLF 提示）。无 lint / build 命令。P4-AC1..AC5 本轮实现及验证完成；P4-AC6 Claude 视觉复核与 Product Owner 预览签字待完成。未 commit / push / 部署。

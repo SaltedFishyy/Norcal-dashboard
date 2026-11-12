@@ -417,12 +417,12 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 
 /* MVR */
 .map-page .leaflet-tile-pane { filter: none; }
-.map-page #route-map { background: #93dde5; }
+.map-page #route-map { background: #aadaff; }
 
 .map-page .map-legend { box-sizing: border-box; width: 230px; max-width: calc(100vw - 64px); padding: 10px 12px; background: rgba(10,16,30,.86); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(4px); }
 .map-page .map-legend strong { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
 .map-page .map-legend .map-swatch { box-sizing: border-box; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
-.map-page .map-legend-sample { display: flex; align-items: center; justify-content: center; width: 18px; height: 12px; flex: 0 0 18px; background: #e9e4d8; border-radius: 3px; }
+.map-page .map-legend-sample { display: flex; align-items: center; justify-content: center; width: 18px; height: 12px; flex: 0 0 18px; background: #f5f3f0; border: 1px solid rgba(0,0,0,.12); border-radius: 3px; }
 @media (max-width: 450px) {
   .map-page .map-legend { width: 200px; font-size: 12px; padding: 8px 10px; }
   .map-page .map-legend .map-legend-state { display: none; }
