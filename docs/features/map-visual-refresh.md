@@ -109,7 +109,7 @@ Product Owner 2026-11-11：喜欢 legacy 站点「北加片区站点数据看板
 | MVR-T2 | D 标签 | 2026-11-11 已授权 |
 | MVR-T3 | E 图例 | 2026-11-11 已授权 |
 | MVR-P2 | 第二阶段：底图回调 + 按 DSP / 按站点着色 | 2026-11-11 已授权，见第 9 节 |
-| — | 布局：地图改为“左侧栏 + 全屏地图”，参考站点的结构 | 未提出，需要 Product Owner 决定 |
+| — | 布局：地图改为“左侧栏 + 全屏地图” | Product Owner 2026-11-12 已决定，见 `docs/features/map-layout.md`（ML） |
 
 ## 8. 实现记录（Implementation Notes）
 
