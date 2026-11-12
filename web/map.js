@@ -1,3 +1,4 @@
+import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNavLinks } from './date-view.js';
 import { dspOptions } from './format.js';
 import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
@@ -9,7 +10,7 @@ const knownErrors = new Set(['district_config_invalid', 'district_not_found', 'i
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
 
 export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.protomapsL,
-  document: doc = document, fetch: request = fetch, search = location.search, storage,
+  document: doc = document, fetch: request = fetch, search = location.search, storage, history: navigation = globalThis.history,
   loadWarehouseModules = () => Promise.all([import('./warehouse-layer.js'), import('./warehouse-panel.js')]) } = {}) {
   const element = id => doc.getElementById(`map-${id}`);
   localizeMap(doc);
@@ -17,9 +18,57 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData, colorMode = 'route';
   let districts = [], selected = {}, scope = readMapScope(storage), dsp = null;
   const dspSelect = element('dsp');
+  const dateSelect = element('date');
+  let viewDate = readViewDate(search), days = [], daysSequence = 0;
+  let pageUrl = '/map' + search + (globalThis.location?.hash || '');
   dspSelect.disabled = true;
   const focus = () => scope === 'station' ? stationSelect.value || null : null;
   const currentDistrict = () => districts.find(item => item.id === districtSelect.value);
+  function updateDateView() {
+    syncNavLinks(doc, viewDate);
+    if (element('date-notice')) element('date-notice').hidden = !viewDate;
+    if (element('date-text')) element('date-text').textContent = viewDate ? `正在查看 ${formatViewDate(viewDate)} 的数据` : '';
+    const available = days.find(item => item.day === viewDate)?.stations_with_data || [];
+    const missing = (currentDistrict()?.stations || []).filter(station => !available.includes(station.code));
+    if (element('date-missing')) element('date-missing').textContent = viewDate && !focus() && missing.length
+      ? ` · 当天无数据的站点：${missing.map(station => station.code).join('、')}` : '';
+  }
+  function setViewDate(date) {
+    viewDate = date;
+    pageUrl = withViewDate(pageUrl, date);
+    navigation?.replaceState(null, '', pageUrl);
+    updateDateView();
+  }
+  async function loadDays() {
+    if (!dateSelect) return;
+    const current = ++daysSequence;
+    days = []; dateSelect.disabled = true; element('date-field').hidden = true;
+    try {
+      const response = await request(apiUrl('/api/snapshot-days', { district: districtSelect.value }), { cache: 'no-store' });
+      const data = await response.json();
+      if (current !== daysSequence) return;
+      if (response.status !== 200 || data.available === false || !Array.isArray(data.days)) throw Error('unavailable');
+      days = data.days;
+      const options = dateOptions(days);
+      if (viewDate && !options.some(item => item.value === viewDate)) options.push(dateOptions([{ day: viewDate, has_data: false }])[1]);
+      dateSelect.replaceChildren();
+      for (const item of options) {
+        const option = doc.createElement('option'); option.value = item.value; option.textContent = item.label; dateSelect.append(option);
+      }
+      dateSelect.value = viewDate || ''; dateSelect.disabled = false; element('date-field').hidden = false;
+      updateDateView();
+    } catch {
+      if (current === daysSequence && viewDate) setViewDate(null);
+    }
+  }
+  async function changeDate(date) {
+    setViewDate(date);
+    if (dateSelect) dateSelect.value = date || '';
+    return loadStation();
+  }
+  dateSelect?.addEventListener('change', () => changeDate(dateSelect.value || null));
+  element('date-latest')?.addEventListener('click', () => changeDate(null));
+  updateDateView();
   const updateSelection = next => { selection = next; view.applySelection(selection); panel.applySelection(selection); };
   const deselect = () => { zipSequence++; panel.searchStatus('success'); updateSelection(clearSelection(focus())); };
   const view = createMapView({ leaflet, protomaps, document: doc, fetch: request,
@@ -107,10 +156,13 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   }
   function showError(code, station) {
     if (['snapshot_not_found', 'station_not_found'].includes(code)) {
-      status('empty', t.noData(station, code)); return;
+      status('empty', viewDate ? historicalEmpty(station) : t.noData(station, code)); return;
     }
     const safeCode = knownErrors.has(code) ? code : 'internal_error';
     status('error', t.loadError(safeCode, station));
+  }
+  function historicalEmpty(station) {
+    return station ? `该站点在 ${formatViewDate(viewDate)} 没有数据` : '该日无数据';
   }
   async function searchQuery(query, enter) {
     const current = ++zipSequence, classified = classifyQuery(query);
@@ -125,7 +177,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     }
     panel.searchStatus('loading', t.zipLoading(query.trim()));
     try {
-      const response = await request(`/api/route-map/zip?postal_code=${encodeURIComponent(query.trim())}`, { cache: 'no-store' });
+      const response = await request(apiUrl('/api/route-map/zip', { postal_code: query.trim() }, viewDate), { cache: 'no-store' });
       const data = await response.json();
       if (current !== zipSequence) return;
       if (response.status !== 200) {
@@ -146,9 +198,10 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     const current = ++sequence, station = focus(), district = districtSelect.value;
     if (warehouseDistrict !== district) { warehouseSequence++; warehouseLayer.clear(); warehouseDistrict = undefined; }
     clear();
+    updateDateView();
     status('loading', t.loadingStation(station || currentDistrict()?.name_zh));
     try {
-      const response = await request(`/api/route-map/district?district=${encodeURIComponent(district)}`, { cache: 'no-store' });
+      const response = await request(apiUrl('/api/route-map/district', { district }, viewDate), { cache: 'no-store' });
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
@@ -167,9 +220,13 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       view.setDsp(dsp); panel.setDsp(dsp);
       retainedZipHint();
       const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
-      status('success', routes.length === 0 ? t.noRoutes
+      const day = days.find(item => item.day === viewDate);
+      const empty = viewDate && (data.empty === true || routes.length === 0 || (station
+        ? day ? !day.stations_with_data?.includes(station) : routes.length === 0
+        : !day || day.has_data === false));
+      status(empty ? 'empty' : 'success', empty ? historicalEmpty(station) : routes.length === 0 ? t.noRoutes
         : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
-      if (routes.some(route => route.mapped_count > 0)) message.className = 'sr-only';
+      if (!empty && routes.some(route => route.mapped_count > 0)) message.className = 'sr-only';
       if (data.details_status === 'invalid') {
         message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
       }
@@ -197,6 +254,8 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       stationSelect.value = scope === 'district' ? '' : selected.station || '';
       if (!selected.station) scope = 'district';
       stationsLoaded = true;
+      await loadDays();
+      if (current !== sequence) return;
       await loadStation();
     } catch { status('error', t.stationsError); }
   }
@@ -221,6 +280,8 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     return loadStation();
   });
   async function changeDistrict() {
+    const current = ++sequence;
+    clear();
     element('warehouse-notice').replaceChildren();
     selected = chooseSelection({ districts, urlDistrict: districtSelect.value, saved: selected });
     populateStations(doc, stationSelect, currentDistrict(), true);
@@ -228,6 +289,8 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     stationSelect.value = scope === 'district' ? '' : selected.station || '';
     saveSelection(storage, selected); saveMapScope(storage, scope);
     if (warehousePanel.isOpen()) void warehousePanel.load();
+    await loadDays();
+    if (current !== sequence) return;
     return loadStation();
   }
   districtSelect.addEventListener('change', changeDistrict);

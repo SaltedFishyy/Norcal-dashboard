@@ -71,6 +71,6 @@ test('DB-T1: schedule constraint, history selection, safe projection and reader 
   assert.match(index.rows[0].indexdef, /\(route_id\)/);
   const versions = [];
   await migrate(db.owner, { ...db.options, onResult: value => versions.push(value) });
-  assert.deepEqual(versions.at(-1), { version: '008', result: 'skipped' });
+  assert.deepEqual(versions.at(-1), { version: '009', result: 'skipped' });
   assert.ok(versions.every(value => value.result === 'skipped'));
 });

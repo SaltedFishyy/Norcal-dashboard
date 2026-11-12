@@ -75,3 +75,7 @@ import './quotation-sync-job.test.js';
 import './quotation-sync-worker.test.js';
 import './quotation-sync-web.test.js';
 import './codex-watch.test.js';
+
+import './date-view-db.test.js';
+import './date-view-api.test.js';
+import './date-view-web.test.js';

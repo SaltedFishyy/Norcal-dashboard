@@ -4,6 +4,7 @@ import path from 'node:path';
 const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']],
+  ['/date-view.js', ['date-view.js', 'text/javascript']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/data-status.js', ['data-status.js', 'text/javascript']],
   ['/quotation-sync-status.js', ['quotation-sync-status.js', 'text/javascript']],

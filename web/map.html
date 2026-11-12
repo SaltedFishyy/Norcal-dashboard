@@ -22,6 +22,7 @@
       <label><span>片区</span> <select id="map-district" disabled aria-label="片区"></select></label>
       <label><span data-map-text="station">站点</span> <select id="map-station" disabled aria-label="站点"></select></label>
       <label><span data-map-text="dsp">DSP</span> <select id="map-dsp" disabled aria-label="DSP"></select></label>
+      <label id="map-date-field" hidden><span>日期</span> <select id="map-date" disabled aria-label="日期"></select></label>
       <div class="map-toolbar-actions">
 <p class="snapshot" title="DMS 快照，非实时数据"><span class="sr-only" data-map-text="snapshot">DMS 快照，非实时数据</span><span data-map-text="updated">数据更新时间</span>：<span id="map-updated">—</span></p>
         <button id="map-warehouses" type="button" hidden disabled class="warehouse-entry">管理仓库</button>
@@ -29,6 +30,7 @@
       </div>
     </section>
     <section id="data-status" class="data-status" aria-label="数据状态"></section>
+    <p id="map-date-notice" class="view-date-notice" role="status" hidden><span id="map-date-text"></span> · <button id="map-date-latest" type="button">回到最新</button> · 首票价格为当前报价<span id="map-date-missing"></span></p>
     <p id="map-message" role="status" aria-live="polite" data-map-text="loadingStations">正在加载站点…</p>
     <p id="map-basemap-message" role="status" hidden></p>
     <p id="map-warehouse-message" class="warehouse-notice" role="status" aria-live="polite"></p>

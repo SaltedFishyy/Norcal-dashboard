@@ -8,6 +8,7 @@ export class DataSourceUnavailableError extends Error {
 export function createJsonDataSource({ runtimeDir }) {
   return {
     source: 'json',
+    readSnapshotDays: async () => null,
     readRouteHistory: async () => null,
     readCurrentFirstPrices: async () => [],
     readRouteQuotation: async () => { throw new DataSourceUnavailableError(); },

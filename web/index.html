@@ -26,12 +26,14 @@
         <div><dt><label for="profile-district">片区</label></dt><dd><select id="profile-district" disabled></select></dd></div>
         <div><dt><label for="profile-station">站点</label></dt><dd><select id="profile-station" disabled></select></dd></div>
         <div><dt><label for="profile-dsp">DSP</label></dt><dd><select id="profile-dsp" disabled><option value="">全部 DSP</option></select></dd></div>
+        <div id="profile-date-field" hidden><dt><label for="profile-date">日期</label></dt><dd><select id="profile-date" disabled></select></dd></div>
         <div class="profile-metric"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l4 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0"/></svg><div><dt>更新时间</dt><dd id="updated">—</dd></div></div>
         <div class="profile-metric"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m2 7 10-5 10 5-10 5Z M2 12l10 5 10-5 M2 17l10 5 10-5"/></svg><div><dt>线路总数</dt><dd id="total">—</dd></div></div>
       </dl>
       <div class="profile-zip-search">
         <form id="profile-zip-form"><label for="profile-zip">ZIP</label><input id="profile-zip" inputmode="numeric" maxlength="5" autocomplete="off"><button type="submit">搜索</button></form>
       </div></div>
+      <div id="profile-date-notice" class="view-date-notice" hidden><span id="profile-date-text"></span> · <button id="profile-date-latest" type="button">回到最新</button> · 首票价格为当前报价</div>
       <div id="profile-zip-result" role="status" aria-live="polite"></div>
     </header>
     <section class="panel" aria-label="线路画像" aria-busy="true" id="profiles">

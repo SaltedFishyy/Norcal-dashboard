@@ -1,3 +1,4 @@
+import { pacificToday, snapshotCalendar } from './date-view.js';
 import http from 'node:http';
 import { StationNotFoundError, SnapshotNotFoundError } from '../store/route-profiles-file.js';
 import { buildPriceIndex, routePriceSummary, buildRouteQuotation, RouteNotFoundError } from '../quotations/quotations.js';
@@ -29,8 +30,14 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
     try { return buildPriceIndex(await dataSource.readCurrentFirstPrices()); }
     catch { return null; } // Isolate quotation failures from DMS reads; never expose driver errors.
   };
-  const districtProfiles = async () => {
-    try { return await dataSource.readRouteProfiles(); }
+  const sourceFor = day => {
+    if (day === undefined) return dataSource;
+    const source = dataSource.atDay?.(day);
+    if (!source) { const error = new Error(); error.name = 'HistoryUnavailableError'; throw error; }
+    return source;
+  };
+  const districtProfiles = async (source = dataSource) => {
+    try { return await source.readRouteProfiles(); }
     catch (error) { if (error instanceof SnapshotNotFoundError) return { stations: {} }; throw error; }
   };
   const getDistrictExtent = async district => {
@@ -66,16 +73,26 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
   return http.createServer(createRequestHandler({
     capabilities: { refresh: false, ...capabilities, warehouse_write: Boolean(warehouses.writeEnabled), route_quotation: dataSource.source === 'db' },
     extraHandlers: warehouseHandlers, readHandlers: createFreshnessHandlers({ dataSource, districtsPath }),
-    getSnapshot: async station => {
-      const snapshot = await dataSource.getStationSnapshot(station);
+    today: () => pacificToday(now),
+    getSnapshotDays: async ({ station, district }) => {
+      if (dataSource.source !== 'db') return { available: false };
+      let stations = [station];
+      if (district !== undefined) {
+        const districts = await readDistricts({ districtsPath, profiles: await districtProfiles() });
+        const found = districts.find(item => item.id === district);
+        if (!found) throw new DistrictNotFoundError();
+        stations = found.stations.map(item => item.code);
+      }
+      const rows = await dataSource.readSnapshotDays({ stations });
+      return rows === null ? { available: false } : snapshotCalendar(rows, pacificToday(now));
+    },
+    getSnapshot: async (station, day) => {
+      const snapshot = await sourceFor(day).getStationSnapshot(station);
       const priceIndex = await readPriceIndex();
       return { ...snapshot, rows: snapshot.rows.map(row => ({ ...row, ...routePriceSummary(priceIndex, row) })) };
     }, log,
     getRouteHistory: async (routeId, days) => {
-      const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles',
-        year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now());
-      const part = type => parts.find(value => value.type === type).value;
-      const today = `${part('year')}-${part('month')}-${part('day')}`;
+      const today = pacificToday(now);
       const history = await dataSource.readRouteHistory({ routeId, days, today });
       return history === null ? { available: false } : buildRouteHistory(history.rows, { routeId, days, ...history });
     },
@@ -91,27 +108,32 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
       catch { throw new DataSourceUnavailableError(); }
       return buildRouteQuotation({ ...owner, ...quotation });
     },
-    getRouteDetail: (routeId) => dataSource.getRouteDetail(routeId),
-    getRouteMap: async station => {
-      const profiles = await dataSource.readRouteProfiles();
+    getRouteDetail: (routeId, day) => sourceFor(day).getRouteDetail(routeId),
+    getRouteMap: async (station, day) => {
+      const source = sourceFor(day);
+      const profiles = await source.readRouteProfiles();
       if (!Object.hasOwn(profiles.stations, station)) throw new StationNotFoundError();
       const boundaries = await readBoundaries({ geoDir });
-      return buildRouteMap({ profiles, station, boundaries, priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() });
+      return buildRouteMap({ profiles, station, boundaries, priceIndex: await readPriceIndex(), details: await source.readRouteDetailsForMap() });
     },
-    getMapStations: async () => {
-      const districts = await readDistricts({ districtsPath, profiles: await dataSource.readRouteProfiles() });
+    getMapStations: async day => {
+      const districts = await readDistricts({ districtsPath, profiles: await sourceFor(day).readRouteProfiles() });
       return districts.flatMap(district => district.stations.filter(station => station.has_snapshot).map(station => station.code));
     },
-    getDistricts: async () => readDistricts({ districtsPath, profiles: await districtProfiles() }),
-    getDistrictMap: async district => {
-      const profiles = await districtProfiles();
+    getDistricts: async day => readDistricts({ districtsPath, profiles: await districtProfiles(sourceFor(day)) }),
+    getDistrictMap: async (district, day) => {
+      const source = sourceFor(day);
+      const profiles = await districtProfiles(source);
       const districts = await readDistricts({ districtsPath, profiles });
       if (!districts.some(item => item.id === district)) throw new DistrictNotFoundError();
       return buildDistrictMap({ profiles, districts, district, boundaries: await readBoundaries({ geoDir }),
-        priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() });
+        priceIndex: await readPriceIndex(), details: await source.readRouteDetailsForMap() });
     },
-    getZip: async postalCode => lookupZip({ profiles: await dataSource.readRouteProfiles(),
-      boundaries: await readBoundaries({ geoDir }), postalCode, priceIndex: await readPriceIndex(), details: await dataSource.readRouteDetailsForMap() }),
+    getZip: async (postalCode, day) => {
+      const source = sourceFor(day);
+      return lookupZip({ profiles: await source.readRouteProfiles(),
+        boundaries: await readBoundaries({ geoDir }), postalCode, priceIndex: await readPriceIndex(), details: await source.readRouteDetailsForMap() });
+    },
     getStaticFile: createStaticReader(webDir, leafletDir, protomapsDir),
     getBasemap: name => readBasemap({ basemapDir, name }),
   }));

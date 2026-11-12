@@ -21,11 +21,48 @@ class Element {
 const descendants = node => [node, ...node.children.flatMap(descendants)];
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const reply = (data, status = 200) => ({ status, json: async () => data });
+test('DV profile date drives profiles, ZIP, detail, empty state and DSP rebuilding', async t => {
+  const f = await fixture(t, '?station=MOCKA&date=2026-11-08');
+  assert.ok(f.calls.includes('/api/route-profiles?station=MOCKA&date=2026-11-08'));
+  assert.match(f.e['profile-date-text'].textContent, /正在查看 11\/08 的数据/);
+  assert.equal(f.e['profile-date-notice'].hidden, false);
+  f.state.rows = [{ route_id: 2, dsp_name: 'Old' }]; await f.e.retry.listeners.click();
+  f.e['profile-dsp'].value = 'Old'; f.e['profile-dsp'].listeners.change();
+  f.state.rows = [{ route_id: 2, dsp_name: 'New' }]; await f.e.retry.listeners.click();
+  assert.equal(f.e['profile-dsp'].value, '');
+  f.state.detailStatus = 404; await f.submit();
+  assert.ok(f.calls.includes('/api/route-map/zip?postal_code=00123&date=2026-11-08'));
+  assert.ok(f.calls.includes('/api/route-details?route_id=2&date=2026-11-08'));
+  assert.match(f.e['detail-content'].textContent, /11\/08 的数据.*该日没有这条线路的详情/);
+  assert.doesNotMatch(f.e['detail-content'].textContent, /抓取/);
+  f.state.profile = () => reply({ rows: [], total: 0, fetched_at: null, empty: true });
+  await f.e.retry.listeners.click(); assert.equal(f.e.message.textContent, '该日无数据'); assert.equal(f.e.total.textContent, '0');
+  await f.e['profile-date-latest'].listeners.click();
+  assert.equal(new URL(globalThis.location.href).searchParams.has('date'), false);
+  assert.equal(f.calls.at(-1), '/api/route-profiles?station=MOCKB');
+});
+test('DV unavailable history hides selector and restores latest while retaining other URL parameters', async t => {
+  const f = await fixture(t, '?station=MOCKA&date=2026-11-08', { available: false });
+  assert.equal(f.e['profile-date-field'].hidden, true);
+  assert.ok(f.calls.includes('/api/route-profiles?station=MOCKA'));
+  assert.equal(new URL(globalThis.location.href).searchParams.get('station'), 'MOCKA');
+});
+test('DV station change retains a selected day absent from its options', async t => {
+  const f = await fixture(t, '?date=2026-11-06', { days: [] });
+  f.e['profile-station'].value = 'MOCKB'; await f.e['profile-station'].listeners.change();
+  assert.equal(f.e['profile-date'].value, '2026-11-06');
+  assert.ok(f.calls.includes('/api/snapshot-days?station=MOCKB'));
+  assert.equal(f.calls.at(-1), '/api/route-profiles?station=MOCKB&date=2026-11-06');
+  assert.match(f.e['profile-date'].children.at(-1).textContent, /（空）/);
+});
 let counter = 0;
-async function fixture(t) {
-  const previous = { document: globalThis.document, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
+async function fixture(t, search = '', days = { days: [{ day: '2026-11-08', has_data: true }] }) {
+  const previous = { document: globalThis.document, fetch: globalThis.fetch, localStorage: globalThis.localStorage, location: globalThis.location, history: globalThis.history };
+  globalThis.location = { search, href: 'http://localhost/' + search };
+  globalThis.history = { replaceState: (_, __, href) => { globalThis.location.href = href; globalThis.location.search = new URL(href).search; } };
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } });
   const ids = ['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district', 'profile-dsp', 'profile-zip-form', 'profile-zip', 'profile-zip-result', 'route-detail', 'detail-content', 'detail-close', 'detail-title'];
+  ids.push('profile-date', 'profile-date-field', 'profile-date-notice', 'profile-date-text', 'profile-date-latest');
   const e = Object.fromEntries(ids.map(id => [id, new Element()]));
   for (const key of ['pickup_volume', 'pph']) {
     const th = new Element('th'), control = new Element('button');
@@ -41,6 +78,7 @@ async function fixture(t) {
   globalThis.fetch = async url => {
     calls.push(url);
     if (url === '/api/districts') return reply({ districts });
+    if (url.startsWith('/api/snapshot-days')) return reply(days);
     if (url.startsWith('/api/route-profiles')) return state.profile ? state.profile(url) : reply({ total: state.rows.length, rows: state.rows, fetched_at: '2026-10-08T12:00:00Z' });
     if (url.startsWith('/api/route-details')) return state.detail ? state.detail() : reply(state.detailStatus === 404 ? { error: 'route_detail_not_found' } : { zips: state.zips }, state.detailStatus);
     if (state.zip instanceof Error) throw state.zip;

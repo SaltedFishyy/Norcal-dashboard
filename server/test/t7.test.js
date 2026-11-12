@@ -187,7 +187,7 @@ test('T7 frontend structure and safe rendering use no external resources', async
   assert.doesNotMatch(html, /style=|<script(?![^>]*src=)/);
   for (const source of sources) assert.doesNotMatch(source, /https?:\/\/|Daily Volume/);
   assert.doesNotMatch(app, /innerHTML|address_type_distribution|parse_errors/);
-  assert.match(app, /encodeURIComponent\(stationSelect.value\)/);
+  assert.match(app, /apiUrl\('\/api\/route-profiles', \{ station: stationSelect.value \}, viewDate\)/);
   assert.doesNotMatch(app, /station=SFO01/);
   assert.match(app, /updated.title = data.fetched_at/);
   assert.match(css, /overflow-x: auto/);

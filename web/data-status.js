@@ -1,3 +1,4 @@
+import { withViewDate } from './date-view.js';
 import { formatUpdated } from './format.js';
 import { createQuotationSyncStatus } from './quotation-sync-status.js';
 
@@ -38,7 +39,10 @@ const pacificTime = value => value ? new Intl.DateTimeFormat('zh-CN', { timeZone
 
 export function createDataStatus({ document: doc = globalThis.document, fetch: request = globalThis.fetch,
   setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
-  reload = () => globalThis.location.reload() } = {}) {
+  reload = () => {
+    if (new URLSearchParams(globalThis.location.search).has('date')) globalThis.location.assign(withViewDate(globalThis.location.href, null));
+    else globalThis.location.reload();
+  } } = {}) {
   renderBrand(doc);
   const root = doc.getElementById('data-status');
   const node = (tag, text, parent) => {

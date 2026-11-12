@@ -1,3 +1,4 @@
+import { pacificToday, requestDay } from './date-view.js';
 import { sendJson } from './http-utils.js';
 import { isStaticPath } from './static-files.js';
 import { basemapPaths, createBasemapHandler } from './basemap.js';
@@ -30,49 +31,61 @@ const errorMappings = new Map([
   ['/api/route-quotations', new Map([...profileErrors, ['RouteNotFoundError', [404, 'route_not_found']]])],
   ['/api/route-profiles', profileErrors], ['/api/route-details', detailErrors],
   ['/api/route-map', mapErrors], ['/api/route-map/zip', mapErrors], ['/api/route-map/stations', mapErrors],
-  ['/api/districts', mapErrors], ['/api/route-map/district', mapErrors],
+  ['/api/snapshot-days', mapErrors], ['/api/districts', mapErrors], ['/api/route-map/district', mapErrors],
   ...[...basemapPaths.keys()].map(pathname => [pathname, basemapErrors]),
 ]);
 
-export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuotation, getRouteHistory, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
+export function createRequestHandler({ getSnapshotDays, today = () => pacificToday(() => new Date()), getSnapshot, getRouteDetail, getRouteQuotation, getRouteHistory, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
   capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
-  const stationEndpoint = read => async ({ url, respond }) => {
+  const stationEndpoint = read => async ({ url, respond, day }) => {
     const stations = url.searchParams.getAll('station');
     if (stations.length !== 1 || !/^[A-Za-z0-9._-]{1,32}$/.test(stations[0])) {
       respond(400, { error: 'invalid_station' }); return;
     }
-    respond(200, await read(stations[0]));
+    respond(200, await read(stations[0], day));
   };
-  const profiles = stationEndpoint(async station => {
-    const { fetched_at, source_as_of, total, rows } = await getSnapshot(station);
-    return { station, fetched_at, source_as_of, total, rows: rows.map(({ raw, ...row }) => row) };
+  const profiles = stationEndpoint(async (station, day) => {
+    const { fetched_at, source_as_of, total, rows, empty } = await getSnapshot(station, day);
+    return { station, fetched_at, source_as_of, total, rows: rows.map(({ raw, ...row }) => row),
+      ...(day !== undefined && empty === true ? { empty: true } : {}) };
   });
-  const routeMap = stationEndpoint(station => getRouteMap(station));
-  const zipLookup = async ({ url, respond }) => {
+  const routeMap = stationEndpoint((station, day) => getRouteMap(station, day));
+  const zipLookup = async ({ url, respond, day }) => {
     const codes = url.searchParams.getAll('postal_code');
     if (codes.length !== 1 || !/^\d{5}$/.test(codes[0])) {
       respond(400, { error: 'invalid_postal_code' }); return;
     }
-    respond(200, await getZip(codes[0]));
+    respond(200, await getZip(codes[0], day));
   };
-  const mapStations = async ({ respond }) => respond(200, { stations: await getMapStations() });
-  const districts = async ({ respond }) => respond(200, { districts: await getDistricts() });
-  const districtMap = async ({ url, respond }) => {
+  const mapStations = async ({ respond, day }) => respond(200, { stations: await getMapStations(day) });
+  const districts = async ({ respond, day }) => respond(200, { districts: await getDistricts(day) });
+  const districtMap = async ({ url, respond, day }) => {
     const ids = url.searchParams.getAll('district');
     if (ids.length !== 1 || !/^[a-z0-9-]{1,32}$/.test(ids[0])) {
       respond(400, { error: 'invalid_district' }); return;
     }
-    respond(200, await getDistrictMap(ids[0]));
+    respond(200, await getDistrictMap(ids[0], day));
+  };
+  const snapshotDays = async ({ url, respond }) => {
+    const stations = url.searchParams.getAll('station'), districts = url.searchParams.getAll('district');
+    if (stations.length) {
+      if (stations.length !== 1 || districts.length || !/^[A-Za-z0-9._-]{1,32}$/.test(stations[0])) {
+        respond(400, { error: 'invalid_station' }); return;
+      }
+    } else if (districts.length !== 1 || !/^[a-z0-9-]{1,32}$/.test(districts[0])) {
+      respond(400, { error: 'invalid_district' }); return;
+    }
+    respond(200, await getSnapshotDays(stations.length ? { station: stations[0] } : { district: districts[0] }));
   };
   const health = ({ respond }) => respond(200, { ok: true });
-  const routeEndpoint = read => async ({ url, respond }) => {
+  const routeEndpoint = read => async ({ url, respond, day }) => {
     const ids = url.searchParams.getAll('route_id');
     if (ids.length !== 1 || !/^\d+$/.test(ids[0]) || !Number.isSafeInteger(Number(ids[0])) || Number(ids[0]) < 1) {
       respond(400, { error: 'invalid_route_id' }); return;
     }
-    respond(200, await read(Number(ids[0])));
+    respond(200, await read(Number(ids[0]), day));
   };
   const routeHistory = async context => {
     const { url, respond } = context;
@@ -89,12 +102,18 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuot
     res.end(body); record(200);
   };
   const handlers = new Map([
-    ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', routeEndpoint(getRouteDetail)],
+    ['/api/snapshot-days', snapshotDays], ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', routeEndpoint(getRouteDetail)],
     ['/api/route-quotations', routeEndpoint(getRouteQuotation)],
     ['/api/route-history', routeHistory],
     ['/api/route-map', routeMap], ['/api/route-map/zip', zipLookup], ['/api/route-map/stations', mapStations],
     ['/api/districts', districts], ['/api/route-map/district', districtMap],
   ]);
+  for (const pathname of ['/api/route-profiles', '/api/route-details', '/api/route-map',
+    '/api/route-map/zip', '/api/route-map/stations', '/api/districts', '/api/route-map/district']) {
+    const handler = handlers.get(pathname);
+    handlers.set(pathname, context => handler({ ...context,
+      day: context.url.searchParams.has('date') ? requestDay(context.url, today()) : undefined }));
+  }
   for (const pathname of basemapPaths.keys()) {
     handlers.set(pathname, createBasemapHandler(getBasemap, csp, record));
   }
@@ -125,7 +144,9 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuot
       catch (error) {
         if (res.headersSent) { res.destroy(); return; }
         const [status, code] = isStatic ? [500, 'internal_error']
-          : errorMappings.get(url.pathname)?.get(error?.name)
+          : (error?.name === 'InvalidDateError' ? [400, 'invalid_date']
+            : error?.name === 'HistoryUnavailableError' ? [400, 'history_unavailable']
+              : errorMappings.get(url.pathname)?.get(error?.name))
             || (error?.name === 'DataSourceUnavailableError' ? [503, 'data_source_unavailable']
               : error?.name === 'DistrictConfigInvalidError' ? [500, 'district_config_invalid'] : [500, 'internal_error']);
         respond(status, { error: code });

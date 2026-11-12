@@ -23,6 +23,19 @@ class Element {
 const nodes = root => [root, ...root.children.flatMap(nodes)];
 const find = (root, text) => nodes(root).find(n => n.tag === 'button' && n.textContent === text);
 const iso = '2026-10-08T12:00:00Z';
+test('DV default refresh reload removes date and preserves other URL context', async t => {
+  const previous = globalThis.location;
+  t.after(() => { if (previous === undefined) delete globalThis.location; else globalThis.location = previous; });
+  let target, reloads = 0;
+  globalThis.location = { search: '?station=A&date=2026-11-08', href: 'http://localhost/?station=A&date=2026-11-08#table', assign: value => { target = value; }, reload: () => reloads++ };
+  const h = fixture({ capability: true, initialState: 'running', defaultReload: true });
+  await h.page.start();
+  h.data.state = { state: 'completed', progress: { ...progress(), finished_at: iso } }; await h.tick(2000);
+  await h.click('数据已更新，点击重新加载'); assert.equal(target, 'http://localhost/?station=A#table');
+  globalThis.location.search = '?station=A';
+  await h.click('数据已更新，点击重新加载'); assert.equal(reloads, 1);
+  h.page.dispose();
+});
 test('AR-T3 Worker status states, Pacific times, failure names and polling; readonly hides line', async () => {
   const readonly = fixture(); await readonly.page.start();
   assert.doesNotMatch(readonly.root.textContent, /自动刷新 ·/);
@@ -78,7 +91,7 @@ function fresh(source = 'db') {
       ...['not_in_dms_menu', 'no_permission', 'disabled'].map((reason, i) => ({ code: `SKIP${i}`, district: 'mock', fetched_at: null, scrape_disabled: reason }))],
     run: source === 'json' ? null : { running: true, last: null } };
 }
-function fixture({ capability = false, autoCapability = false, failCapability = false, source = 'db', initialState = 'idle', mapPage = false, profilePage = false } = {}) {
+function fixture({ capability = false, autoCapability = false, failCapability = false, source = 'db', initialState = 'idle', mapPage = false, profilePage = false, defaultReload = false } = {}) {
   const root = new Element('section'), calls = [], timers = new Map(); let timerId = 0, reloads = 0;
   const data = { freshness: fresh(source), state: { state: initialState, progress: initialState === 'running' ? progress() : null },
     districts: [{ id: 'mock', name_zh: '合成片区' }, { id: 'unassigned', name_zh: '未分配站点' }],
@@ -98,7 +111,7 @@ function fixture({ capability = false, autoCapability = false, failCapability = 
   const doc = { getElementById: id => id === 'data-status' ? root : id === 'profile-data-summary' && profilePage ? summary : id === 'map-data-actions' && (mapPage || profilePage) ? actions : nodes(root).find(n => n.id === id),
     createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
   const page = createDataStatus({ document: doc, fetch: request,
-    setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), reload: () => reloads++ });
+    setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), reload: defaultReload ? undefined : () => reloads++ });
   const click = async text => { const el = find(root, text); assert.ok(el, `button ${text}`); await el.listeners.click(); return el; };
   const tick = async delay => { const entry = [...timers].find(([, t]) => t.delay === delay); assert.ok(entry); timers.delete(entry[0]); await entry[1].fn(); };
   return { root, actions, summary, page, data, calls, timers, click, tick, reloads: () => reloads };

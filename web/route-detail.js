@@ -1,3 +1,4 @@
+import { apiUrl, formatViewDate } from './date-view.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatValue, formatNumber, formatUpdated, difficultyTone, profileText as t } from './format.js';
 
@@ -111,17 +112,23 @@ export async function openRouteDetail(row, source = document.activeElement, fetc
   const current = ++sequence;
   setupHistory(dialog, content, row, current, options);
   document.getElementById('detail-title').textContent = formatValue(row.route_name);
-  const showStatus = (...nodes) => content.replaceChildren(basicInfo(row, fetchedAt), ...nodes);
+  const dateNote = () => element('p', `${formatViewDate(options.date)} 的数据`, 'detail-note');
+  const showStatus = (...nodes) => content.replaceChildren(...(options.date ? [dateNote()] : []), basicInfo(row, fetchedAt), ...nodes);
   showStatus(element('p', t.loading, 'detail-status'));
   content.setAttribute('aria-busy', 'true');
   if (!dialog.open) dialog.showModal();
   try {
-    const response = await fetch(`/api/route-details?route_id=${encodeURIComponent(row.route_id)}`, { cache: 'no-store' });
+    const response = await fetch(apiUrl('/api/route-details', { route_id: row.route_id }, options.date), { cache: 'no-store' });
     const data = await response.json();
     if (current !== sequence || options.isCurrent?.() === false) return;
-    if (response.status === 200 && Array.isArray(data?.zips)) return renderDetail(content, data, row, fetchedAt, options.highlightZip);
+    if (response.status === 200 && Array.isArray(data?.zips)) {
+      const result = renderDetail(content, data, row, fetchedAt, options.highlightZip);
+      if (options.date) content.replaceChildren(dateNote(), ...Array.from(content.children));
+      return result;
+    }
     else if (response.status === 404 && data?.error === 'route_detail_not_found') {
-      showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(row.station), 'detail-note'));
+      if (options.date) showStatus(element('p', '该日没有这条线路的详情', 'detail-status'));
+      else showStatus(element('p', t.noDetail, 'detail-status'), element('p', t.scrapeHint(row.station), 'detail-note'));
     } else {
       const code = codes.has(data?.error) ? data.error : 'internal_error';
       showStatus(element('p', t.detailError(code), 'detail-status'));

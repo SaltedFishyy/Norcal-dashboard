@@ -1,3 +1,4 @@
+import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNavLinks } from './date-view.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatValue, formatNumber, formatUpdated, formatPriceRange, pageState, difficultyTone, sortRows, dspOptions } from './format.js';
 import { openPriceDetail } from './price-detail.js';
@@ -14,6 +15,54 @@ const profiles = document.getElementById('profiles');
 const stationSelect = document.getElementById('profile-station');
 const districtSelect = document.getElementById('profile-district');
 const dspSelect = document.getElementById('profile-dsp');
+const dateSelect = document.getElementById('profile-date');
+const dateField = document.getElementById('profile-date-field');
+let viewDate = readViewDate(globalThis.location?.search || '');
+let daysSequence = 0;
+function updateDateView() {
+  syncNavLinks(document, viewDate);
+  const notice = document.getElementById('profile-date-notice');
+  if (notice) notice.hidden = !viewDate;
+  const text = document.getElementById('profile-date-text');
+  if (text) text.textContent = viewDate ? `正在查看 ${formatViewDate(viewDate)} 的数据` : '';
+  const price = document.getElementById('sort-price');
+  if (price) price.title = '首票价格 0–1(lb) / Quotation for the First Parcel 0–1(lb)' + (viewDate ? ' · 当前报价' : '');
+}
+function setViewDate(date) {
+  viewDate = date;
+  if (globalThis.location && globalThis.history) history.replaceState(null, '', withViewDate(location.href, date));
+  updateDateView();
+}
+async function loadDays() {
+  if (!dateSelect) return;
+  const current = ++daysSequence;
+  dateSelect.disabled = true; dateField.hidden = true;
+  if (!selected.station) return;
+  try {
+    const response = await fetch(apiUrl('/api/snapshot-days', { station: selected.station }), { cache: 'no-store' });
+    const data = await response.json();
+    if (current !== daysSequence) return;
+    if (response.status !== 200 || data.available === false || !Array.isArray(data.days)) throw Error('unavailable');
+    const options = dateOptions(data.days);
+    if (viewDate && !options.some(item => item.value === viewDate)) options.push(dateOptions([{ day: viewDate, has_data: false }])[1]);
+    dateSelect.replaceChildren();
+    for (const item of options) {
+      const option = document.createElement('option'); option.value = item.value; option.textContent = item.label; dateSelect.append(option);
+    }
+    dateSelect.value = viewDate || ''; dateSelect.disabled = false; dateField.hidden = false;
+  } catch {
+    if (current === daysSequence && viewDate) setViewDate(null);
+  }
+}
+async function changeDate(date) {
+  setViewDate(date); invalidateZip();
+  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
+  if (dateSelect) dateSelect.value = date || '';
+  return load();
+}
+dateSelect?.addEventListener('change', () => changeDate(dateSelect.value || null));
+document.getElementById('profile-date-latest')?.addEventListener('click', () => changeDate(null));
+updateDateView();
 let dsp = null;
 let districts = [], selected = {}, stationsLoaded = false, sequence = 0;
 let renderedData, pendingLoad, renderedRows = new Map(), zipSequence = 0;
@@ -49,7 +98,7 @@ const columns = [
 
 function render(result, data) {
   if (dspSelect) dspSelect.disabled = true;
-  message.textContent = result.message;
+  message.textContent = viewDate && data?.empty === true ? '该日无数据' : result.message;
   profiles.setAttribute('aria-busy', String(result.state === 'loading'));
   retry.hidden = result.state !== 'error' && result.state !== 'empty';
   table.hidden = result.state !== 'success';
@@ -103,7 +152,7 @@ function render(result, data) {
       if (isRoute) {
         content.type = 'button'; content.className = 'route-link';
         renderedRows.get(String(row.route_id)).button = content;
-        content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at)); td.append(content);
+        content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at, { date: viewDate })); td.append(content);
       }
       if (hasDifficulty) {
         content.className = field === 'route_difficulty_manual' ? `difficulty tone-${difficultyTone(value)}` : 'difficulty system-difficulty';
@@ -126,12 +175,21 @@ function load() {
   pendingLoad = loadProfiles();
   return pendingLoad;
 }
+function loadStation() {
+  const current = ++sequence;
+  render(pageState({ loading: true }));
+  pendingLoad = (async () => {
+    await loadDays();
+    if (current === sequence) return loadProfiles();
+  })();
+  return pendingLoad;
+}
 async function loadProfiles() {
   const current = ++sequence;
   render(pageState({ loading: true }));
   if (!selected.station) { render({ state: 'empty', message: '暂无数据：该片区没有站点快照。' }); return; }
   try {
-    const response = await fetch(`/api/route-profiles?station=${encodeURIComponent(stationSelect.value)}`, { cache: 'no-store' });
+    const response = await fetch(apiUrl('/api/route-profiles', { station: stationSelect.value }, viewDate), { cache: 'no-store' });
     const data = await response.json();
     if (current === sequence) {
       render(pageState({ status: response.status, data }), data);
@@ -156,7 +214,7 @@ async function start() {
     populateDistricts(document, districtSelect, districts); districtSelect.value = selected.district;
     populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
     stationsLoaded = true;
-    await load();
+    await loadStation();
   } catch { if (current === sequence) render(pageState({ failed: true })); }
 }
 async function switchTo({ district, station }) {
@@ -167,7 +225,7 @@ async function switchTo({ district, station }) {
   populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
   saveSelection(undefined, selected);
   const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
-  return load();
+  return loadStation();
 }
 function invalidateZip() {
   zipSequence++;
@@ -207,7 +265,7 @@ async function locateZip(owner, data, zip, current) {
   } else await pendingLoad;
   if (current !== zipSequence) return;
   const row = renderedData?.rows.find(row => String(row.route_id) === String(owner.route_id));
-  if (!row) { zipFeedback('当前快照中找不到该线路'); return; }
+  if (!row) { zipFeedback(viewDate ? '该日数据中找不到该线路' : '当前快照中找不到该线路'); return; }
   const parts = [`ZIP ${zip}`];
   for (const [label, value] of [['站点', owner.station], ['线路', owner.route_name], ['DSP', data.route?.dsp_name || data.dsp_name]]) {
     if (value !== null && value !== undefined && value !== '') parts.push(`${label} ${value}`);
@@ -230,13 +288,13 @@ async function locateZip(owner, data, zip, current) {
 async function highlightZipRoute(routeId, parts, zip, current) {
   if (current !== zipSequence) return;
   const target = renderedRows.get(String(routeId));
-  if (!target) { zipFeedback('当前快照中找不到该线路'); return; }
+  if (!target) { zipFeedback(viewDate ? '该日数据中找不到该线路' : '当前快照中找不到该线路'); return; }
   clearZipHighlight();
   target.tr.className = 'zip-target-row';
   target.tr.scrollIntoView({ block: 'center' });
   zipFeedback(parts.join(' · '));
   const detail = await openRouteDetail(target.row, target.button, renderedData.fetched_at, {
-    highlightZip: zip, isCurrent: () => current === zipSequence,
+    date: viewDate, highlightZip: zip, isCurrent: () => current === zipSequence,
   });
   if (current === zipSequence && detail?.highlightFound === false) {
     zipFeedback(`${parts.join(' · ')} · 该线路的 ZIP 明细中没有这个 ZIP`);
@@ -252,7 +310,7 @@ zipForm?.addEventListener('submit', async event => {
   if (!/^\d{5}$/.test(zip)) { zipFeedback('请输入 5 位 ZIP', true); return; }
   zipButton.disabled = true; zipFeedback('查询中…');
   try {
-    const response = await fetch(`/api/route-map/zip?postal_code=${encodeURIComponent(zip)}`, { cache: 'no-store' });
+    const response = await fetch(apiUrl('/api/route-map/zip', { postal_code: zip }, viewDate), { cache: 'no-store' });
     if (current !== zipSequence) return;
     if (response.status !== 200) throw new Error('zip_query_failed');
     const data = await response.json();

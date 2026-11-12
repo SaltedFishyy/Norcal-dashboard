@@ -20,7 +20,7 @@
 
 ### PostgreSQL 存储基础设施（Central DB P2 / CD-T2）
 
-- DB-T1，migration `008_route_history.sql`：**代码中已定义，未部署到正式库**。`scrape_runs.trigger` 新增 `schedule`（每日自动刷新，见 [Auto Refresh](features/auto-refresh.md) 第 5 节），保留 `cli`、`ui`、`json_import`。
+- DB-T1，migration `008_route_history.sql`：**已在正式库执行（2026-11-11，见 `docs/deployment.md`）**。`scrape_runs.trigger` 新增 `schedule`（每日自动刷新，见 [Auto Refresh](features/auto-refresh.md) 第 5 节），保留 `cli`、`ui`、`json_import`。
 - 新视图 `v_route_history_daily` 来源为已有 `station_snapshots` 与 `snapshot_routes.profile`（DMS 浏览器自动化或 JSON 导入的历史快照）；只取 `active` / `superseded`。按 `coalesce(activated_at, created_at)` 换算 `America/Los_Angeles` 得到 `day`，每站每 Pacific 日取最后一个 snapshot，时间相同按 id DESC 决定；先选 snapshot，再展开 Route，不补齐缺失日期或已消失 Route。
 - 历史视图列：`day`（date）、`station`（station_code，text）、`snapshot_id`（bigint）、`snapshot_at`（上述快照时间，timestamptz）、`route_id`（bigint）、`route_name`、`dsp_name`、`pickup_volume`、`pph`、`first_mile_distance`、`zip_count`、`route_difficulty`、`postal_codes`。三个指标仅接受 JSON number 并投影为 numeric，否则 NULL；名称及难度为 text，难度沿用现有 profile 文本。ZIP 数组转 text[] 并保留 ZIP 字符串，`zip_count` 为数组长度；非数组两列均为 NULL，空数组长度为 0。不暴露 raw；`snapshot_at` 表示历史数据时间，不代表实时数据。
 - 新索引 `snapshot_routes_route_id_idx` 覆盖 `snapshot_routes(route_id)`。新视图撤销 PUBLIC 权限，向 scraper、reader 授予 SELECT；reader 不获得底层表权限。
@@ -35,6 +35,21 @@
 - 只读角色仅查询过滤原始字段的视图；抓取角色仅有指定的 INSERT、列级 UPDATE 和 SELECT 权限。完整字段与权限见 [central-db.md 第 21 节](features/central-db.md#21-p2-详细设计product-owner-2026-10-07-授权)。
 
 ---
+
+### 按日期读取视图（DV-T1，migration 009）
+
+**已在正式库执行（2026-11-12，执行前备份 `nc-before-009-*.dump`）**。来源为 DMS 浏览器自动化抓取 / JSON 导入形成的历史 snapshot 与 Route Detail 版本；只读投影，不改表或数据。
+
+| 视图 | 粒度与列 |
+|---|---|
+| `v_daily_snapshots` | 每 Station 每 Pacific 日一行：`station`（text）、`day`（date）、`snapshot_id`（bigint）、`snapshot_at`（timestamptz）、`fetched_at` / `source_as_of`（text）、`total`（int）、末尾 `source`（text，来自 station_snapshots.source）。 |
+| `v_daily_snapshot_routes` | 每日选中 snapshot 的每条 Route 一行：`day`、`station`、`snapshot_id`、`route_id`、`ordinal`、`route_name`、`profile`（jsonb，去掉 raw）、`detail_version_id`（bigint，可空，保留原关联）。 |
+| `v_route_detail_versions` | 每个 committed 详情版本一行：`id`、`route_id`、`station_code`、`run_id`、`origin`、`status`、`fetched_at`、`detail`（去掉 capacity_raw）、`created_at`、`committed_at`；类型与 `v_route_details` 相同，保留所有 committed 版本，可按 id 查询。 |
+| `v_route_detail_version_zips` | 每个 committed 版本的 ZIP 行：`route_id`、`detail_version_id`、`ordinal`、`postal_code`（text）、`zip`（jsonb，去掉 raw）；类型与 `v_route_detail_zips` 相同，ZIP 保留前导零。 |
+
+每日规则沿用 008：仅 active / superseded，以 `coalesce(activated_at, created_at)` 转 America/Los_Angeles 日期，每站每天按时间 DESC、id DESC 选最后一个 snapshot。`v_route_history_daily` 改为引用 `v_daily_snapshots`，列名、类型、顺序及结果不变。`snapshot_at` 为历史数据时间，`fetched_at` / `source_as_of` 保留来源值，不表示实时数据。
+
+四个新视图撤销 PUBLIC 权限，向 scraper / reader 授予 SELECT；reader 不能读取底层表。替换历史视图保留原授权。不新增索引，未改变现有最新数据视图或前端。
 
 ## 2. 核心运营指标（Core Operational Metrics，候选）
 
@@ -295,3 +310,13 @@ CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数�
 - ?? point ??? Route ??? Pacific ??????????? `day > Pacific today - days`??????????????????????????????????? pickup_volume????? Daily Volume?
 - ??? available?route_id?days?points?changes?first_seen?last_seen?latest_day?former_names?first_seen / last_seen ????????? Route ???latest_day ??????????????????????? number ? null?
 - changes ??????????? route_difficulty / dsp_name / ZIP ?????? null ???????ZIP ??? added / removed ???from / to ? null???? postal_codes ? snapshot_id?
+
+### Date View API（DV-T2）
+
+数据来源：PostgreSQL 历史 snapshot 视图（migration 009），原始来源为 DMS 浏览器自动化抓取 / JSON 导入；按日读取不触发抓取或写入。
+
+- `/api/route-profiles`、`/api/route-details`、`/api/route-map`、`/api/route-map/zip`、`/api/route-map/stations`、`/api/districts`、`/api/route-map/district` 接受最多一个 `date=YYYY-MM-DD`。必须为真实日期且不得晚于 Pacific 今天，否则返回 400 `invalid_date`；不传时沿用最新路径及响应结构。
+- 按日元数据与线路来自 `v_daily_snapshots` / `v_daily_snapshot_routes`，每站取当天最后一个 active / superseded snapshot。详情只读取关联的 committed `detail_version_id`，空关联返回 404 `route_detail_not_found`，地图无该线路详情，不回退最新版本。首票报价始终使用当前报价。
+- 当天 Station 无 snapshot：Profile 返回 200，`fetched_at: null, source_as_of: null, total: 0, rows: [], empty: true`；片区成员 `has_snapshot: false`。时间字段保留源 snapshot 的更新时间，非实时数据。
+- `GET /api/snapshot-days?station=<code>` 或 `?district=<id>`（二选一）返回 `{ days: [{ day, has_data, stations_with_data }] }`：从最早数据日到 Pacific 今天，每日连续、倒序，包含空日期。片区任一成员有 snapshot 即 `has_data: true`；成员沿用现有配置。完全无数据返回 `{ days: [] }`。
+- JSON 模式带 `date` 返回 400 `history_unavailable`，`snapshot-days` 返回 `{ available: false }`。只读服务和 Worker 均提供此只读接口。报价、线路历史、仓库及 freshness 接口不增加日期行为。

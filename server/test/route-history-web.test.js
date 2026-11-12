@@ -39,6 +39,14 @@ function harness(t) {
     history: () => all(nodes['route-detail']).find(n => n.id === 'detail-history') };
 }
 const route = { route_id: 900101, route_name: 'MOCK' };
+test('DV selected overview date leaves the lazy history window unchanged', async t => {
+  const h = harness(t);
+  await openRouteDetail(route, undefined, undefined, { date: '2026-11-08' });
+  assert.equal(h.calls[0], '/api/route-details?route_id=900101&date=2026-11-08');
+  assert.match(text(h.nodes['detail-content']), /11\/08 的数据/);
+  await h.tabs()[1].onclick();
+  assert.equal(h.calls.at(-1), '/api/route-history?route_id=900101&days=7');
+});
 function fixture() {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
   const day = n => new Date(Date.parse(`${today}T00:00:00Z`) - n * 86400000).toISOString().slice(0, 10);

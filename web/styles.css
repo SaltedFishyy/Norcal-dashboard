@@ -358,7 +358,7 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 .profile-summary label { color: #e9eef9; font-size: var(--fs-15); }
 .profile-summary select { font-size: var(--fs-15); min-width: 0; max-width: 180px; padding: calc(9px + var(--space-step)) calc(12px + var(--space-step)); border: 1px solid #465b75; border-radius: 7px; background: #101b2c; color: #e9eef9; font-family: inherit; }
 .profile-summary .profile-metric { display: flex; align-items: center; gap: 12px; }
-.profile-summary .profile-metric:first-of-type, .profile-summary .profile-metric:nth-child(4) { border-left: 1px solid #465b75; padding-left: 20px; }
+.profile-summary .profile-metric:first-of-type, .profile-summary .profile-metric:nth-child(5) { border-left: 1px solid #465b75; padding-left: 20px; }
 .profile-metric dt { margin-bottom: 3px; }
 .profile-metric dd { font-size: var(--fs-16); }
 .profile-page .profile-zip-search { flex: 0 1 auto; border-left: 1px solid #465b75; padding-left: 20px; }
@@ -381,7 +381,7 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
   .profile-summary .metrics > div > dt { width: 36px; flex-shrink: 0; }
   .profile-summary .metrics > div > dd { flex: 1; min-width: 0; }
   .profile-summary select { width: 100%; max-width: 100%; }
-  .profile-summary .profile-metric:nth-child(4) { border: 0; padding: 0; }
+  .profile-summary .profile-metric:nth-child(5) { border: 0; padding: 0; }
   .profile-page .profile-zip-search { flex-basis: 100%; border: 0; padding: 0; }
   .profile-page #profile-zip { flex: 1; width: 0; }
 }
@@ -474,3 +474,7 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 #detail-history { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .rh-cards { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { #route-detail *, #route-detail { animation: none; transition: none; scroll-behavior: auto; } }
+
+.view-date-notice { margin-bottom: 16px; padding: 12px; border: 1px solid #465b75; border-radius: 7px; overflow-wrap: anywhere; }
+#profile-date-field[hidden] { display: none; }
+#map-date-field[hidden] { display: none; }

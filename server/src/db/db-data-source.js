@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { dailyReaders, readSnapshotDays } from './daily-route-profiles.js';
 import { dbConfig } from './connection.js';
 import { SnapshotNotFoundError, StationNotFoundError } from '../store/route-profiles-file.js';
 import { RouteDetailNotFoundError, projectRouteDetail } from '../store/route-details-file.js';
@@ -40,8 +41,10 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
     return Object.fromEntries(versions.rows.map(row => [String(row.route_id), { ...row.detail,
       zips: zips.rows.filter(zip => zip.route_id === row.route_id).map(zip => zip.zip) }]));
   };
-  return {
+  const dataSource = {
     source: 'db',
+    atDay: day => Object.freeze({ ...dataSource, ...dailyReaders(read, day) }),
+    readSnapshotDays: options => read(client => readSnapshotDays(client, options)),
     readRouteHistory: ({ routeId, days, today }) => read(async client => {
       const rows = (await client.query(`SELECT day::text AS day, station, route_name, dsp_name,
         pickup_volume, pph, first_mile_distance, zip_count, route_difficulty, postal_codes
@@ -120,4 +123,5 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
     }),
     close: () => pool.end(),
   };
+  return dataSource;
 }

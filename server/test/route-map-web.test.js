@@ -167,6 +167,7 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   const warehouseModules = await Promise.all([import('../../web/warehouse-layer.js'), import('../../web/warehouse-panel.js')]);
   const ids = ['route-map', ...['district', 'station', 'dsp', 'message', 'retry', 'content', 'selection', 'coverage',
     'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
+  ids.push(...['date', 'date-field', 'date-notice', 'date-text', 'date-missing', 'date-latest'].map(id => `map-${id}`));
   ids.push('map-warehouses', 'map-warehouse-message', 'map-warehouse-notice');
   const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
   const doc = { querySelectorAll: () => [], listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, getElementById: id => elements[id], createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
@@ -242,6 +243,7 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
       if (response instanceof Error) throw response;
       return typeof response === 'function' ? response() : response || { ok: true, status: 200, json: async () => url === '/api/capabilities' ? { warehouse_write: true } : { warehouses: [] } };
     }
+    if (url.startsWith('/api/snapshot-days')) return warehouseOptions.daysReply ? warehouseOptions.daysReply(url) : { status: 200, json: async () => ({ available: false }) };
     requests.push({ url, options });
     const reply = replies.shift();
     if (reply instanceof Error) throw reply;
@@ -256,6 +258,107 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   return { doc, leaflet, controls, baselayers, renderers, elements, map, groups, page, requests, replies, reply, warehouseRequests, warehouseReplies, markers, routeMarkers };
 }
 const payload = () => buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
+
+const calendarReply = () => ({ status: 200, json: async () => ({ available: true, days: [
+  { day: '2026-11-08', has_data: true, stations_with_data: ['MOCKA'] },
+  { day: '2026-11-07', has_data: false, stations_with_data: [] },
+] }) });
+
+test('DV-T4 map and ZIP use the selected date, preserve URL context and return to latest', async () => {
+  const urls = [];
+  const { page, doc, elements: e, requests, replies, reply } = await fixture('?station=MOCKA&date=2026-11-08', 206, null,
+    { daysReply: calendarReply, history: { replaceState: (_, __, url) => urls.push(url) } });
+  const link = new Element('a'); link.setAttribute('href', '/?district=mock');
+  doc.querySelectorAll = selector => selector === '.page-nav a' ? [link] : [];
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
+  await page.start();
+  assert.equal(e['map-date'].value, '2026-11-08');
+  assert.equal(e['map-date-notice'].hidden, false);
+  assert.match(e['map-date-text'].textContent, /正在查看 11\/08 的数据/);
+  assert.equal(e['map-date'].children[2].textContent, '11/07（空）');
+  assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock&date=2026-11-08');
+  assert.equal(link.getAttribute('href'), '/?district=mock&date=2026-11-08');
+  replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' })));
+  await page.searchQuery('00002', true);
+  assert.equal(requests.at(-1).url, '/api/route-map/zip?postal_code=00002&date=2026-11-08');
+  replies.push(reply(200, payload())); await e['map-date-latest'].listeners.click();
+  assert.equal(urls.at(-1), '/map?station=MOCKA');
+  assert.equal(link.getAttribute('href'), '/?district=mock');
+  assert.equal(e['map-date-notice'].hidden, true);
+  assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
+  replies.push(reply(200, payload())); e['map-date'].value = '2026-11-07'; await e['map-date'].listeners.change();
+  assert.equal(urls.at(-1), '/map?station=MOCKA&date=2026-11-07');
+  assert.equal(e['map-message'].textContent, '该站点在 11/07 没有数据');
+});
+
+test('DV-T4 partial district, empty dates, unknown calendar date and station 404 are empty states', async () => {
+  const storage = { getItem: key => key === 'nc-ops-console.map-scope' ? 'district' : null };
+  const { page, elements: e, replies, reply } = await fixture('?date=2026-11-08', 206, storage, { daysReply: calendarReply });
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload())); await page.start();
+  assert.equal(e['map-date-missing'].textContent, ' · 当天无数据的站点：MOCKB');
+  assert.equal(e['map-message'].className, 'sr-only');
+  for (const result of [reply(404, { error: 'station_not_found' }), reply(404, { error: 'snapshot_not_found' }),
+    reply(200, { ...payload(), routes: [], features: { type: 'FeatureCollection', features: [] } })]) {
+    e['map-station'].value = 'MOCKB'; replies.push(result); await e['map-station'].listeners.change();
+    assert.equal(e['map-message'].textContent, '该站点在 11/08 没有数据');
+    assert.equal(e['map-message'].className, '');
+  }
+  e['map-station'].value = ''; replies.push(reply(200, payload())); await e['map-station'].listeners.change();
+  e['map-date'].value = '2026-11-07'; replies.push(reply(200, payload())); await e['map-date'].listeners.change();
+  assert.equal(e['map-message'].textContent, '该日无数据');
+  const other = await fixture('?date=2026-01-01', 206, storage, { daysReply: calendarReply });
+  other.replies.push(other.reply(200, { stations: ['MOCKA'] }), other.reply(200, payload())); await other.page.start();
+  assert.equal(other.elements['map-date'].value, '2026-01-01');
+  assert.match(other.elements['map-date'].children.at(-1).textContent, /（空）/);
+  assert.equal(other.elements['map-message'].textContent, '该日无数据');
+});
+
+test('DV-T4 unavailable calendar hides selector and loads latest', async () => {
+  for (const daysReply of [() => ({ status: 200, json: async () => ({ available: false }) }), () => { throw Error('offline'); }]) {
+    const { page, elements: e, requests, replies, reply } = await fixture('?date=2026-11-08', 206, null, { daysReply });
+    replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload())); await page.start();
+    assert.equal(e['map-date-field'].hidden, true);
+    assert.equal(e['map-date-notice'].hidden, true);
+    assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
+  }
+});
+
+test('DV-T4 date changes discard old map and ZIP responses and rebuild DSPs', async () => {
+  const { page, elements: e, replies, reply } = await fixture('?date=2026-11-08', 206, null, { daysReply: calendarReply });
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload())); await page.start();
+  let releaseMap, releaseZip;
+  replies.push(() => new Promise(resolve => { releaseMap = resolve; })); const oldMap = page.loadStation();
+  replies.push(() => new Promise(resolve => { releaseZip = resolve; })); const oldZip = page.searchQuery('00002', true);
+  const next = payload(); next.routes.forEach(route => { route.dsp_name = 'Daily DSP'; });
+  replies.push(reply(200, next)); await e['map-date-latest'].listeners.click();
+  releaseMap(reply(500, { error: 'boundary_invalid' })); releaseZip(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' })));
+  await Promise.all([oldMap, oldZip]);
+  assert.equal(e['map-message'].className, 'sr-only');
+  assert.equal(e['map-zip-panel'].hidden, true);
+  assert.equal(e['map-dsp'].children[1].textContent, 'Daily DSP');
+});
+
+test('DV-T4 district changes reload calendars and discard stale district calendars', async () => {
+  const calendars = [], pending = [];
+  const { page, elements: e, replies, reply } = await fixture('?date=2026-11-08', 206, null, {
+    daysReply: url => { calendars.push(url); return pending.length ? pending.shift()() : calendarReply(); },
+  });
+  replies.push(reply(200, { districts: [
+    { id: 'mock', stations: [{ code: 'MOCKA', has_snapshot: true }] },
+    { id: 'other', stations: [{ code: 'MOCKB', has_snapshot: true }] },
+  ] }), reply(200, payload())); await page.start();
+  let release;
+  pending.push(() => new Promise(resolve => { release = resolve; }));
+  e['map-district'].value = 'other'; const old = e['map-district'].listeners.change();
+  e['map-district'].value = 'mock'; replies.push(reply(200, payload())); await e['map-district'].listeners.change();
+  release({ status: 200, json: async () => ({ available: false }) }); await old;
+  assert.deepEqual(calendars, ['/api/snapshot-days?district=mock', '/api/snapshot-days?district=other', '/api/snapshot-days?district=mock']);
+  assert.equal(e['map-date-field'].hidden, false);
+  assert.equal(e['map-date'].value, '2026-11-08');
+  const empty = payload(); empty.routes = []; empty.features.features = [];
+  replies.push(reply(200, empty)); await page.loadStation();
+  assert.equal(e['map-message'].textContent, '该站点在 11/08 没有数据');
+});
 
 test('MS-T2b Map restores manual preference without saving startup or automatic ZIP switches', async () => {
   let saved = JSON.stringify({ district: 'mock', station: 'MOCKB' }); const writes = [];
