@@ -1,7 +1,7 @@
 import { dspOptions } from './format.js';
 import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
-import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, assignRouteColors } from './map-state.js';
+import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, assignRouteColors, assignGroupColors, dspColorKey } from './map-state.js';
 import { mapText as t, warehouseText, localizeMap } from './map-text.js';
 import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
 
@@ -23,6 +23,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   const updateSelection = next => { selection = next; view.applySelection(selection); panel.applySelection(selection); };
   const deselect = () => { zipSequence++; panel.searchStatus('success'); updateSelection(clearSelection(focus())); };
   const view = createMapView({ leaflet, protomaps, document: doc, fetch: request,
+    onDsp: value => changeDsp(value),
     onColorMode: mode => { colorMode = mode; view.setColorMode(colorMode); panel.setColorMode(colorMode); },
     onZip: properties => {
       zipSequence++; panel.searchStatus('success');
@@ -152,7 +153,9 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
       const routeColors = assignRouteColors(data.features.features);
-      stationData = data; panel.render(data, { focusStation: station, routeColors }); view.render(data, { fitToStation: true, focusStation: station, routeColors }); updateSelection(clearSelection(station));
+      const groupColors = { dsp: assignGroupColors(data.features.features, p => dspColorKey(p.dsp_name)),
+        station: assignGroupColors(data.features.features, p => p.station) };
+      stationData = data; panel.render(data, { focusStation: station, routeColors, groupColors }); view.render(data, { fitToStation: true, focusStation: station, routeColors, groupColors }); updateSelection(clearSelection(station));
       const options = dspOptions(data.routes, station);
       if (!options.includes(dsp)) dsp = null;
       dspSelect.replaceChildren();
@@ -201,14 +204,16 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     const query = element('search').value || '';
     if (classifyQuery(query).kind === 'zip') panel.searchStatus('success', t.retainedZip(query.trim()));
   }
-  dspSelect.addEventListener('change', () => {
+  function changeDsp(value) {
     zipSequence++;
-    dsp = dspSelect.value || null;
+    dsp = value || null;
+    dspSelect.value = dsp || '';
     const route = selection.route && stationData?.routes.find(row => row.route_id === selection.route.route_id);
     if (dsp !== null && selection.route && route?.dsp_name !== dsp) deselect();
     view.setDsp(dsp); panel.setDsp(dsp);
     retainedZipHint();
-  });
+  }
+  dspSelect.addEventListener('change', () => changeDsp(dspSelect.value));
   stationSelect.addEventListener('change', () => {
     scope = stationSelect.value ? 'station' : 'district';
     if (stationSelect.value) selected.station = stationSelect.value;

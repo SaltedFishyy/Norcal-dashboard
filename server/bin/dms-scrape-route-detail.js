@@ -1,3 +1,4 @@
+import { dmsLanguageNotice } from '../src/dms/portrait-page.js';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { access } from 'node:fs/promises';
@@ -54,10 +55,11 @@ export async function runRouteDetailScrape({ args = process.argv.slice(2), env =
     if (result.restorationError) { step = 'capture'; throw result.restorationError; }
     return 0;
   } catch (error) {
-    const allowed = ['NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError'];
+    const allowed = ['DmsLanguageError', 'NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError'];
     const errorType = allowed.includes(error.name) ? error.name : 'Error';
     const detail = errorType === 'Error' ? null : error.message;
-    if (errorType === 'NeedsLoginError') errorLog('请重新运行 npm run dms:login。');
+    if (errorType === 'DmsLanguageError') errorLog(dmsLanguageNotice);
+    else if (errorType === 'NeedsLoginError') errorLog('请重新运行 npm run dms:login。');
     else errorLog(`错误类型：${errorType}；阶段：${step}${detail ? `；原因：${detail}` : ''}`);
     if (runtimeDir) {
       try { await failure({ runtimeDir, station, step, errorType, detail }); }

@@ -52,8 +52,8 @@ for (const [column, value, reason] of [
   [5, NaN, 'price_invalid'], [5, '9usd', 'price_invalid'], [5, '1,000', 'price_invalid'],
   [5, 0, 'price_zero'], [5, '0', 'price_zero'], [5, 900.123, 'price_precision'],
   [19, null, 'date_invalid'], [19, '02/30/2026', 'date_invalid'], [19, '11/1/20217', 'date_invalid'],
-  [19, 46307, 'date_invalid'], [19, '2026-11-01', 'date_invalid'], [20, '10/31/2026', 'end_before_effective'],
-  [20, '02/29/2025', 'date_invalid'], [20, 46308, 'date_invalid'],
+  [19, 46307, 'date_not_date_cell'], [19, '2026-11/01', 'date_invalid'], [20, '10/31/2026', 'end_before_effective'],
+  [20, '02/29/2025', 'date_invalid'], [20, 46308, 'date_not_date_cell'],
 ]) test(`LQ parser rejects ${reason}: column ${column}, ${String(value)}`, () => {
   const cells = syntheticCells(); cells[column] = value;
   const parsed = parse(cells);
@@ -113,4 +113,56 @@ test('LQ extended dates and California header fixtures', () => {
   assert.equal(parseQuotationSheet(duplicateEnd).ok, false);
   const quotation = structuredClone(sfoHeader); quotation[2].push('\u62a5\u4ef7\u65e5\u671f');
   assert.deepEqual(parseQuotationSheet([...quotation, syntheticCells()]).rows, parse(syntheticCells()).rows);
+});
+
+
+test('LQ-T10 accepts four date formats and maps every two-digit year to 20YY', () => {
+  for (const [value, expected] of [
+    ['2/29/2024', '2024-02-29'], ['2024/2/29', '2024-02-29'],
+    ['2024-02-29', '2024-02-29'], ['2024-2-9', '2024-02-09'],
+    ['2/29/24', '2024-02-29'], ['10/26/26', '2026-10-26'],
+    ['1/1/00', '2000-01-01'], ['12/31/99', '2099-12-31'],
+  ]) {
+    const row = syntheticCells(); row[19] = value; row[20] = value;
+    const result = parse(row);
+    assert.deepEqual(result.rejected, [], value);
+    assert.equal(result.rows[0].effectiveFrom, expected, value);
+    assert.equal(result.rows[0].endDate, expected, value);
+  }
+});
+
+test('LQ-T10 rejects invalid dates and distinguishes numeric cells and placeholders in both columns', () => {
+  for (const column of [19, 20]) for (const [value, reason] of [
+    ['2025-02-29', 'date_invalid'], ['2/29/25', 'date_invalid'],
+    ['2026-13-1', 'date_invalid'], ['2026-4-31', 'date_invalid'],
+    ['0/1/26', 'date_invalid'], ['1/0/26', 'date_invalid'],
+    ['26-1-1', 'date_invalid'], ['1/1/026', 'date_invalid'],
+    ['2026/1-1', 'date_invalid'], ['2026-1/1', 'date_invalid'],
+    ['2026-11-01T00:00:00Z', 'date_invalid'], ['46118', 'date_invalid'],
+    [46118, 'date_not_date_cell'], [0, 'date_not_date_cell'],
+    [NaN, 'date_not_date_cell'], [' ### ', 'date_placeholder'],
+  ]) {
+    const row = syntheticCells(); row[19] = '1/1/00'; row[column] = value;
+    const result = parse(row);
+    assert.equal(result.rows.length, 0);
+    assert.equal(result.rejected[0].reason, reason, `${column}: ${value}`);
+  }
+});
+
+test('LQ-T10 OAR 40-plus headers map all 14 synthetic prices with bounded ranges', () => {
+  for (const upper of [1000, 999999]) {
+    const headers = structuredClone(sfoHeader);
+    headers[2].splice(5, 7, '0 - 1(Ib)', '1-5(Ib)', '5-10(Ib)', '10-20(lb)', '20-30(lb)', '30-40(lb)', `40-${upper}(Ib)`);
+    headers[2][18] = `续票价格 40-${upper}(Ib)/Quotation for second and subsequent pieces`;
+    const result = parseQuotationSheet([...headers, syntheticCells()]);
+    assert.deepEqual(result.rows, parse(syntheticCells()).rows);
+    assert.equal(Object.keys(result.rows[0].first).length + Object.keys(result.rows[0].additional).length, 14);
+    const explicit = structuredClone(headers); explicit[2][11] = `首票价格 40-${upper}(lb)`;
+    assert.deepEqual(parseQuotationSheet([...explicit, syntheticCells()]).rows, result.rows);
+    for (const column of [11, 18]) for (const label of ['40-999(lb)', '140-1000(lb)', '40-1000.5(lb)']) {
+      const invalid = structuredClone(headers);
+      invalid[2][column] = `${column === 11 ? '首票价格' : '续票价格'} ${label}`;
+      assert.equal(parseQuotationSheet(invalid).error, 'header_invalid', label);
+    }
+  }
 });

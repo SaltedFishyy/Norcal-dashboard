@@ -52,6 +52,8 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
 
 仓库管理升级顺序：先用 `nc_admin` 创建 warehouse 角色（见 [Warehouse spec 第 13 节 T0](features/warehouses.md#13-实现记录)），再由获批的部署操作执行 migration 003，然后重启服务。T2 实现不执行这些部署动作。Worker 的 `.env` 可配置 `NC_DB_WAREHOUSE_URL`，测试使用 `NC_TEST_DB_WAREHOUSE_URL`，只给 Worker（3100）使用，不放进 readonly.env。3100 固定只允许 loopback Host。
 
+每日自动刷新 / 线路历史升级顺序（AR-T4，2026-11-11 已执行）：`pg_dump -Fc --schema=nc` 备份 → `npm run db:migrate` 执行 008（`schedule` trigger、`v_route_history_daily`）→ repo `.env` 设置 `AUTO_REFRESH_TIME=17:00`（空或 `off` 关闭，仅 `DATA_SOURCE=db` 生效）、`AUTO_REFRESH_TZ=America/Los_Angeles` → 重启 Worker 和只读服务。Worker 每天按片区串行刷新，状态写入 runtime 目录 `auto-refresh-status.json`，3100 显示「自动刷新」行；只读 3000 通过 DB 显示失败提示，不读取 runtime 文件。规则见 `docs/features/auto-refresh.md`。
+
 报价同步升级顺序（LQ-T5，2026-11-06 已在正式库执行）：管理员先创建 `nc_quotation` 登录角色（无特权、无成员关系），再 `npm run db:migrate` 执行 005 / 006 / 007；`.env` 配置上表 Lark 变量；`npm run quotes:lark-check` → `npm run quotes:sync-lark -- --dry-run` 核对计划 → `npm run quotes:sync-lark` 首次同步；最后设置 `LARK_QUOTATION_SYNC_MINUTES` 并重启 Worker。Worker 启动后 60 秒首跑，之后每次完成后按间隔串行执行；每次尝试写入 runtime 目录 `quotation-sync-status.json`，3100 数据状态显示「报价同步」行。读取 / 表头失败不改库，保留上次成功数据。只读 3000 不接触 Lark 凭据。
 
 启动检查分级：3100 的 warehouse 权限检查通过且使用 DB 数据源时开启写入；只有 `missing_warehouse_privilege`（表或视图不存在、授权不足）或连接失败时，记录一行日志并关闭写入，服务正常启动；任何权限过大问题拒绝启动，只输出一行中文原因。3000 LAN 的 reader 隔离检查在既有 `canWriteRuns` 检查之后执行：只有缺少 warehouse 权限时仍启动（视图未就绪时仓库 GET 返回 503），权限过大时拒绝启动。3000 局域网模式下出现 warehouse 凭据时拒绝启动；本机模式忽略该凭据。
@@ -141,7 +143,7 @@ $basePath = Join-Path $env:LOCALAPPDATA 'nc-ops-console'
 ## 刷新、登录与故障恢复
 
 - 在公用电脑打开 `http://127.0.0.1:3100`，选择范围并确认刷新。其他电脑的 3000 入口只读，浏览不会产生 DMS 请求。
-- DMS 登录过期：在**交互式终端**运行 `npm run dms:login`，在浏览器完成登录后回到终端按 Enter。Claude Code 的 `!` 方式不能完成该交互。登录后重新刷新，不自动重试失败抓取。
+- DMS 登录过期：在**交互式终端**运行 `npm run dms:login`，在浏览器完成登录后回到终端按 Enter。登录时确认界面为中文（右上角语言选择中文）。scraper 遇到英文界面会自动尝试切换。Claude Code 的 `!` 方式不能完成该交互。登录后重新刷新，不自动重试失败抓取。
 - 正式命令行刷新只用 `npm run dms:scrape-stations`（需要时显式传 `--stations`）。旧的 `dms:scrape`、`dms:scrape-route-detail`、`dms:scrape-route-details` 只写 JSON，不能用于正式 DB 刷新。
 - run 卡在 running：先确认没有任何抓取运行，再执行 `npm run db:abandon-run -- <run_id> --confirm-no-scrape-running`。`<run_id>` 是实际 UUID，该命令只把 running 改为 abandoned；不要在活跃抓取期间执行。
 - 残留 `scrape.lock`：Windows 可能复用 PID，存活检测不足以证明抓取仍在进行。先确认 Worker 进度、相关进程及命令行均无刷新，再人工删除**实际 runtime 目录**中的 `scrape.lock`。不要只依据 PID 或自动删除锁；锁损坏也需人工确认。

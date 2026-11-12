@@ -3,6 +3,25 @@ import assert from 'node:assert/strict';
 import { createTestDb, dbSkip } from './db-helpers.js';
 import { connectDb } from '../src/db/connection.js';
 import { createDbBatchSink } from '../src/db/batch-db-sink.js';
+
+test('SC4 dual sink omits runtime skipped station and retains its active snapshot', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t);
+  const connect = () => connectDb('NC_TEST_DB_SCRAPER_URL', { schema: db.schema });
+  const prior = createDbBatchSink({ connect, requestedStations: ['MFR01'] });
+  await prior.startRun({ run_id: 'mock-history', started_at: '2026-10-07T00:00:00Z' });
+  await prior.activateStationSnapshot({ station: 'MFR01', stationSnapshot: {
+    fetched_at: '2026-10-07T00:00:00Z', source: 'mock', total: 0, rows: [] } });
+  await prior.finishRun({ record: { status: 'completed', end_time: '2026-10-07T00:00:00Z', request_count: 0 } });
+  const before = (await db.owner.query("SELECT active_snapshot_id FROM stations WHERE code='MFR01'")).rows;
+  const h = batchFixture({ missingStations: ['MFR01'] });
+  assert.equal(await h.run({ env: { DMS_BASE_URL: 'https://example.invalid/areaDepiction', DB_DUAL_WRITE: '1' },
+    dbSinkFactory: metadata => createDbBatchSink({ ...metadata, connect }) }), 0);
+  assert.deepEqual((await db.owner.query("SELECT active_snapshot_id FROM stations WHERE code='MFR01'")).rows, before);
+  assert.equal((await db.owner.query(`SELECT s.* FROM scrape_run_stations s JOIN scrape_runs r ON r.id=s.run_id
+    WHERE s.station_code='MFR01' AND r.json_run_id <> 'mock-history'`)).rowCount, 0);
+  assert.deepEqual(h.files.at(-1).record.skipped, [{ code: 'MFR01', district: null, reason: 'not_in_dms_menu' }]);
+  assert.equal((await db.owner.query("SELECT * FROM scrape_runs WHERE status='completed'")).rowCount, 2);
+});
 import { createDualBatchSink, DbStoreError } from '../src/batch/dual-batch-sink.js';
 import { batchFixture } from './multi-station-fixtures.js';
 

@@ -8,11 +8,14 @@ import { startWorkerServer } from '../src/worker/worker.js';
 import { setupWarehouses, WarehousePrivilegeError } from '../src/warehouses/warehouse-setup.js';
 import { createQuotationSyncScheduler, quotationSyncInterval } from '../src/quotations/quotation-sync-scheduler.js';
 import { runScheduledQuotationSync } from '../src/quotations/quotation-sync-job.js';
+import { autoRefreshConfig, createAutoRefreshScheduler } from '../src/worker/auto-refresh-scheduler.js';
+import { readDistrictConfig } from '../src/store/districts-file.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 export async function runWorker({ env = process.env, log = console.log, errorLog = console.error,
   start = startWorkerServer, setup = setupWarehouses,
-  makeScheduler = createQuotationSyncScheduler, syncJob = runScheduledQuotationSync } = {}) {
+  makeScheduler = createQuotationSyncScheduler, syncJob = runScheduledQuotationSync,
+  makeAutoRefreshScheduler = createAutoRefreshScheduler } = {}) {
   const source = env.DATA_SOURCE ?? 'json';
   const value = env.WORKER_PORT ?? '3100';
   const port = Number(value);
@@ -29,6 +32,14 @@ export async function runWorker({ env = process.env, log = console.log, errorLog
     const intervalMinutes = quotationSyncInterval(env, source, log);
     const server = await start({ port, runtimeDir: runtime.path, repoRoot, dataSource, log, warehouses,
       quotationSyncIntervalMinutes: intervalMinutes });
+    const autoConfig = autoRefreshConfig(env, source, log);
+    if (autoConfig.enabled) {
+      const scheduler = makeAutoRefreshScheduler({ config: autoConfig, launcher: server.refreshLauncher,
+        readDistricts: () => readDistrictConfig(), runtimeDir: runtime.path, log });
+      server.autoRefreshScheduler = scheduler;
+      server.once('close', () => scheduler.stop());
+      await scheduler.start();
+    }
     if (intervalMinutes > 0) {
       const scheduler = makeScheduler({ intervalMinutes, log,
         runOnce: () => syncJob({ env, runtimeDir: runtime.path }) });

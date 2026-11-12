@@ -16,6 +16,8 @@ export function createDbBatchSink({ connect, requestedStations, options = {}, tr
   };
   const writeState = async state => {
     for (const [station, value] of Object.entries(state.stations)) {
+      // Pending stations have not passed menu validation; runtime skips have no DB row.
+      if (value.status === 'pending' || state.skipped?.some(entry => entry.code === station)) continue;
       await client.query(`INSERT INTO scrape_run_stations
         (run_id, station_code, status, success_count, cached_count, failed_count) VALUES ($1,$2,$3,0,0,0)
         ON CONFLICT (run_id,station_code) DO UPDATE SET status=EXCLUDED.status`, [id, station, value.status]);

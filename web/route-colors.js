@@ -1,10 +1,9 @@
-// Frozen since RM2: changing the palette length changes every Route's color.
-// RM3 light-map adjustments (same hue families, same slots):
-// #ffffb3 -> #c4a62a, #fccde5 -> #d875a8, #ccebc5 -> #71ad68, #ffed6f -> #d9b52c.
+// MVR replaces all color values once with an equal-lightness OKLCH palette.
+// The 19 slots and FNV-1a hash remain unchanged since RM2.
 export const palette = Object.freeze([
-  '#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f', '#e5c494',
-  '#8dd3c7', '#c4a62a', '#bebada', '#fb8072', '#80b1d3', '#fdb462', '#b3de69', '#d875a8',
-  '#bc80bd', '#71ad68', '#d9b52c', '#6ed0ed',
+  '#57a3ef', '#e27897', '#9da837', '#9292f0', '#e57d64', '#60b56b', '#bd83d9',
+  '#d68c33', '#00b9a0', '#da7ab0', '#b49f23', '#779bf2', '#e6797e', '#81af50', '#a98ae7',
+  '#e0834a', '#35b886', '#cd7ec6', '#c79521',
 ]);
 
 export function routeColor(routeId) {

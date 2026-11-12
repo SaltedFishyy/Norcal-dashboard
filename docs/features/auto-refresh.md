@@ -1,6 +1,6 @@
 # DMS 每日自动刷新（Auto Refresh，AR）
 
-状态：**Approved**（Product Owner 2026-11-11 批准需求与方案；**尚未授权进入实现**）
+状态：**Approved — 已实现（DB-T1、AR-T1–T3，2026-11-11），待上线（AR-T4：正式库 migration 008、配置、重启 Worker，需 Product Owner 确认）和 UI 签字**
 
 ## 1. 目标
 
@@ -80,4 +80,21 @@
 
 ## 9. 实现记录（Implementation Notes）
 
-（待填写）
+- **AR-T3（2026-11-11）**：Worker 增加 `capabilities.auto_refresh: true`；在现有 `web/data-status.js` 中加入自动刷新状态行，沿用报价同步的首次加载及 60 秒轮询，显示 Pacific 上次 / 下次时间、中文结果、成功片区数和最多 3 个失败片区及中文原因。只读服务没有该 capability，不请求 Worker 状态接口。DB 数据源新增 `readScheduleRuns({ since })`，只经 `v_runs` 查询近期 schedule run 和 completed 恢复记录；`summarizeAutoRefresh` 纯函数按最近 48 小时、Pacific 最近日期和片区最后一次尝试汇总，后续同片区 / all 范围成功会清除失败。`/api/freshness` 的 DB `run.auto_refresh` 返回汇总或 null；JSON 模式保留 `run: null`。自动失败提示优先于通用失败提示，登录过期用现有登录提示，running 保留正在更新提示；更新记录的“来源：每日自动”通过测试确认。
+  - 验证：新增 fake DOM 状态文案 / 提示优先级 / 轮询 / 只读隐藏 / 更新记录测试、汇总纯函数与 HTTP 组装测试，以及使用 `createTestDb` 的读取方法测试。`node --test server/test/`（不加载 `.env`）共 819 项：762 通过、55 跳过、2 失败；失败仍为 CD-AC30 / CD-AC31 强制要求未配置的 `NC_TEST_DB_*`，新增 DB 测试同样因缺配置跳过，待 Claude 本机完整验证。`git diff --check` 通过；项目无 lint / build 命令。使用现有 Playwright 和合成临时数据启动临时随机端口 API，验证 Route Profile / Route Map 自动刷新状态行、更新记录弹窗及 Leaflet 容器，浏览器 pageerror 为 0；未验证真实 DMS 数据。没有新增前端文件、import 路径或依赖，没有访问 DMS、读取 `.env` / 正式 runtime、重启服务、提交或推送。
+  - 本地预览：在现有服务运行时打开 `http://127.0.0.1:3100/` 或 `http://127.0.0.1:3100/map` 检查 Worker 状态行，打开 `http://127.0.0.1:3000/` 或 `http://127.0.0.1:3000/map` 检查只读失败提示和更新记录；真实状态取决于已配置的调度器与 DB 记录。此次没有改变配置或重启服务，若现有进程尚未加载改动，需由获授权人员另行安排；UI 仍待 Product Owner 预览签字。
+
+- **AR-T2 第 1 轮修复（2026-11-11）**：定时运行和启动补跑携带计划日期，跨日或达到 23:00 时仅记录 `auto_refresh_missed` 并安排下一次；登录过期保留本轮已有失败结果，仅标记尚未运行的片区；重启收尾仅修改 `pending` 片区，保留已有失败原因；损坏 JSON 或缺少日期 / 片区数组的状态记录 `auto_refresh_status_invalid` 后按无记录继续调度，读取 I/O 错误仍关闭调度。新增 4 项回归测试（含首轮 / 重试轮登录停止、睡眠跨日 / 截止及无效状态形状），原有 12 项断言未改，定向测试 16/16 通过；全量测试仍仅 CD-AC30 / CD-AC31 因缺少 `NC_TEST_DB_*` 失败，`git diff --check` 通过。
+
+- **AR-T2（2026-11-11）**：新增 `server/src/worker/auto-refresh-scheduler.js`，提供 `autoRefreshConfig` 和可注入时钟、定时器、launcher、片区读取器的 `createAutoRefreshScheduler`。按配置片区顺序串行调用共享 launcher，支持两轮失败重试、登录立即停止、繁忙等待及截止放弃、启动补跑、同日防重复和当天中断记录收尾；状态通过 `writeFileAtomic` 写入 runtime 的 `auto-refresh-status.json`。用 `Intl.DateTimeFormat` 搜索目标本地日期 / 时间对应的 UTC 分钟，不写死时区偏移；定时器长延迟分段。导出重试、繁忙检查、计划时间后两小时截止、23:00 补跑截止及两分钟补跑延迟常量。Worker 启动时仅在配置启用且 DB 模式创建调度器，关闭时取消等待，不终止子进程；新增 `GET /api/auto-refresh/status`，关闭时返回 `{ enabled: false }`。`.env.example` 保持默认关闭。新增 12 项测试并注册到 `server/test/index.js`，涵盖调度规则、两个夏令时切换日、启动 / 完成异常、生命周期与 HTTP 状态接口；测试仅使用临时目录和假 launcher。定向测试 12/12 通过；按 brief 执行 `node --test server/test/`（不加载 `.env`）：810 项中 754 通过、54 跳过、2 失败，失败为现有 CD-AC30 / CD-AC31 缺少强制要求的 `NC_TEST_DB_*`，待本机补跑 DB 检查。项目无 lint / build 命令。未修改前端、需求或验收标准，未读取 `.env` 或正式 runtime，未访问 DMS、抓取、执行迁移、重启服务或提交 / 推送。
+
+- **AR-T1（2026-11-11）**：新增 `createRefreshLauncher`，集中管理范围预览、启动预留、锁检查、启动进度、子进程及日志转发；Worker 的刷新接口复用 launcher，并通过 `server.refreshLauncher` 暴露给后续调度器。`status()` 提供 `{ busy, progress }`，HTTP 状态投影仍由 Worker 结合最近 DB run 完成。`start({ scope, trigger })` 接受 `ui` / `schedule`，成功返回 `done`；退出或 `error` 后读取最终进度，缺失、不可读或仍在运行时返回 `stopped` / `process:Exited`；`error` 事件的 `exit_code` 为 `null`。CLI 解析、最近抓取查询和更新记录来源映射已支持 `schedule`。新增 launcher、CLI trigger 和 DB 最近 run 测试，未修改现有 Worker 测试断言。按 brief 使用 `node --test server/test/`（不加载 `.env`）：798 项中 742 通过、54 跳过、2 失败；失败为现有 CD-AC30 / CD-AC31 强制要求 `NC_TEST_DB_*` 配置，DB 集成验证待本机补跑。未访问 DMS、未运行真实抓取、未重启服务或执行迁移。
+
+### AR-T4 — 上线（2026-11-11，Product Owner 批准第 1–3 步）
+
+- 正式库备份：`pg_dump -Fc --schema=nc` → `%LOCALAPPDATA%\nc-ops-console\runtime-data\backups\nc-before-008-2026-11-11T23-49-16-172Z.dump`（753 KB，含 18 张表数据，已用 `pg_restore --list` 核对）。
+- `npm run db:migrate`：001–007 skipped，008 applied。reader 读取 `v_route_history_daily`：1,888 行、12 个日期、533 条 Route（2026-10-07 至 2026-11-05）。
+- repo `.env` 新增 `AUTO_REFRESH_TIME=17:00`、`AUTO_REFRESH_TZ=America/Los_Angeles`（未显示其他内容）。
+- 15:51 停止 Worker / 只读服务的 Node 进程，守护脚本 5 秒后自动重启。`/api/auto-refresh/status`：enabled，`next_run_at` 2026-11-12T01:00Z（= 11-11 17:00 PST）；3000 `/api/route-history` 返回真实历史。
+- 上线时发现最近一次 run（2026-11-10）以 `capture:NeedsLoginError` 停止：首次 17:00 运行前需要 `npm run dms:login`，否则会以 `needs_login` 停止。
+- 待办：观察首次 17:00 运行并记录结果（AR-AC8）。

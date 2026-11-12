@@ -420,7 +420,7 @@ Product Owner 要求：不直接改为“失败就跳过”；先处理定位 / 
 验收标准：
 - RD3-15-AC1：按钮位置在两次检查之间移动时，不点击，继续轮询；稳定后只点击一次。
 - RD3-15-AC2：第一次点击超时，且观察期间没有请求、没有弹窗 → 重新定位并点击一次；成功后继续抓取，记录 `click_retry: 1`。
-- RD3-15-AC3：第一次点击超时，但观察期间有 `/prod-api/` 请求或出现弹窗 → 立即停止，不重试。
+- RD3-15-AC3：第一次点击超时，但观察期间有 `/prod-api/` 请求或出现弹窗 → 立即停止，不重试。（已被 RD3-16 修改，见下节。）
 - RD3-15-AC4：重试后仍失败 → 停止，抛出 `SelectorError`，诊断中 `click_retry: 1`，并有 `click_wait_reason`。每条 Route 的点击次数不超过 2。
 - RD3-15-AC5：`click_wait_reason` 分类正确，没有原始文本和 URL；现有 RD3 / RD4 / 多站点测试全部通过。
 - RD3-15-AC6：真实验证（需要 Product Owner 同意后才访问 DMS）：只对 SEA01 运行必要范围的批次，确认 SEA01-008 能抓取，或者在新的诊断中得到具体的 `click_wait_reason`。
@@ -435,6 +435,34 @@ Product Owner 要求：不直接改为“失败就跳过”；先处理定位 / 
 - AC1–AC5 在 doubles、合成诊断及相关回归范围内通过；AC6 未执行，待后续授权真实验证。未访问 DMS、运行 dms:* / 刷新命令、修改数据库、写入凭据、commit、push 或部署。保留现有 RM12 修改及原 RD3-15 需求 / 验收标准；工作期间新出现的两个 WA geo 文件未作改动。
 
 - RD3-15-AC6 真实验证（2026-10-29，Product Owner 同意后由 Claude 执行）：`dms-scrape-stations --stations SEA01 --new-run`，run `f46835e1-57b2-4421-bee0-9a0f687be801`。SEA01 completed，23 条 Route（新抓 2 条：SEA01-008、SEA01-014；cache 跳过 21 条），完整性检查通过，定位全部是 L1，没有用到重试，没有安全停止。批次共 92 个请求，已恢复原 Station，scrape lock 已释放。SEA01-008 这次第一次点击就成功了，所以无法单独证明是稳定性检查起的作用（原来的失败也可能是偶发的）。如果以后再失败，诊断中的 `click_wait_reason` 会给出具体原因。
+
+---
+
+## RD3-16 — 点击超时但已生效时等待弹窗（Approved，Product Owner 2026-11-05）
+
+背景：2026-11-05 全量刷新在 LAX01-006（route_id 18）的「画像详情」阶段因 `locator.click: Timeout 3000ms exceeded.` 停止，记录为 `capture:SelectorError`、`click_retry: 0`、`click_wait_reason: unknown`。Claude 已确认：10:18:19 进入该阶段，10:18:23 出现 7 个详情请求，同时 click 报超时，说明点击已送达。当天「每页条数」耗时从前一天约 0.6 秒变为约 6 秒。失败诊断 JSON 写入成功，但截图保存超时。本任务不重新访问真实 DMS 或 runtime 进行调查。
+
+规则变化：RD3-15 第 3 条及 AC3 的“发现请求或弹窗立即停止”改为“不重新点击，继续等待画像弹窗”。复用 `hasVisiblePortraitModal`，每 200ms 通过 `guarded` 轮询，最多等待 30 秒；出现则保留实际定位方法、列表恢复回调、`click_retry`、`click_wait_reason`，并返回 `click_late: true`。随后仍由 `confirmPortraitRoute` 校验 Route Name；超时抛出原错误，名称不匹配仍按现有规则停止。没有请求和弹窗时仍只重试一次，每条 Route 最多点击两次。登录、熔断、请求上限及中断守卫不变。
+
+`click_wait_reason` 按多行错误中最后一条可匹配行分类，保留原六类，新增 `navigation_wait`（waiting for scheduled navigations）及 `click_dispatched`（click action done / performing click action）；只输出枚举，不保存原文或 URL。成功的晚到点击元数据写入既有路区批次 `routes[]`，不写失败诊断。截图 timeout 改为 8000ms，诊断总上限 9000ms，仍为 best-effort。
+
+验收标准：
+
+- **RD3-16-AC1** 点击超时，但已有详情请求或弹窗时，不重新点击；弹窗在 30 秒内出现且路区名正确，就继续抓取并记录 `click_late: true`。
+- **RD3-16-AC2** 30 秒内弹窗没有出现，或路区名不符时，按现有方式停止。每条 Route 点击次数仍不超过 2。
+- **RD3-16-AC3** 没有请求、也没有弹窗时，重试一次的逻辑不变；安全守卫不受影响。
+- **RD3-16-AC4** `click_wait_reason` 按最后一条匹配的 call log 行分类，新增 `navigation_wait`、`click_dispatched`，只输出枚举值。
+- **RD3-16-AC5** 诊断截图 timeout 为 8000ms，总上限 9000ms。
+- **RD3-16-AC6** spec 已更新，`npm test` 全部通过，`git diff --check` 通过。
+
+### RD3-16 实现记录（Implementation Notes，2026-11-05）
+
+- 共用画像点击流程在首次或唯一一次重试的点击报错后，发现请求或弹窗则等待，不再发送点击。保留实际 L1/L2/L3/L5 方法和 L5 恢复回调；成功后的名称校验及详情抓取沿用现有流程。
+- `server/bin/dms-scrape-route-details.js` 将 `click_late`、`click_retry`、`click_wait_reason` 保存到既有批次运行记录的 `routes[]`。缓存 schema、数据库、API 和前端未变；没有发现其他分类白名单需要更新。
+- 两个批次入口的 `pageFailureTimeout` 改为 9500ms，避免原外层 5000ms 上限提前关闭页面、截断新的 8000ms 截图和 9000ms 诊断上限；共用 session 默认值不变。
+- 合成 page doubles 覆盖晚到请求/弹窗、不重复点击、L5 恢复、30 秒超时、名称不符、登录和熔断；运行记录测试验证成功不写诊断，mock timers 验证诊断总上限。
+- `npm.cmd test`（Windows 下的 npm test）：677/677 通过；`git diff --check` 通过，只有 LF/CRLF 提示。未配置 lint/build 命令，没有新增依赖。AC1–AC5 由合成测试验证，AC6 通过；未执行真实 DMS 或浏览器人工检查。
+- 未访问真实 DMS、运行 dms:*、读写真实 session/runtime、重启服务、写入凭据、commit、push 或部署；保留既有无关改动。
 
 ---
 

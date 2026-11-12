@@ -42,6 +42,26 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
   };
   return {
     source: 'db',
+    readRouteHistory: ({ routeId, days, today }) => read(async client => {
+      const rows = (await client.query(`SELECT day::text AS day, station, route_name, dsp_name,
+        pickup_volume, pph, first_mile_distance, zip_count, route_difficulty, postal_codes
+        FROM v_route_history_daily WHERE route_id=$1 AND day > $2::date - $3::integer
+        ORDER BY day`, [routeId, today, days])).rows.map(row => ({ ...row,
+        ...Object.fromEntries(['pickup_volume', 'pph', 'first_mile_distance', 'zip_count']
+          .map(field => [field, row[field] == null ? null : Number(row[field])])) }));
+      // Metadata spans all history, even when the requested window is empty.
+      const metadata = (await client.query(`WITH history AS (
+          SELECT day, route_name FROM v_route_history_daily WHERE route_id=$1
+        ), current_name AS (SELECT route_name FROM history ORDER BY day DESC LIMIT 1)
+        SELECT (SELECT min(day)::text FROM history) AS first_seen,
+          (SELECT max(day)::text FROM history) AS last_seen,
+          (SELECT max(day)::text FROM v_route_history_daily) AS latest_day,
+          ARRAY(SELECT route_name FROM history
+            WHERE route_name IS DISTINCT FROM (SELECT route_name FROM current_name)
+            GROUP BY route_name ORDER BY max(day) DESC, route_name) AS former_names`, [routeId])).rows[0];
+      return { rows, firstSeen: metadata.first_seen, lastSeen: metadata.last_seen,
+        latestDay: metadata.latest_day, formerNames: metadata.former_names };
+    }),
     readCurrentFirstPrices: () => read(async client => (await client.query(
       'SELECT route_id,postal_code,price FROM v_route_quotation_first_0_1lb')).rows.map(row => ({
       route_id: Number(row.route_id), postal_code: row.postal_code, price: row.price == null ? null : Number(row.price) }))),
@@ -65,8 +85,12 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
       'SELECT * FROM v_warehouses WHERE ($1::text IS NULL OR district_id=$1) ORDER BY warehouse_name', [districtId ?? null])).rows),
     readRuns: ({ limit }) => read(async client =>
       (await client.query('SELECT * FROM v_runs ORDER BY started_at DESC,id DESC LIMIT $1', [limit])).rows),
+    readScheduleRuns: ({ since }) => read(async client =>
+      (await client.query(`SELECT id,trigger,status,scope,stop_reason,started_at FROM v_runs
+        WHERE started_at >= $1 AND (trigger='schedule' OR status='completed')
+        ORDER BY started_at DESC,id DESC`, [since])).rows),
     readLastScrapeRun: () => read(async client =>
-      (await client.query("SELECT * FROM v_runs WHERE trigger IN ('cli','ui') ORDER BY started_at DESC,id DESC LIMIT 1")).rows[0] ?? null),
+      (await client.query("SELECT * FROM v_runs WHERE trigger IN ('cli','ui','schedule') ORDER BY started_at DESC,id DESC LIMIT 1")).rows[0] ?? null),
     canWriteRuns: () => read(async client =>
       (await client.query("SELECT has_table_privilege('scrape_runs','INSERT') AS can_write")).rows[0].can_write),
     readRouteProfiles: () => read(async client => {

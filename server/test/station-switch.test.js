@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readCurrentStation, switchStation, StationSwitchError, assertCurrentStation } from '../src/dms/station-switch.js';
+import { readCurrentStation, readHeaderOrigin, restoreHeaderOrigin, switchStation, StationSwitchError, StationNotInMenuError, assertCurrentStation } from '../src/dms/station-switch.js';
 import { stationPage } from './multi-station-fixtures.js';
 import { diagnosticMessage } from '../src/dms/batch-diagnostics.js';
 test('MS switch uses exact header and locator menu, listens before clicking, and restores', async () => {
@@ -71,4 +71,45 @@ test('MS strict header check waits for visibility with five second bound and ret
 test('MS observed automatic list unsuccessful payload stops even with HTTP 200', async () => {
   const h = stationPage({ mutateBody: value => ({ ...value, success: false }) });
   await assert.rejects(switchStation(h.context, 'MFR01'), /自动列表响应未成功/);
+});
+
+ test('SC4 missing target closes an expanded station menu without switching', async () => {
+  const h = stationPage({ missingStations: ['MFR01'] });
+  await assert.rejects(switchStation(h.context, 'MFR01'), StationNotInMenuError);
+  assert.equal(h.menuOpen, false); assert.equal(h.station, 'SFO01'); assert.equal(h.requests, 0);
+  assert.equal(h.events.filter(e => e.startsWith('click:')).length, 2);
+});
+for (const options of [{ menuVisible: false }, { closeMenu: false }, { closeChangesHeader: true }])
+ test('SC4 unsafe missing target remains a fatal switch error ' + JSON.stringify(options), async () => {
+  const h = stationPage({ missingStations: ['MFR01'], ...options });
+  await assert.rejects(switchStation(h.context, 'MFR01'), e => e instanceof StationSwitchError && !(e instanceof StationNotInMenuError));
+  assert.equal(h.requests, 0);
+});
+
+for (const original of ['', '<script>', 'A'.repeat(41)]) test(`SC5 rejects invalid origin ${original}`, async () => {
+  const h = stationPage({ original });
+  await assert.rejects(readHeaderOrigin(h.context), StationSwitchError);
+  assert.equal(h.requests, 0);
+});
+test('SC5 label origin switches strictly and SC4 missing station preserves label', async () => {
+  const h = stationPage({ original: 'GOFO-EXPRESS' });
+  assert.deepEqual(await readHeaderOrigin(h.context), { kind: 'label', value: 'GOFO-EXPRESS' });
+  await assert.rejects(readCurrentStation(h.context), StationSwitchError);
+  await switchStation(h.context, 'MFR01');
+  await assertCurrentStation(h.context, 'MFR01');
+  const missing = stationPage({ original: 'GOFO-EXPRESS', missingStations: ['MFR01'] });
+  await assert.rejects(switchStation(missing.context, 'MFR01'), StationNotInMenuError);
+  assert.equal(missing.station, 'GOFO-EXPRESS');
+  assert.equal(missing.requests, 0);
+});
+test('SC5 label restoration escapes regex punctuation and confirms header', async () => {
+  const h = stationPage();
+  // The synthetic locator decodes regex escapes as the browser matches literal text.
+  const locator = h.page.locator;
+  h.page.locator = selector => ({ ...locator(selector), filter: options => {
+    if (options.hasText) options = { ...options, hasText: new RegExp(options.hasText.source.replaceAll('\\.', '.')) };
+    return locator(selector).filter(options);
+  } });
+  assert.equal(await restoreHeaderOrigin(h.context, { kind: 'label', value: 'GOFO.EXPRESS' }), true);
+  assert.equal(h.station, 'GOFO.EXPRESS');
 });

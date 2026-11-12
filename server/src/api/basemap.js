@@ -1,6 +1,6 @@
 import { pipeline } from 'node:stream/promises';
 
-export const basemapPaths = new Map(['us', 'norcal', 'socal', 'mountain', 'pnw', 'az', 'hawaii', 'ops'].map(name => [`/basemap/${name}.pmtiles`, name]));
+export const basemapPaths = new Map(['us', 'norcal', 'socal', 'mountain', 'pnw', 'az', 'hawaii', 'ops', 'service'].map(name => [`/basemap/${name}.pmtiles`, name]));
 
 export function parseRange(value, size) {
   const match = /^bytes=(\d*)-(\d*)$/.exec(value);

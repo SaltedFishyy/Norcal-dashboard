@@ -20,6 +20,10 @@
 
 ### PostgreSQL 存储基础设施（Central DB P2 / CD-T2）
 
+- DB-T1，migration `008_route_history.sql`：**代码中已定义，未部署到正式库**。`scrape_runs.trigger` 新增 `schedule`（每日自动刷新，见 [Auto Refresh](features/auto-refresh.md) 第 5 节），保留 `cli`、`ui`、`json_import`。
+- 新视图 `v_route_history_daily` 来源为已有 `station_snapshots` 与 `snapshot_routes.profile`（DMS 浏览器自动化或 JSON 导入的历史快照）；只取 `active` / `superseded`。按 `coalesce(activated_at, created_at)` 换算 `America/Los_Angeles` 得到 `day`，每站每 Pacific 日取最后一个 snapshot，时间相同按 id DESC 决定；先选 snapshot，再展开 Route，不补齐缺失日期或已消失 Route。
+- 历史视图列：`day`（date）、`station`（station_code，text）、`snapshot_id`（bigint）、`snapshot_at`（上述快照时间，timestamptz）、`route_id`（bigint）、`route_name`、`dsp_name`、`pickup_volume`、`pph`、`first_mile_distance`、`zip_count`、`route_difficulty`、`postal_codes`。三个指标仅接受 JSON number 并投影为 numeric，否则 NULL；名称及难度为 text，难度沿用现有 profile 文本。ZIP 数组转 text[] 并保留 ZIP 字符串，`zip_count` 为数组长度；非数组两列均为 NULL，空数组长度为 0。不暴露 raw；`snapshot_at` 表示历史数据时间，不代表实时数据。
+- 新索引 `snapshot_routes_route_id_idx` 覆盖 `snapshot_routes(route_id)`。新视图撤销 PUBLIC 权限，向 scraper、reader 授予 SELECT；reader 不获得底层表权限。
 - District 数据库层（DA-T1，migration `004_districts.sql`）：`known_stations` 每个已知 Station 一行，保存 `code`、可空的 `scrape_disabled_reason` 和 `created_at`；`districts` 每个片区一行，保存 id、中英文名称及唯一 `ordinal`；`district_stations` 每个已分配 Station 一行，以 `station_code` 为主键并外键关联 Station 和 District，保存片区内 `ordinal`；`district_config_version` 为单行版本及 `updated_at`。四张表分别提供 `v_*` 视图，版本视图不暴露内部 singleton id。
 - District 种子来源为手动维护的 `config/districts.json`，通过 `db:import-districts` 一次性事务导入；补入 `stations` 中的历史代码，但不为其生成归属。任意目标表已有数据即拒绝，保留源文件。跳过原因属于 Station，不因移动或移除归属而改变。`nc_district` 只能修改归属和版本。2026-10-14 经 Product Owner 授权仅部署 migration 004，并用现有种子导入初始化 4 个片区、46 个站点归属（含 Seattle），版本为 1；应用读取来源仍是文件，尚未切换到数据库。详见 [District Management spec 第 4 节](features/district-admin.md#4-数据设计migration-004_districtssql) 和 [Seattle 执行记录](features/seattle-district.md)。
 - 已新增 schema `nc` 的建表脚本、批处理双写、一次性 JSON 导入和 DB 只读 API；正式库操作由维护者在 review 后执行。
@@ -284,3 +288,10 @@ CSV 注意：Tableau 读取文本文件时可能把 `postal_code` 推断为数�
 - RQ-T2 已提供上述主接口字段及 `GET /api/route-quotations?route_id=`；报价不可用时 Route 的五个价格/计数字段均为 null，可用但无报价时返回实际缺价计数；详情 `updated_at` 仅统计当前报价（含 extra ZIP）的最大 `imported_at`，不含 upcoming。
 - 新鲜度：报价的 `effective_from` / `imported_at` 独立于 DMS `fetched_at`。
 - migration 005 已在代码中定义（未部署到正式库）：`quotation_weight_bands`、`route_quotation_imports`、`route_quotation_lines`、`route_quotation_prices`。字段与规则见规格第 4 节。
+
+### Route History API?RH-T1?
+
+- `GET /api/route-history?route_id=<n>&days=7|30`??? 7 ???? PostgreSQL `v_route_history_daily` ?????????????? DMS?JSON ???? `{ available: false }`?
+- ?? point ??? Route ??? Pacific ??????????? `day > Pacific today - days`??????????????????????????????????? pickup_volume????? Daily Volume?
+- ??? available?route_id?days?points?changes?first_seen?last_seen?latest_day?former_names?first_seen / last_seen ????????? Route ???latest_day ??????????????????????? number ? null?
+- changes ??????????? route_difficulty / dsp_name / ZIP ?????? null ???????ZIP ??? added / removed ???from / to ? null???? postal_codes ? snapshot_id?

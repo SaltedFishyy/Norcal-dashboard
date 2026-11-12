@@ -7,6 +7,44 @@ import { createDbDataSource } from '../src/db/db-data-source.js';
 import { centralFixture } from './central-db-fixtures.js';
 import { createTestDb, dbSkip } from './db-helpers.js';
 import { importJson } from '../src/db/json-import.js';
+import { summarizeAutoRefresh } from '../src/api/freshness.js';
+
+test('AR-T3 schedule summary uses latest Pacific day and attempt, with district/all recovery and 48h expiry', () => {
+  const now = new Date('2026-11-12T12:00:00Z');
+  const run = (id, started_at, district = 'south', status = 'stopped', trigger = 'schedule') => ({ id, started_at,
+    status, trigger, scope: { type: 'district', district }, stop_reason: 'list:SelectorError' });
+  const old = run('old', '2026-11-11T01:00:00Z', 'old');
+  const first = run('first', '2026-11-12T01:00:00Z');
+  const success = run('ok', '2026-11-12T01:10:00Z', 'north', 'completed');
+  const retry = run('retry', '2026-11-12T02:00:00Z');
+  const expected = { day: '2026-11-11', failed: [{ district: 'south', stop_reason: 'list:SelectorError' }], completed_count: 1, district_count: 2 };
+  assert.deepEqual(summarizeAutoRefresh([old, success, first, retry], { now }), expected);
+  assert.deepEqual(summarizeAutoRefresh([first, run('retry-ok', '2026-11-12T02:00:00Z', 'south', 'completed')], { now }),
+    { day: '2026-11-11', failed: [], completed_count: 1, district_count: 1 });
+  for (const scope of [{ type: 'district', district: 'south' }, { type: 'all' }]) {
+    const manual = { ...run('manual', '2026-11-12T03:00:00Z', 'south', 'completed', 'ui'), scope };
+    assert.deepEqual(summarizeAutoRefresh([first, success, manual], { now }), { ...expected, failed: [], completed_count: 2 });
+  }
+  // An unrelated success, an earlier success and a failed manual attempt do not clear a failure.
+  assert.deepEqual(summarizeAutoRefresh([first, success, run('other', '2026-11-12T03:00:00Z', 'east', 'completed', 'ui'),
+    run('earlier', '2026-11-12T00:00:00Z', 'south', 'completed', 'ui'), run('fail', '2026-11-12T04:00:00Z', 'south', 'stopped', 'ui')], { now }), expected);
+  assert.equal(summarizeAutoRefresh([old], { now: new Date('2026-11-13T01:00:01Z') }), null);
+  assert.equal(summarizeAutoRefresh([], { now }), null);
+  assert.deepEqual(summarizeAutoRefresh([first, run('new-day', '2026-11-12T08:01:00Z', 'east', 'abandoned')], { now }),
+    { day: '2026-11-12', failed: [{ district: 'east', stop_reason: 'list:SelectorError' }], completed_count: 0, district_count: 1 });
+  assert.equal(summarizeAutoRefresh([{ ...first, stop_reason: 'private detail' }], { now }).failed[0].stop_reason, null);
+});
+
+test('AR-T3 freshness assembles auto_refresh in DB mode without Worker runtime access', async t => {
+  const f = await centralFixture(t); let since;
+  const get = await open(t, f, { ...createJsonDataSource(f), source: 'db', readLastScrapeRun: async () => null,
+    readScheduleRuns: async options => { since = options.since; return [{ id: 'mock', trigger: 'schedule', status: 'stopped',
+      started_at: new Date().toISOString(), scope: { type: 'district', district: 'mock' }, stop_reason: 'list:SelectorError' }]; } });
+  const result = await get('/api/freshness'); assert.equal(result.status, 200);
+  assert.equal(result.body.run.auto_refresh.district_count, 1);
+  assert.deepEqual(result.body.run.auto_refresh.failed, [{ district: 'mock', stop_reason: 'list:SelectorError' }]);
+  assert.ok(Math.abs(Date.now() - Number(since) - 48 * 3_600_000) < 5000);
+});
 
 async function open(t, f, dataSource) {
   const server = await startApiServer({ ...f, dataSource, port: 0 });

@@ -34,7 +34,7 @@ const errorMappings = new Map([
   ...[...basemapPaths.keys()].map(pathname => [pathname, basemapErrors]),
 ]);
 
-export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuotation, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
+export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuotation, getRouteHistory, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
   capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
@@ -74,6 +74,14 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuot
     }
     respond(200, await read(Number(ids[0])));
   };
+  const routeHistory = async context => {
+    const { url, respond } = context;
+    const values = url.searchParams.getAll('days');
+    if (values.length > 1 || (values.length === 1 && !['7', '30'].includes(values[0]))) {
+      respond(400, { error: 'invalid_days' }); return;
+    }
+    return routeEndpoint(routeId => getRouteHistory(routeId, Number(values[0] ?? 7)))(context);
+  };
   const staticFile = async ({ rawPath, res }) => {
     const { body, contentType } = await getStaticFile(rawPath);
     res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store',
@@ -83,6 +91,7 @@ export function createRequestHandler({ getSnapshot, getRouteDetail, getRouteQuot
   const handlers = new Map([
     ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', routeEndpoint(getRouteDetail)],
     ['/api/route-quotations', routeEndpoint(getRouteQuotation)],
+    ['/api/route-history', routeHistory],
     ['/api/route-map', routeMap], ['/api/route-map/zip', zipLookup], ['/api/route-map/stations', mapStations],
     ['/api/districts', districts], ['/api/route-map/district', districtMap],
   ]);

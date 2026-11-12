@@ -13,11 +13,46 @@ import { startApiServer } from '../src/api/server.js';
 import { runServer } from '../bin/server.js';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+
+test('readLastScrapeRun includes schedule and excludes newer JSON imports', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t), source = testSource(t, db);
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  for (const [index, trigger] of ['ui', 'schedule', 'json_import'].entries()) {
+    await db.scraper.query(`INSERT INTO scrape_runs (id,trigger,status,requested_stations,options,started_at)
+      VALUES ($1,$2,'completed',ARRAY['AAA01'],'{}',$3)`, [ids[index], trigger, new Date(Date.UTC(2026, 0, index + 1))]);
+  }
+  const last = await source.readLastScrapeRun();
+  assert.equal(last.id, ids[1]);
+  assert.equal(last.trigger, 'schedule');
+});
 
 export function testSource(t, db) {
   const source = createDbDataSource({ schema: db.schema, env: { NC_DB_READER_URL: process.env.NC_TEST_DB_READER_URL } });
   t.after(() => source.close()); return source;
 }
+
+test('AR-T3 readScheduleRuns reads recent schedules and completed recovery runs through reader view', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t), source = testSource(t, db);
+  const rows = [
+    ['schedule', 'stopped', '2026-11-10T01:00:00Z'],
+    ['schedule', 'stopped', '2026-11-12T01:00:00Z'],
+    ['ui', 'completed', '2026-11-12T02:00:00Z'],
+    ['ui', 'stopped', '2026-11-12T03:00:00Z'],
+    ['cli', 'completed', '2026-11-12T04:00:00Z'],
+  ];
+  const ids = [];
+  for (const [trigger, status, started_at] of rows) {
+    const id = randomUUID(); ids.push(id);
+    await db.scraper.query(`INSERT INTO scrape_runs (id,trigger,status,requested_stations,options,started_at,scope,stop_reason)
+      VALUES ($1,$2,$3,'{}','{}',$4,$5,$6)`, [id, trigger, status, started_at,
+      { type: 'district', district: 'mock' }, status === 'stopped' ? 'list:SelectorError' : null]);
+  }
+  const result = await source.readScheduleRuns({ since: new Date('2026-11-11T00:00:00Z') });
+  assert.deepEqual(result.map(r => r.id), [ids[4], ids[2], ids[1]]);
+  assert.deepEqual(result[2].scope, { type: 'district', district: 'mock' });
+  assert.equal(result[2].stop_reason, 'list:SelectorError');
+});
 
 test('DB data source missing semantics and shared detail projection', { skip: dbSkip }, async t => {
   const db = await createTestDb(t), source = testSource(t, db), fixture = await centralFixture(t);

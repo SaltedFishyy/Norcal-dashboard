@@ -155,8 +155,10 @@ Phase 1 方案：**Playwright storageState**。不做在线登录系统，不做
 5. **storageState 是否足够保持登录，由 T1 实际验证**（保存 → 关闭 → 重新打开仍是登录状态）。如果不够，再与 Product Owner 讨论 persistent profile，现在不提前实现。
 6. **过期处理：** 检测到跳转到登录页或登录失效时，立即停止，提示“请重新运行 dms:login”，**不自动重试、不猜测、不绕过登录**。
 7. **Session 不外泄：** 日志、输出 JSON、失败记录、API 响应中都不能出现 cookie、token 或 storageState 内容。日志只记录 URL 的路径部分（去掉 query string）。
-8. **只读：** scraper 只访问配置中白名单列出的 DMS 页面，不点击任何提交、保存、删除、派单类按钮。
+8. **只读：** scraper 只访问配置中白名单列出的 DMS 页面，不点击任何提交、保存、删除、派单类按钮。**例外：** Product Owner 2026-11-03 批准 scraper 点击语言下拉切换为中文。这可能会修改该账号在 DMS 的语言偏好；除此之外仍然只读。
 9. **清除：** 删除 `dms-state.json` 即退出（T6 之后可在页面上提供 “Clear DMS session”）。
+
+10. **界面语言：** DMS 必须是中文界面；检测到英文界面时，自动通过右上角语言下拉切换一次中文；切换失败才以 `DmsLanguageError` 停止。登录浏览器和 scraper context 使用 `zh-CN`，登录后直接按 Enter；英文界面由抓取流程自动切换（LANG2）。
 
 `DMS_BASE_URL` 等 DMS 地址放在 `.env`，不写死在代码里。`.env.example` 只写占位值。
 
@@ -398,6 +400,20 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
 
 ## 实现记录（Implementation Notes）
 
+### LANG1 — DMS 界面语言保护（2026-11-03）
+
+- 共用 `withPortraitPage` 在登录检查后、UI 操作前读取查询按钮 DOM，最多等待 2 秒；中文按钮存在则继续，仅发现名称以单词 `Search` 结尾（区分大小写，`/(^|\s)Search$/`，允许前置图标名称，如 `search Search`，不匹配单独的小写 `search`）时抛出 `DmsLanguageError`，两者都缺失则交还原有流程。单 Station、route-detail、批次和 global Station 模式共用该检查。
+- 登录的两次 context 和 scraper context 使用 `zh-CN`。CLI、数据状态区及刷新进度弹窗显示切换中文并重新保存登录的提示；复用已有 API `stop_reason`，不增加响应字段，不修改 `needs_login` 判定。两个批次入口沿用原有阶段标记，记录为 `capture:DmsLanguageError`，通过 `safeStopReason` 校验。
+- `npm.cmd test` 646/646 通过，专项测试 227/227 通过，`git diff --check` 通过；无 lint/build 配置。Chromium 使用临时 loopback HTTP 和纯合成 API 验证提示、进度弹窗及提示清除，无 console/page error 或外部请求。首次合成预览因测试服务漏提供 `difficulty.js` 超时，补齐后通过。
+- 未访问 DMS、未读取真实 session/runtime 文件、未运行登录或抓取命令、未重启现有服务，未 commit/push/deploy。真实 DMS 验证与 Product Owner 预览签字待后续进行。
+
+### LANG2 — 自动切换中文（2026-11-03）
+
+- 新增 `language-switch.js`，保留 portrait-page 的 LANG1 re-export 和提示。英文时精确匹配可见 English trigger 及中文 / 简体中文菜单项，仅尝试一次，点击上限 2 秒。networkidle 超时容忍，中文查询按钮确认最多 30 秒；安全错误原样抛出，切换后重新检查登录。
+- 仅在中文菜单点击派发前预留重载预算：open 列表上限 +1；已有全局 prod-api 上限 +25；batch 累计预算 +25（覆盖 open 重载开销，Station 自身 prod-api 预算不放宽）。无切换时预算不变。
+- 未访问真实 DMS、session 或 runtime；选择器按 brief 推断，真实 DOM 和最终抓取结果待 Product Owner 验证。
+- 检查：最终 `npm.cmd test` 672/672 通过，语言专项 24/24 通过，`git diff --check` 通过；无 lint/build 配置。纯合成 Chromium DOM 验证可见控件精确匹配、两次点击及中文确认，无 page error、无外部请求。首次合成检查受 PowerShell 中文管道编码影响失败，改用 Unicode 转义后通过。未重启服务，未 commit/push/deploy。
+
 ### T1 — 2026-09-30
 
 - Product Owner 本次明确要求执行 `.handoff/briefs/T1-dms-login.md`，授权范围仅 T1；本文上方 Draft / 未授权标记不代表后续 T2–T8 已获授权。
@@ -524,3 +540,10 @@ D2、D3、D4、D6 由 T2 摸底时在 DMS 页面上确认，结果写入 `docs/d
   - `GET /api/route-profiles?station=SFO01`：total = 51，rows 51 行，与 T3 真实 snapshot 的 rows 和 `fetched_at` 完全一致；`source_as_of` 为 null。
   - 无界面 Chromium（1440 宽和 390 宽）：页头显示 SFO01 / Last Updated `2026-09-30 17:46 PDT`（title 为完整 ISO 时间）/ Total Routes 51，表格 51 行、7 列，Manual Difficulty 全部显示 `—`；console 没有 error / warning；页面只发出 5 个同源 GET 请求（页面、3 个静态文件、1 个 API），没有外部请求；窄屏时只有表格区域横向滚动，页面本身不横向滚动。
 - **第 1 轮修复（2026-10-01，Product Owner 预览后）：** 仅修改 web/styles.css、web/app.js、web/format.js 和 server/test/t7.test.js。单元格保留 13px 字号，使用 20px line-height、上下 6px padding 和 nowrap，数据行约 33px；难易度标签缩小为 20px 高，保留表格独立横向滚动。两列难易度的 null / undefined / 空字符串只渲染普通 `—`，非空值继续用 textContent 原样显示标签。Pickup Volume 使用千分位整数，PPH / First-mile Distance 固定 2 位小数，空值及非有限数字仍显示 `—`，仅改变显示格式。补充纯函数与实际 app DOM doubles 测试，覆盖数字格式、两列空值不生成标签、非空标签及跨 Station 名称原样显示；`npm.cmd test` **96/96 通过**。未配置 lint / build；未修改 server 实现、API、静态路由、package 文件、legacy 或真实数据，未访问 DMS / session、未启动浏览器，未 commit / push / deploy。本轮宽 / 窄屏视觉效果与 console 检查待 Claude / Product Owner 本机预览确认。
+
+### LANG3 — 提示文案（2026-11-11）
+
+- 更新登录说明及 session 验证问题：登录后直接按 Enter，英文界面由 LANG2 自动切换；验证问题仅询问登录状态。CLI 和看板使用一致的自动切换失败提示，说明手动切换、重新刷新及仍失败时重新登录的步骤。
+- 同步 session、data-status、multi-station-batch 和 rd1 的文案断言；不修改语言切换、y/n 处理、抓取或刷新逻辑。
+- 检查：`node --test server/test/` 共 825 项，767 通过、56 跳过、2 失败；失败为 CD-AC30 / CD-AC31，均因未配置 `NC_TEST_DB_*`。session、language-switch、data-status、multi-station-batch、rd1 专项测试 159/159 通过。`git diff --check` 通过（仅有既有工作区文件的 LF/CRLF 提示）；无 lint / build 配置。
+- 未读取 .env 或真实 session/runtime 文件，未访问 DMS，未运行登录或抓取，未重启服务，未 commit / push / deploy。未进行真实浏览器预览，待 Product Owner 确认提示显示。

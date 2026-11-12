@@ -997,6 +997,7 @@ RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
 | # | 决定 |
 |---|---|
 | M1 | （MAP-R1，2026-10-09）渲染：SVG 渲染器的 padding 改为可配置常量（polygon、highlight、selection-outline 三类图层都生效）；底图区域层设置 minZoom（`us` 不设 maxZoom，因为南加州、Yuma、夏威夷只有 `us` 覆盖）；所有底图使用 `updateWhenZooming: false`；点击 ZIP 后不显示浏览器焦点框。 |
+| | MAP-PERF（2026-11-11）：区域层已覆盖全部运营区，us 改为 maxZoom 6，hawaii minZoom 7 |
 | M2 | （MAP-R1）视觉层级为 **选中 > 悬停 > 普通 > 淡化**；数值集中在 `web/map-state.js` 的 `POLYGON_STYLE` 常量中。悬停不再使用白色描边。**取代 RM5-AC1 中“地图样式与 RM4 完全相同”和 RM7 中“不改描边”的要求。** |
 | M3 | （2026-10-09）Product Owner 本人把淡化描边的不透明度调为 0.23（`POLYGON_STYLE.dimmed.opacity`）。 |
 | M4 | （MAP-R1b，2026-10-09）地图页的地图更大、字更大：只在 `web/styles.css` 末尾的 `MAP-R1b` 区块中覆盖，范围限定为 `.map-page`。 |
@@ -1005,6 +1006,8 @@ RM-Q1、RM-Q2 已由 Product Owner 2026-10-05 决定（见本节开头）。
 | M7 | （MAP-R2a）**地图直接显示 Route 编号**：不需要开关，不限着色模式。每条 Route 只显示一次尾号（`SFO01-021` → `021`）；锚点在主要覆盖区域内（面积加权质心，不在线路内时改用最近成员 ZIP 的内部点）；缩放 ≥ 11 时显示，缩远时隐藏（选中线路从 9 开始显示，并且更突出）；按优先级避让其他标签和仓库 marker；标签不响应鼠标，不影响任何现有交互。 |
 
 ### RM9-2 约束
+
+- MVR Phase 3：新增仓库外 runtime/basemap/service.pmtiles，来源为 Protomaps 20261110 构建，z11–14、约 915 MB，覆盖 `config/basemap-service-region.json` 中 52 个 Station 服务区 bbox（各含 0.05° 边距）；前端按联合范围请求并保留区域底图回退，详见 `map-visual-refresh.md` 第 10 节。
 
 - 正式 3000 会直接读取 `web/` 文件，并且服务端的静态白名单是固定的：本节的改动**不新增 web 文件，也不新增 import 路径**（见 WH-FIX1）。`map-view.js` 因此会变长，已记入 `docs/tech-debt.md`。
 - 标签和颜色只是前端呈现，不改 `/api/route-map*` 的返回结构。

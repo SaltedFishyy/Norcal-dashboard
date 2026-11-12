@@ -136,7 +136,7 @@ bash scripts/codex-handoff.sh docs/features/<slug>.md
 
 `scripts/codex-watch.mjs` 是可选的旁观者：只读取 run 产物，不参与任务执行，不写任何文件，不启动 Codex。它不改变 Mode A 的 artifacts，也不改变 review / fix 流程。关闭 watcher 窗口或按 Ctrl+C 只退出 watcher，不影响后台 Codex。
 
-Claude 可在 Mode A 已生成 run 目录后，自动执行下面的命令打开一个独立 Windows Terminal 窗口；该窗口结束时等待按 Enter 关闭：
+Claude 可在 Mode A 已生成 run 目录后，自动执行下面的命令打开一个独立 Windows Terminal 窗口；该窗口使用 `--auto-close`，run 结束打印摘要后等待 8 秒自动退出，也可按 Enter 立即关闭（Windows Terminal 默认在进程正常退出时关闭标签页）：
 
 ```powershell
 node scripts/codex-watch.mjs --window .handoff/runs/<run-name>
@@ -151,6 +151,8 @@ node scripts/codex-watch.mjs --hold .handoff/runs/<run-name>
 ```
 
 无参数时选择目录名排序后的最新 run；没有 run 时等待第一个 run 出现。选定后持续观察该 run，不自动切换。指定目录可以是相对当前工作目录的路径或绝对路径；默认 run 搜索位置由脚本位置确定，不依赖当前工作目录。
+
+`--hold` 仍可手动使用，run 结束后等待按 Enter 关闭，不会自动倒计时；也可手动传入 `--auto-close` 使用 8 秒自动关闭模式。
 
 回看已完成的 run：
 

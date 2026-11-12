@@ -1,3 +1,4 @@
+import { dmsLanguageNotice } from '../src/dms/portrait-page.js';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { access } from 'node:fs/promises';
@@ -41,10 +42,11 @@ export async function runScrape({ args = process.argv.slice(2), env = process.en
     log(`station：${station}；行数：${stationSnapshot.rows.length}；total：${stationSnapshot.total}；list 请求数：${result.listRequestCount}；输出：${filename}；parse_errors：${warnings.length}`);
     return 0;
   } catch (error) {
-    const allowed = ['NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError'];
+    const allowed = ['DmsLanguageError', 'NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError'];
     const errorType = allowed.includes(error.name) ? error.name : 'Error';
     const detail = errorType === 'Error' ? null : error.message;
-    if (errorType === 'NeedsLoginError') errorLog('请重新运行 npm run dms:login。');
+    if (errorType === 'DmsLanguageError') errorLog(dmsLanguageNotice);
+    else if (errorType === 'NeedsLoginError') errorLog('请重新运行 npm run dms:login。');
     else {
       errorLog(`错误类型：${errorType}；阶段：${step}${detail ? `；原因：${detail}` : ''}`);
       if (runtimeDir) {

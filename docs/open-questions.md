@@ -83,7 +83,9 @@
 
 见 `docs/features/district.md`“南加州片区（2026-10-09）”。
 
-- [ ] SC-Q1 这 15 个 Station 是否都在 DMS 的站点菜单中，当前账号是否都有权限？现有规则是：刷新过程中遇到菜单里没有的 Station，会停止整个 run；只有在 `scrape_disabled` 中配置过的 Station 才会被跳过。确认之前不预先配置 `scrape_disabled`。南加州排在配置末尾，所以“全部刷新”时，北加州和丹佛会先完成并各自生效。（2026-10-09）
+- SC4 最终决定（Product Owner 2026-11-05，取代 SC2 / SC3）：LAX02 / LAX03 保留在南加州，共 15 站，不配置 `scrape_disabled`。刷新时确认 DMS 菜单已展开、有其他 Station、却没有目标 Station，关闭菜单并确认页头未变后，以 `not_in_dms_menu` 运行时跳过，继续批次，保留历史数据。以下保留原核对问题及抓取历史。
+
+- [ ] SC-Q1 这 15 个 Station 是否都在 DMS 的站点菜单中，当前账号是否都有权限？原“菜单缺站会停止整个 run，只有静态配置才跳过”的规则已被 SC4 修改（Product Owner 2026-11-05）：经安全确认的菜单缺站在运行时跳过；菜单未展开、没有可见 Station 或关闭验证失败仍停止。此轮不访问 DMS，菜单及权限仍待真实核对。（原问题 2026-10-09）
   - **第一次抓取（2026-10-09，run `87934135…`，`--scope district:south-cal --new-run`）：**
     - CNO01 completed：41 条 Route。
     - LAX01 completed：26 条 Route。
@@ -146,6 +148,10 @@
 - [ ] LQ-Q11 SFV 分表（`sZuGSc`）有两个生效日期列：T「报价生效日期」和 X「生效日期」，而且 83 行数据在 T、U（结束日期）、X 三列**全部为空**。是表格还没有填日期，还是日期在别处？在表格维护方补齐日期、并确定以哪一列为准之前，SFV 保持表头无效、不导入（LQ-D16）。（2026-11-06）
 - [ ] LQ-Q12 表格数据修正（由表格维护方处理，修正后定时同步自然生效）：Denver 有 5 行生效 / 结束日期单元格的内容就是文本 `########`（不是列宽导致，原始值相同），修正前按 `date_placeholder` 拒绝；BOI 有 21 行没有日期；IDA / BIL 共 24 行线路名为空（疑似合并单元格，不自动填充，LQ-D15）；IFP 表的线路名与 DMS IFP01 一条都对不上。（2026-11-06）
 - [ ] LQ-Q13 LQ-T7 后摸底发现的格式问题（详见 `docs/workflow/lark-quotation-handoff.md` 5.3）：(a) 是否接受 `YYYY-MM-DD` 日期（LAX01 17 行）？(b) 是否接受两位年份 `MM/DD/YY` 并按 20YY 解释（STG）？(c) 数字日期序列号（LAX02 / LAV 各 2 行）是否继续拒绝？(d) OAR 的 `40-999999(Ib)` 是否视为「40(lb)以上」？(e) 南加州 8 张表的生效日期大多为空、IFP 线路名带空格，需要表格维护方修正。（2026-11-06）
+
+## 地图 DSP 着色 / Map DSP Coloring
+
+- **（已按推断执行，待业务核实）DSP 名称后缀是否代表同一家公司？** `dsp_name` 形如 `SFO-AAS`、`SFO02-AAS`、`DEN-AAS`。Product Owner 2026-11-11 同意 Claude 的推断：最后一个 `-` 之后的公司代码相同 = 同一家公司，地图“按 DSP”着色按公司代码定色（`docs/features/map-visual-refresh.md` P2-1 D3）。如果以后发现不同站点的同名后缀其实是不同公司，改为按完整 `dsp_name` 定色，只需改 `dspColorKey`。
 
 ## 每日自动刷新 / Auto Refresh
 

@@ -1,7 +1,7 @@
 import { formatUpdated } from './format.js';
 
 export const quotationSyncResults = {
-  partial_failure: '\u90e8\u5206\u5de5\u4f5c\u8868\u5931\u8d25', failed: '\u5168\u90e8\u5931\u8d25',
+  partial_failure: '部分工作表失败', failed: '全部失败',
   completed: '完成', partial: '部分完成', rejected: '全部拒绝', unchanged: '无变化',
   fetch_failed: '读取失败', header_invalid: '表头无效', aborted_mass_removal: '删除过多已中止',
   write_role_missing: '未配置写入账号', config_invalid: '配置无效', db_failed: '数据库错误',
@@ -20,9 +20,9 @@ export function createQuotationSyncStatus({ document: doc, root, get }) {
       line.textContent = `报价同步 · 定时：${data.enabled ? `每 ${data.interval_minutes} 分钟` : '关闭'}`
         + ` · 最近成功：${success ? formatUpdated(success) : '—'}`
         + ` · 最近一次：${quotationSyncResults[attempt?.result] || '—'}`
-        + (sheets.length ? ` \u00b7 \u5de5\u4f5c\u8868\uff1a${sheets.length - failures.length}/${sheets.length}` : '')
-        + ` \u00b7 \u62d2\u7edd\u884c\u6570\uff1a${attempt?.rejected_count ?? 0}`
-        + (failures.length ? ` \u00b7 \u5931\u8d25\uff1a${failures.slice(0, 3).map(sheet => `${sheet.title || sheet.sheet_id}\uff08${quotationSyncResults[sheet.result] || '\u5931\u8d25'}\uff09`).join('\u3001')}${failures.length > 3 ? ` \u7b49 ${failures.length - 3} \u4e2a` : ''}` : '');
+        + (sheets.length ? ` · 工作表：${sheets.length - failures.length}/${sheets.length}` : '')
+        + ` · 拒绝行数：${attempt?.rejected_count ?? 0}`
+        + (failures.length ? ` · 失败：${failures.slice(0, 3).map(sheet => `${sheet.title || sheet.sheet_id}（${quotationSyncResults[sheet.result] || '失败'}）`).join('、')}${failures.length > 3 ? ` 等 ${failures.length - 3} 个` : ''}` : '');
     } catch { if (!disposed) line.textContent = '报价同步 · 状态获取失败'; }
     finally { busy = false; }
   }

@@ -1,3 +1,4 @@
+import { dmsLanguageNotice } from '../src/dms/portrait-page.js';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -91,6 +92,7 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
       maxListRequests, maxDetailRequests, maxBatchDetailRequests, maxProdApiRequests, batch: true,
       listRequestPath: '/roadAreaPortrait/home/frontPage/', needsLoginOn401: true,
       signal: controller.signal, log, onCounts: value => { counts = value; },
+      pageFailureTimeout: 9500,
       onPageFailure: async ({ page, error }) => {
         if (!['capture', 'close_modals', 'delay'].includes(phase)) return;
         diagnostic = await writePageFailureDiagnostic({ runtimeDir, page, error, currentRoute: current,
@@ -133,7 +135,9 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
             const result = await context.guarded(() => capture(context, { routeName: current.route_name, routeId: current.route_id }));
             current.locate_method = result.locateMethod ?? null;
             current.attempts = result.attempts ?? [];
-            if (result.click_retry !== undefined) current.click_retry = result.click_retry;
+            for (const key of ['click_retry', 'click_wait_reason', 'click_late']) {
+              if (result[key] !== undefined) current[key] = result[key];
+            }
             checkInterrupted();
             phase = 'transform'; step = 'transform';
             const { route } = transformRouteDetail(result, { station: options.station, routeId: current.route_id, fetchedAt: now().toISOString() });
@@ -183,11 +187,12 @@ export async function runRouteDetailsBatch({ args = process.argv.slice(2), env =
     checkInterrupted();
   } catch (error) {
     caught = error;
-    const safeTypes = new Set(['NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError', 'RouteDetailInvalidError', 'InterruptedError']);
+    const safeTypes = new Set(['DmsLanguageError', 'NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError', 'RouteDetailInvalidError', 'InterruptedError']);
     const type = safeTypes.has(error.name) ? error.name : 'Error';
     stopReason = `${phase || step}:${type}`;
     exitCode = controller.signal.aborted || type === 'InterruptedError' ? 130 : 1;
     errorLog(`批次停止：${stopReason}${type === 'NeedsLoginError' ? '；请运行 npm run dms:login。' : ''}`);
+    if (error.name === 'DmsLanguageError') errorLog(dmsLanguageNotice);
   } finally {
     const finishedAt = now();
     const record = { started_at: startedAt.toISOString(), finished_at: finishedAt.toISOString(),

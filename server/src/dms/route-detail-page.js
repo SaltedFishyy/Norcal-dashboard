@@ -70,12 +70,19 @@ async function inspectLocatedButton({ page, guarded }, routeName) {
 }
 
 export function classifyClickWaitReason(message = '') {
-  if (/intercepts pointer events/i.test(message)) return 'intercepted';
-  if (/not stable/i.test(message)) return 'not_stable';
-  if (/not visible/i.test(message)) return 'not_visible';
-  if (/not attached|detached/i.test(message)) return 'detached';
-  if (/not enabled|disabled/i.test(message)) return 'not_enabled';
-  return 'unknown';
+  const patterns = [
+    [/intercepts pointer events/i, 'intercepted'], [/not stable/i, 'not_stable'],
+    [/not visible/i, 'not_visible'], [/not attached|detached/i, 'detached'],
+    [/not enabled|disabled/i, 'not_enabled'],
+    [/waiting for scheduled navigations/i, 'navigation_wait'],
+    [/click action done|performing click action/i, 'click_dispatched'],
+  ];
+  let reason = 'unknown';
+  for (const line of String(message).split(/\r?\n/)) {
+    const match = patterns.find(([pattern]) => pattern.test(line));
+    if (match) reason = match[1];
+  }
+  return reason;
 }
 
 async function clickLocatedRow(context, routeName) {
@@ -198,6 +205,7 @@ async function locatePortraitRow(context, { routeName, routeId }) {
       } catch (error) {
         if (state.restoreList) error.restoreList = state.restoreList;
         attempts.push(method);
+        if (error.portraitClickAttempted) error.locateMethod = method;
         if (error.portraitClickAttempted || error.noFallback || !(error instanceof SelectorError || error.name === 'TimeoutError')
           || /画像详情按钮不唯一|Route 行不唯一/.test(error.message)) throw error;
         outcome = 'not_found';
@@ -227,14 +235,26 @@ async function clickPortraitRow(context, target) {
     catch (error) {
       restoreList = error.restoreList ?? restoreList;
       if (context.location.click_retry !== undefined) error.click_retry = context.location.click_retry;
-      if (!error.portraitClickAttempted || retry === 1) throw error;
+      if (!error.portraitClickAttempted) throw error;
       // Observe through the same safety guard: circuit breakers and login failures still stop immediately.
       for (let poll = 0; poll <= 10; poll++) {
         if (context.counts().prodApiRequestCount !== error.prodApiBeforeClick
           || await hasVisiblePortraitModal(context)
-          || context.counts().prodApiRequestCount !== error.prodApiBeforeClick) throw error;
+          || context.counts().prodApiRequestCount !== error.prodApiBeforeClick) {
+          // The click reached DMS. Wait for its modal without dispatching another click.
+          for (let latePoll = 0; latePoll <= 150; latePoll++) {
+            if (await hasVisiblePortraitModal(context)) {
+              context.location.locateMethod = error.locateMethod;
+              context.location.click_late = true;
+              return { ...context.location, restoreList };
+            }
+            if (latePoll < 150) await context.guarded(() => context.page.waitForTimeout(200));
+          }
+          throw error;
+        }
         if (poll < 10) await context.guarded(() => context.page.waitForTimeout(150));
       }
+      if (retry === 1) throw error;
       context.location.click_retry = 1;
     }
   }

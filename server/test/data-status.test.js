@@ -23,6 +23,54 @@ class Element {
 const nodes = root => [root, ...root.children.flatMap(nodes)];
 const find = (root, text) => nodes(root).find(n => n.tag === 'button' && n.textContent === text);
 const iso = '2026-10-08T12:00:00Z';
+test('AR-T3 Worker status states, Pacific times, failure names and polling; readonly hides line', async () => {
+  const readonly = fixture(); await readonly.page.start();
+  assert.doesNotMatch(readonly.root.textContent, /自动刷新 ·/);
+  assert.ok(!readonly.calls.some(c => c.url === '/api/auto-refresh/status')); readonly.page.dispose();
+  const h = fixture({ autoCapability: true }); h.data.auto = { enabled: false };
+  await h.page.start(); assert.match(h.root.textContent, /自动刷新 · 关闭/);
+  h.data.auto = { enabled: true, time: '17:00', time_zone: 'America/Los_Angeles', next_run_at: '2026-11-13T01:00:00Z',
+    last: { started_at: '2026-11-12T01:00:00Z', finished_at: '2026-11-12T02:00:00Z', result: 'completed',
+      districts: [{ id: 'mock', status: 'completed' }] } };
+  await h.tick(60000);
+  assert.match(h.root.textContent, /每天 17:00（太平洋时间） · 上次：2026\/11\/11 18:00 完成 · 片区：成功 1 \/ 共 1 · 下次：2026\/11\/12 17:00/);
+  for (const [result, label] of [['partial', '部分完成'], ['needs_login', '需要重新登录'], ['running', '进行中'], ['failed', '失败'], ['skipped_busy', '繁忙跳过']]) {
+    h.data.auto.last.result = result;
+    h.data.auto.last.districts = [{ id: 'ok', status: 'completed' }, ...[
+      ['mock', 'list:SelectorError'], ['B', 'switch:StationSwitchError'], ['C', 'capture:NeedsLoginError'], ['D', 'worker:Restarted']
+    ].map(([id, stop_reason]) => ({ id, stop_reason, status: 'stopped' }))];
+    await h.tick(60000);
+    assert.ok(h.root.textContent.includes(`18:00 ${label}`));
+    assert.match(h.root.textContent, /片区：成功 1 \/ 共 5/);
+    assert.match(h.root.textContent, /失败：合成片区（页面结构异常）、B（切换站点失败）、C（登录过期） 等 1 个/);
+    assert.doesNotMatch(h.root.textContent, /D（/);
+  }
+  for (const [reason, label] of [['process:Exited', '进程中断'], ['worker:Restarted', '进程中断'], ['other:Error', '未知错误']]) {
+    h.data.auto.last.districts = [{ id: 'mock', status: 'stopped', stop_reason: reason }];
+    await h.tick(60000); assert.ok(h.root.textContent.includes(`合成片区（${label}）`));
+  }
+  h.page.dispose(); assert.equal(h.timers.size, 0);
+});
+
+test('AR-T3 readonly failure messages prioritize schedule, login and running without duplicates', async () => {
+  const h = fixture();
+  h.data.freshness.run = { running: false, last: { status: 'stopped', started_at: iso },
+    auto_refresh: { day: '2026-11-11', failed: [{ district: 'mock', stop_reason: 'list:SelectorError' }], completed_count: 1, district_count: 2 } };
+  await h.page.start();
+  assert.match(h.root.textContent, /11\/11 17:00 自动更新部分失败：合成片区（页面结构异常）。其余片区已更新，当前显示的是各站点最近一次成功的数据。/);
+  assert.doesNotMatch(h.root.textContent, /最近一次更新失败/);
+  h.data.freshness.run.auto_refresh.district_count = 1;
+  await h.page.loadFreshness(); assert.match(h.root.textContent, /自动更新失败：/); assert.doesNotMatch(h.root.textContent, /其余片区已更新/);
+  h.data.freshness.run.auto_refresh.failed[0].stop_reason = 'capture:NeedsLoginError';
+  await h.page.loadFreshness(); assert.match(h.root.textContent, /DMS 登录已过期/); assert.doesNotMatch(h.root.textContent, /自动更新.*失败|最近一次更新失败/);
+  h.data.freshness.run.running = true;
+  await h.page.loadFreshness(); assert.match(h.root.textContent, /公用电脑正在更新数据/);
+  h.data.freshness.run = { running: false, last: { status: 'completed' }, auto_refresh: { day: '2026-11-11', failed: [], completed_count: 1, district_count: 1 } };
+  await h.page.loadFreshness(); assert.doesNotMatch(h.root.textContent, /自动更新|最近一次更新失败|DMS 登录已过期|正在更新数据/);
+  h.data.runs = [{ status: 'completed', trigger: 'schedule', scope: { type: 'district', district: 'mock' } }];
+  await h.click('更新记录'); assert.match(h.root.textContent, /来源：每日自动/);
+  h.page.dispose();
+});
 function fresh(source = 'db') {
   return { source, notice: '数据来自 DMS 抓取，非实时', global: { newest_fetched_at: iso },
     districts: [{ id: 'mock', newest_fetched_at: iso, oldest_fetched_at: iso, stations_with_data: 1, station_count: 4 }],
@@ -30,7 +78,7 @@ function fresh(source = 'db') {
       ...['not_in_dms_menu', 'no_permission', 'disabled'].map((reason, i) => ({ code: `SKIP${i}`, district: 'mock', fetched_at: null, scrape_disabled: reason }))],
     run: source === 'json' ? null : { running: true, last: null } };
 }
-function fixture({ capability = false, failCapability = false, source = 'db', initialState = 'idle', mapPage = false, profilePage = false } = {}) {
+function fixture({ capability = false, autoCapability = false, failCapability = false, source = 'db', initialState = 'idle', mapPage = false, profilePage = false } = {}) {
   const root = new Element('section'), calls = [], timers = new Map(); let timerId = 0, reloads = 0;
   const data = { freshness: fresh(source), state: { state: initialState, progress: initialState === 'running' ? progress() : null },
     districts: [{ id: 'mock', name_zh: '合成片区' }, { id: 'unassigned', name_zh: '未分配站点' }],
@@ -40,7 +88,8 @@ function fixture({ capability = false, failCapability = false, source = 'db', in
     calls.push({ url, options });
     if (url === '/api/capabilities' && failCapability || url === '/api/freshness' && data.failFresh || url === '/api/refresh/status' && data.failStatus) throw Error('private secret');
     const body = url === '/api/freshness' ? data.freshness : url === '/api/districts' ? { districts: data.districts }
-      : url === '/api/capabilities' ? { refresh: capability, warehouse_write: false } : url.startsWith('/api/runs') ? { runs: data.runs, source }
+      : url === '/api/capabilities' ? { refresh: capability, auto_refresh: autoCapability, warehouse_write: false }
+        : url === '/api/auto-refresh/status' ? data.auto : url.startsWith('/api/runs') ? { runs: data.runs, source }
         : url.startsWith('/api/refresh/preview') ? data.plan : data.state;
     const status = url === '/api/refresh' ? data.postStatus : 200;
     return { status, ok: status >= 200 && status < 300, json: async () => structuredClone(body) };
@@ -208,4 +257,31 @@ test('RM13c profile freshness summary is in the card and details remain in histo
   assert.equal(h.summary.children.filter(n => n.tag === 'time').length, 1);
   assert.ok(h.actions.children[0].children.some(n => n.tag === 'button'));
   h.page.dispose();
+});
+
+for (const source of ['freshness', 'progress', 'last_run']) test('language notice from ' + source, async () => {
+  const h = fixture({ capability: source !== 'freshness' });
+  if (source === 'freshness') h.data.freshness.run = { running: false, last: { status: 'stopped', stop_reason: 'open:DmsLanguageError', needs_login: false } };
+  else h.data.state = { state: 'stopped', needs_login: false, [source]: { stop_reason: 'capture:DmsLanguageError' } };
+  await h.page.start();
+  assert.match(h.root.textContent, /DMS 界面是英文/);
+  assert.match(h.root.textContent, /程序自动切换中文失败。请在公用电脑打开 DMS，把右上角语言手动切换为中文/);
+  assert.doesNotMatch(h.root.textContent, /DMS 登录已过期/);
+  if (source !== 'freshness') {
+    const dialog = nodes(h.root).find(n => n.tag === 'dialog' && /刷新数据/.test(n.textContent));
+    assert.match(dialog.textContent, /DMS 界面是英文/);
+    h.data.state = { state: 'completed', needs_login: false, progress: { stop_reason: null } };
+    await h.page.loadStatus();
+  } else {
+    h.data.freshness.run.last.stop_reason = 'capture:SelectorError';
+    await h.page.loadFreshness();
+  }
+  assert.doesNotMatch(h.root.textContent, /DMS 界面是英文/);
+  h.page.dispose();
+});
+
+test('SC4 progress renders runtime missing station reason without static configuration', async () => {
+  const h = fixture({ capability: true });
+  h.data.state = { state: 'running', progress: { ...progress(), skipped: [{ code: 'LAX03', district: 'mock', reason: 'not_in_dms_menu' }] } };
+  await h.page.start(); assert.match(h.root.textContent, /LAX03（DMS 中无此站点）/); h.page.dispose();
 });

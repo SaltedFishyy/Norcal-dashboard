@@ -18,6 +18,26 @@ function times(stations) {
   const values = stations.map(s => s.fetched_at).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b));
   return { newest_fetched_at: values.at(-1) ?? null, oldest_fetched_at: values[0] ?? null };
 }
+// Keep recovery runs as well as scheduled attempts: a later manual success clears a failure.
+export function summarizeAutoRefresh(runs, { now = new Date() } = {}) {
+  const cutoff = Number(now) - 48 * 3_600_000;
+  const recent = runs.filter(r => Date.parse(r.started_at) >= cutoff && Date.parse(r.started_at) <= Number(now))
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || String(b.id).localeCompare(String(a.id)));
+  const dayOf = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+  const scheduled = recent.filter(r => r.trigger === 'schedule' && r.scope?.type === 'district');
+  if (!scheduled.length) return null;
+  const day = dayOf(scheduled[0].started_at), latest = new Map();
+  for (const r of scheduled) if (dayOf(r.started_at) === day && !latest.has(r.scope.district)) latest.set(r.scope.district, r);
+  const failed = []; let completed_count = 0;
+  for (const [district, run] of latest) {
+    const recovered = recent.some(r => r.status === 'completed' && Date.parse(r.started_at) > Date.parse(run.started_at)
+      && (r.scope?.type === 'all' || r.scope?.type === 'district' && r.scope.district === district));
+    if (run.status === 'completed' || recovered) completed_count++;
+    else if (['stopped', 'abandoned'].includes(run.status)) failed.push({ district, stop_reason: safeStopReason(run.stop_reason) });
+  }
+  return { day, failed, completed_count, district_count: latest.size };
+}
 export function createFreshnessHandlers({ dataSource, districtsPath }) {
   return new Map([
     ['/api/runs', async ({ url, respond }) => {
@@ -45,9 +65,12 @@ export function createFreshnessHandlers({ dataSource, districtsPath }) {
         return { id, ...times(group), stations_with_data: group.filter(s => s.fetched_at !== null).length, station_count: group.length };
       });
       const last = dataSource.source === 'db' ? await dataSource.readLastScrapeRun() : null;
+      const now = new Date();
+      const auto_refresh = dataSource.source === 'db' ? summarizeAutoRefresh(
+        await dataSource.readScheduleRuns({ since: new Date(Number(now) - 48 * 3_600_000) }), { now }) : null;
       const run = dataSource.source === 'db' ? { running: last?.status === 'running', last: last ? {
         status: last.status, trigger: last.trigger, started_at: last.started_at, finished_at: last.finished_at,
-        stop_reason: safeStopReason(last.stop_reason), needs_login: needsLogin(safeStopReason(last.stop_reason)) } : null } : null;
+        stop_reason: safeStopReason(last.stop_reason), needs_login: needsLogin(safeStopReason(last.stop_reason)) } : null, auto_refresh } : null;
       respond(200, { source: dataSource.source, notice: '数据来自 DMS 抓取，非实时', global: times(stations), districts, stations, run });
     }],
   ]);

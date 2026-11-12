@@ -1,3 +1,6 @@
+import { ensureChineseDms, DmsLanguageError } from './language-switch.js';
+export { checkDmsLanguage, DmsLanguageError, dmsLanguageNotice } from './language-switch.js';
+
 export async function hasVisiblePortraitModal({ page, guarded }) {
   return await guarded(() => page.locator('.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]')
     .evaluateAll(elements => elements.some(element => element.getClientRects().length > 0
@@ -22,7 +25,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
   let browser, page, failure, requestCount = 0, listRequestCount = 0, detailRequestCount = 0;
   let prodApiRequestCount = 0, routeDetailRequestCount = 0, maxRouteDetailRequestCount = 0;
   let loginChecksActive = false, listLoaded = false;
-  let stationBudget, batchBudget = 0;
+  let stationBudget, batchBudget = 0, languageListAllowance = 0;
   const counts = () => ({ requestCount, listRequestCount, detailRequestCount,
     prodApiRequestCount, routeDetailRequestCount, maxRouteDetailRequestCount });
   let rejectStop;
@@ -64,7 +67,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
     if (route.includes(listRequestPath)) {
       listRequestCount++;
       log(batch ? `阶段：列表请求；计数：${listRequestCount}` : `阶段：request；pathname：${route}；计数：${listRequestCount}`);
-      if (stationBudget ? listRequestCount - stationBudget.listStart > stationBudget.listCap : listRequestCount > maxListRequests) stop(new LoadLimitError());
+      if (stationBudget ? listRequestCount - stationBudget.listStart > stationBudget.listCap : listRequestCount > maxListRequests + languageListAllowance) stop(new LoadLimitError());
     }
     if (maxDetailRequests !== undefined && route.includes('/roadAreaPortraitDetails/')) {
       detailRequestCount++;
@@ -96,7 +99,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
     if (signal?.aborted) throw new InterruptedError();
     if (!browserType) ({ chromium: browserType } = await import('playwright'));
     browser = await browserType.launch({ headless });
-    const context = await guarded(() => browser.newContext({ storageState: statePath }));
+    const context = await guarded(() => browser.newContext({ storageState: statePath, locale: 'zh-CN' }));
     page = await guarded(() => context.newPage());
     page.on('request', onRequest);
     page.on('response', onResponse);
@@ -112,6 +115,17 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       void page.locator('input[type=password]').first().waitFor({ state: 'attached', timeout: 0 })
         .then(() => stop(new NeedsLoginError())).catch(() => {});
     }
+    await ensureChineseDms({ page, guarded, log,
+      allowLanguageSwitch: () => {
+        languageListAllowance = 1;
+        if (maxProdApiRequests !== undefined) maxProdApiRequests += 25;
+        batchBudget += 25;
+      },
+      assertLoggedIn: async () => {
+        if (!pathname(page.url()).includes('/areaDepiction')
+          || await guarded(() => page.locator('input[type=password]').count()) > 0) throw new NeedsLoginError();
+      },
+    });
     const queryStation = async () => {
     if (globalStationMode) {
       await control('展开', async () => {
@@ -240,7 +254,7 @@ export async function withPortraitPage({ browserType, statePath, baseUrl, statio
       finally { clearTimeout(timer); }
     }
     if (failure) throw failure;
-    if (batch || [NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError].some((type) => error instanceof type)) throw error;
+    if (batch || [DmsLanguageError, NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError, InterruptedError].some((type) => error instanceof type)) throw error;
     throw new CaptureError();
   } finally {
     if (page) { page.off('request', onRequest); page.off('response', onResponse); }

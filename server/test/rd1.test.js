@@ -11,7 +11,7 @@ import { SchemaError } from '../src/transform/route-profile.js';
 import { StoreError } from '../src/store/route-profiles-file.js';
 import { saveRouteDetail, getRouteDetail, RouteDetailNotFoundError, RouteDetailInvalidError } from '../src/store/route-details-file.js';
 import { captureRouteDetail, classifyClickWaitReason } from '../src/dms/route-detail-page.js';
-import { captureRoutePortrait, NeedsLoginError, CaptureError, SelectorError, LoadLimitError, CircuitBreakerError } from '../src/dms/route-profile-page.js';
+import { captureRoutePortrait, DmsLanguageError, NeedsLoginError, CaptureError, SelectorError, LoadLimitError, CircuitBreakerError } from '../src/dms/route-profile-page.js';
 import { runRouteDetailScrape } from '../bin/dms-scrape-route-detail.js';
 import { runRouteDetailsBatch } from '../bin/dms-scrape-route-details.js';
 import { parseMaxRouteDetailRequests } from '../src/config.js';
@@ -164,7 +164,7 @@ function evaluate(fn, nodes, argument, hitBlocked = false) {
   }
 }
 
-function pageHarness({ records, login = false, password = false, status, listRequests = 1, detailRequests = 2,
+function pageHarness({ records, english = false, login = false, password = false, status, listRequests = 1, detailRequests = 2,
   wrongId, wrongHeaderId, wrongHeader, virtual = false, missingRow = false, ambiguousAction = false, ambiguousDetail = false, mixedSection = false,
   modalDelay = 0, detailDelay = 0, missingDetail = false, actionError, actionDelay = 0, missingAction = false,
   missingModal = false, pendingNavigation = false, navigationStatus, navigationPaths = [],
@@ -175,7 +175,7 @@ function pageHarness({ records, login = false, password = false, status, listReq
   separateGroups = false, missingLabel = false, inputOnly = false, classOnly = false,
   loadingMs = 0, resetScroll = false, ineffectiveMain = false, actualScroller = false, wheelWorks = false,
   routeFilter = false, filterLabel = '路区名称', filteredRecords, duplicateRow = false, movingButton = false,
-  actionFailures = 0, requestOnError = false, modalOnError = false, observeRequest = false } = {}) {
+  actionFailures = 0, requestOnError = false, modalOnError = false, observeRequest = false, lateModalMs = Infinity, lateStatus, wrongPortrait = false } = {}) {
   const page = new EventEmitter(), clicks = [], logs = [], waits = [], stabilityWaits = [];
   let buttonChecks = 0, failedClicks = 0;
   const listeners = new Set();
@@ -228,7 +228,7 @@ function pageHarness({ records, login = false, password = false, status, listReq
     ...Array.from({ length: 4 }, () => new Tree('div', '', [new Tree('span', '详情 >')]))]);
   const delayedDetail = detailDelay > 0 || missingDetail;
   if (!delayedDetail) label.parentElement = section;
-  const modal = new Tree('div', '', [new Tree('h2', '路区画像详情'), new Tree('span', '路区名称：MOCK-001'), delayedDetail ? modalBody : section]);
+  const modal = new Tree('div', '', [new Tree('h2', '路区画像详情'), new Tree('span', wrongPortrait ? '\u8def\u533a\u540d\u79f0\uff1aOTHER' : '\u8def\u533a\u540d\u79f0\uff1aMOCK-001'), delayedDetail ? modalBody : section]);
   modal.className = 'dbuMicroSysApp-modal-content'; modal.children[0].className = 'dbuMicroSysApp-modal-title';
   const portraitClose = new Tree('button'); portraitClose.className = 'dbuMicroSysApp-modal-close';
   portraitClose.parentElement = modal; modal.children.push(portraitClose);
@@ -261,7 +261,7 @@ function pageHarness({ records, login = false, password = false, status, listReq
   const filterHeading = new Tree('label', filterLabel); filterHeading.className = 'dbuMicroSysApp-form-item-label';
   const filterItem = new Tree('div', '', [filterHeading, new Tree('input')]); filterItem.className = 'dbuMicroSysApp-form-item';
   const locator = (selector, index = 0) => ({
-    count: async () => selector === 'input[type=password]' ? Number(password) : selector === 'actions' ? 3
+    count: async () => selector === 'header .dbu-web-main-dropdown-trigger:visible' ? 0 : selector === 'input[type=password]' ? Number(password) : selector === 'actions' ? 3
       : selector === '.dbuMicroSysApp-form-item' && routeFilter ? 2 : 1,
     nth: (i) => locator(selector, selector === 'portrait-action' ? index : i), first: () => locator(selector),
     filter: () => locator(selector === 'tr[rowid]' ? 'actions' : selector),
@@ -287,8 +287,8 @@ function pageHarness({ records, login = false, password = false, status, listReq
         table.className = 'vxe-table is--virtual-y' + (tabElapsed < loadingMs ? ' is--loading' : '');
         const value = evaluate(fn, [bodyNode], arg); scrolled = true; return value;
       }
-      if (actionFailures && selector === '.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]' && !arg) {
-        return evaluate(fn, modalOnError ? [modal] : [], arg);
+      if ((actionFailures || actionError) && selector === '.dbuMicroSysApp-modal, .dbuMicroSysApp-modal-content, [role="dialog"]' && !arg) {
+        return evaluate(fn, (modalOnError || failedClicks && tabElapsed >= lateModalMs) ? [modal] : [], arg);
       }
       if (selector.includes('closing')) return evaluate(fn, [labelModal, capacityModal, modal].filter(node => node.getAttribute('data-rd3-modal')), arg);
       if (selector === '.dbuMicroSysApp-modal-content') {
@@ -344,13 +344,13 @@ function pageHarness({ records, login = false, password = false, status, listReq
           if (requestOnError) page.emit('request', detailRequest('getRoadAreaContent'));
           throw Object.assign(new Error('locator.click: Timeout 3000ms exceeded\nCall log: element is not stable https://example.invalid/private'), { name: 'TimeoutError' });
         }
-        if (actionError) throw actionError;
+        if (actionError) { if (requestOnError) page.emit('request', detailRequest('getRoadAreaContent')); throw actionError; }
         for (let i = 0; i < detailRequests; i++) page.emit('request', detailRequest('getRoadAreaContent'));
         if (status) page.emit('response', { url: () => 'https://example.invalid/prod-api/mock', status: () => status });
       }
     },
   });
-  page.locator = locator; page.getByText = (text) => locator(text); page.getByRole = () => locator('query');
+  page.locator = locator; page.getByText = (text) => locator(text); page.getByRole = (_, { name }) => ({ ...locator('query'), count: async () => Number(english ? name.test('Search') : name.test('查询')) });
   page.keyboard = { press: async (key) => clicks.push(key) };
   page.mouse = { move: async () => {}, wheel: async (_x, y) => { if (wheelWorks) { position += y; row.scrolled = true; } } };
   page.waitForTimeout = async (milliseconds) => {
@@ -361,6 +361,7 @@ function pageHarness({ records, login = false, password = false, status, listReq
       return;
     }
     waits.push({ milliseconds, clicks: [...clicks] }); tabElapsed += milliseconds;
+    if (failedClicks && lateStatus) page.emit('response', { url: () => 'https://example.invalid/prod-api/mock', status: () => lateStatus });
     if (pendingSelection && tabElapsed >= pendingSelection.at) { setTabs(pendingSelection.selected); pendingSelection = undefined; }
   };
   page.goto = async () => {
@@ -421,11 +422,49 @@ test('RD3-15 retries once only without requests or visible modals', async () => 
   assert.equal(result.locateMethod, 'L1');
   assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 2);
   assert.equal(h.stabilityWaits.length, 12);
-  for (const options of [{ requestOnError: true }, { modalOnError: true }, { observeRequest: true }]) {
+  for (const options of [{ requestOnError: true }, { observeRequest: true }]) {
     const stopped = pageHarness({ actionFailures: 1, ...options });
     await assert.rejects(stopped.run(), error => error instanceof SelectorError && error.click_retry === 0
       && error.click_wait_reason === 'not_stable');
     assert.equal(stopped.clicks.filter(click => click === 'portrait-action').length, 1);
+    assert.equal(stopped.waits.filter(wait => wait.milliseconds === 200).length, 150);
+  }
+});
+
+test('RD3-16 late modal continues without another click and retains location metadata', async () => {
+  for (const options of [{ requestOnError: true, lateModalMs: 600 }, { observeRequest: true, lateModalMs: 600 }, { modalOnError: true },
+    { ineffectiveMain: true, routeFilter: true, requestOnError: true, lateModalMs: 600 }]) {
+    const h = pageHarness({ actionFailures: 1, ...options });
+    const result = await h.run();
+    assert.equal(result.click_late, true);
+    assert.equal(result.click_retry, 0);
+    assert.equal(result.click_wait_reason, 'not_stable');
+    assert.equal(result.locateMethod, options.routeFilter ? 'L5' : 'L1');
+    if (options.routeFilter) assert.equal(typeof result.restoreList, 'function');
+    assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+  }
+});
+
+test('RD3-16 late modal still requires the matching route name', async () => {
+  const h = pageHarness({ actionFailures: 1, modalOnError: true, wrongPortrait: true });
+  await assert.rejects(h.run(), error => error instanceof SelectorError && /\u8def\u533a\u540d\u79f0\u672a\u5339\u914d/.test(error.message));
+  assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+});
+
+test('RD3-16 late wait preserves login and circuit breaker failures', async () => {
+  for (const [lateStatus, name] of [[401, 'NeedsLoginError'], [429, 'CircuitBreakerError']]) {
+    const h = pageHarness({ actionFailures: 1, requestOnError: true, lateStatus });
+    await assert.rejects(h.run(), { name });
+    assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
+    assert.equal(h.waits.length, 1);
+  }
+});
+
+test('RD3-16 classifies the final matching call-log line', () => {
+  for (const [line, expected] of [['waiting for scheduled navigations', 'navigation_wait'],
+    ['performing click action', 'click_dispatched'], ['click action done', 'click_dispatched'],
+    ['element is not visible', 'not_visible']]) {
+    assert.equal(classifyClickWaitReason('Timeout\nCall log:\n element is not stable\n' + line + '\n unmatched https://example.invalid/private'), expected);
   }
 });
 
@@ -482,7 +521,7 @@ test('RD3-14 duplicates and failed clicks stop immediately without fallback clic
     await assert.rejects(h.run(), error => error.message.endsWith(message) && JSON.stringify(error.attempts) === '["L1"]');
     assert.equal(h.waits.length, 0); assert.ok(!h.clicks.includes('portrait-action'));
   }
-  const h = pageHarness({ actionError: new SelectorError('synthetic click failure') });
+  const h = pageHarness({ actionError: new SelectorError('synthetic click failure'), requestOnError: true });
   await assert.rejects(h.run(), error => error.portraitClickAttempted && error.attempts.length === 1);
   assert.equal(h.clicks.filter(click => click === 'portrait-action').length, 1);
 });
@@ -1136,4 +1175,20 @@ test('RM5 modal uses shared five colors for system route and ZIP difficulties an
       assert.equal(row.children[3].children[0].style.backgroundColor, difficultyColor(difficultyLevel(words[i])));
     });
   }
+});
+
+test('English route detail with missing language trigger stops before any UI clicks', async () => {
+  const h = pageHarness({ english: true });
+  await assert.rejects(h.run(), DmsLanguageError);
+  assert.deepEqual(h.clicks, []);
+  assert.ok(h.closes);
+});
+test('route detail CLI language error gives only sanitized Chinese guidance', async () => {
+  const logs = [], failures = [];
+  assert.equal(await runRouteDetailScrape({ args: ['--route', 'MOCK-001'], env: cliEnv,
+    log: () => {}, errorLog: value => logs.push(value), sessionExists: async () => {},
+    capture: async () => { const error = new DmsLanguageError(); error.message = 'private browser error'; throw error; },
+    failure: async value => failures.push(value) }), 1);
+  assert.match(logs.join(''), /程序自动切换中文失败。请在公用电脑打开 DMS，把右上角语言手动切换为中文/);
+  assert.doesNotMatch(logs.join(''), /private browser error/);
 });

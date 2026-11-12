@@ -183,6 +183,17 @@ npm run dms:scrape-stations -- [--stations SFO01,SMF01,...] [--max-routes-per-st
 
 ## 10. 停止条件（任何一个都停止整个批次，不进入下一个 Station）
 
+SC4（Product Owner 2026-11-05）：目标菜单项数量为 0，且可见 `li.dbu-web-main-dropdown-menu-item` 中至少有一个 Station 文字符合 `^[A-Z]{3}\d{2}$` 时，可判定目标不在已展开的菜单中。只点击 trigger 打开 / 关闭菜单，确认所有菜单项隐藏、页头 Station 未变后，抛出 `StationNotInMenuError`；不点击 Station、不产生 switch-org 请求。菜单未展开、没有可见 Station、重复目标、关闭失败或页头变化仍按 `StationSwitchError` 停止。
+
+批次捕获该专用错误，以 `{ code, district, reason: 'not_in_dms_menu' }` 写入 progress、JSON run state / batch summary 的 `skipped` 并记录汇总日志；继续下一站，不写该站 snapshot / Route Detail，不算失败。其他站完成则批次完成、无 stop_reason。静态 `scrape_disabled` 不变。3100 沿用 progress.skipped 显示原因。
+
+### SC4 实现记录（Implementation Notes，2026-11-05）
+
+- DB 现有 Station 状态没有 skipped，且 scope 在 INSERT 后不可更新。沿用 brief 允许的“DB 无该站运行行、跳过信息在 JSON 运行记录”方案：切站成功后才持久化 in_progress，DB sink 不插入 pending / skipped 条目；不新增状态、migration 或权限。DB v_runs 的 scope.skipped 仍仅包含配置跳过，运行时跳过详情读取 JSON 运行记录 / progress。
+- JSON state 中跳过站保留 pending 并另存 skipped，完成与缺失清单计算排除本次运行时跳过；若批次被其他错误中止，续跑会重新检查缺站，避免把临时缺站永久记为完成。
+- 验证：`npm.cmd test`（即 `npm test`）684/684 通过，0 failed / skipped，日志 `.handoff/SC4-tests.log`；包含菜单关闭 / 页头变化保护、无 switch-org 请求、中间站跳过后继续、历史 snapshot 保留、真实测试库双写与 3100 合成 DOM 显示。`git diff --check` 通过（仅 LF/CRLF 提示）。没有 lint / build scripts。首轮发现状态持久化时机回归，修复后全量通过；新增 DB 断言已限定本次运行，不把历史运行行计入。
+- 未访问真实 DMS、运行 dms:*、重启服务或改正式数据库；没有新增依赖、提交、推送或部署。南加州配置与相关 SC2 / SC3 测试恢复为 HEAD 的 15 站版本。真实地图 / 3100 浏览器预览及 Product Owner 签字未执行。
+
 429 / 5xx、401 / 登录页 / 密码框、`switch-org` 失败、右上角 Station 不等于目标、列表记录的 `transitStationName` 不一致、列表请求失败或超时、0 Route 但不满足第 5.3 节条件、transform / 校验失败（含同站 ZIP 冲突）、RD3 / RD4 的所有详情校验、定位全部失败、per-route / per-station / whole-batch cap、完整性检查失败、Ctrl+C。停止时：已写入的数据保留，run state 中当前 Station 标为 `stopped`，写 summary，尝试恢复 `original_station`，写诊断文件。**不重试**。
 
 ## 11. Dashboard / 地图兼容（第 2 个 Codex 任务，Claude 设计）
@@ -294,3 +305,26 @@ npm run dms:scrape-stations -- [--stations SFO01,SMF01,...] [--max-routes-per-st
 - 新增 6 项测试，覆盖 API 顺序/额外站点/快照过滤、选择优先级、存储异常（含 getter）、Profile 保存/恢复/URL 不覆盖、Map 保存/恢复/ZIP 自动切站不保存。T7 静态资源测试验证新模块的白名单、原 CSP 和安全响应头。`npm.cmd test`（npm test）386/386 通过，0 failed/skipped，日志 `.handoff/MS-T2b-tests.log`；T7、route-map-web、map-state、RM5/RM5b 回归通过。`git diff --check` 通过，仅 LF/CRLF 提示。没有 lint/build scripts，未增加依赖。
 - 使用已有 Playwright Chromium 对临时合成快照和 loopback API 做真实浏览器检查：默认 SFO01、Profile 手动保存、Map 恢复并手动保存、Profile URL 优先且不写入、Map ZIP 自动切站且不保存，全部通过，无 pageerror。未读取真实 runtime，合成环境没有底图 archives；底图观感、实际九站点及 1440/390 预览签字仍待 Claude/Product Owner 验证。
 - 本轮仅改变站点展示顺序和浏览器偏好，不修改快照/cache schema、数据集、需求或验收标准。保留开始前工作区改动；未访问 DMS、读取 session、写入凭据、commit、push、部署或发布。MS-AC12/13 相关自动化回归通过；MS-AC14 自动化部分通过，实际站点/布局预览未验收；MS-AC1–11 与 MS-AC15 的真实 DMS 验证不属于本次任务。
+
+## SC5 — 页头起始值不是 Station 代码（Product Owner 2026-11-11）
+
+**背景：** 2026-11-11 重新登录后，DMS 页头 Station 下拉框（`header .dbu-web-main-dropdown-trigger span.groupCheck`）显示 `GOFO-EXPRESS`，不是 Station 代码。`readCurrentStation` 要求 `^[A-Z]{3}\d{2}$`，所以批次在读取 `original_station` 时以 `StationSwitchError('页头 Station 格式无效')` 停止（run `4bbec45d…`）。Product Owner 要求：起始值不是 Station 时也要能通过同一个下拉框正常切换到目标站点。
+
+**规则：**
+
+1. **起始值**：`original_station` 可以是 Station 代码，也可以是“组织标签”：去掉首尾空白后符合 `^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$`（例如 `GOFO-EXPRESS`）。不符合（空、过长、含其他字符）仍按 `StationSwitchError` 停止。summary 中记录 `original_station` 原文和 `original_kind: 'station' | 'label'`。
+2. **切换与校验不放宽**：切到目标 Station 仍用原菜单 locator、`switch-org` 响应和页头文本严格确认（页头必须等于目标 Station 代码）；逐页身份校验、`assertCurrentStation` 不变。
+3. **恢复**：
+   - 起始值为 Station 代码：不变。
+   - 起始值为组织标签：结束时打开同一菜单，查找文字**精确等于**该标签的菜单项；恰好 1 个时点击，并确认页头文本等于该标签后记 `original_station_restored: true`。找不到、多于 1 个或确认失败时，记 `false`，在日志中写一行“原页头为组织标签，未能恢复”，**不改变停止原因、不视为失败**；页头停留在最后一个处理的 Station。
+4. 菜单缺站判断（SC4）中“页头未变化”的比较，同样按原文比较起始值（Station 或标签）。
+5. 适用于所有使用页头切站的入口（批次、route-detail 批次、global Station 模式），共用同一读取函数。
+
+### SC5 实现记录（Implementation Notes，2026-11-11）
+
+- 新增 `readHeaderOrigin`，返回 `{ kind, value }`；与 `waitForHeaderStation` 共用原有 200 ms、约 30 秒有界轮询，按 SC5 校验去除首尾空白后的起始值。`readCurrentStation` 和写入前严格身份校验保持不变。切站起始读取及 SC4 菜单关闭后的原文比较使用新函数。
+- 多站批次保存 `original_kind`，Station 起始值沿用现有恢复流程；组织标签通过同一菜单精确匹配唯一项并确认页头恢复。标签中的正则特殊字符会转义。失败记录 false 和一行“原页头为组织标签，未能恢复”，保留批次状态与停止原因。
+- 未经真实 DMS 验证；无法确定组织标签项是否触发 `switch-org`，标签恢复以页头精确文本确认为准，仍受现有 guarded 安全监控保护。目标 Station 的 switch-org / 页头 / 自动列表处理和安全上限保持现有行为。检索确认当前仅多站批次使用页头切站及 global Station 模式；route-detail 批次使用筛选控件，没有页头原值恢复入口。
+- 新增合成测试覆盖标签起始抓取与恢复、非法起始值、缺项 / 重复 / 确认失败、完成与停止状态保留、标签起始的 SC4 缺站，以及标签正则字符转义。原有测试断言未改；定向测试 70/70 通过。
+- 按 brief 执行 `node --test server/test/`，不加载 `.env`：835 项，777 passed、56 skipped、2 failed。失败为 CD-AC30 / CD-AC31，均报“未配置 NC_TEST_DB_*”；全量通过条件尚未满足，留待 Claude 本机运行。日志 `.handoff/SC5-tests.log`、`.handoff/SC5-targeted-tests.log`。`git diff --check` 通过，仅 LF/CRLF 提示；项目无 lint / build scripts。
+- 本轮未读取 `.env`、真实 runtime 或 session，未访问 DMS、重启服务、新增依赖、commit、push 或部署；保留工作区已有改动。

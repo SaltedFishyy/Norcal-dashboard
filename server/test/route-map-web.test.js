@@ -1,8 +1,9 @@
 import test from 'node:test';
+import { namedFlavor } from '@protomaps/basemaps';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { polygonStyle, selectRoute, POLYGON_STYLE, hoverStyle, uncoveredZipStyle } from '../../web/map-state.js';
-import { MAP_RENDER, basemaps, createMapView, ROUTE_LABEL } from '../../web/map-view.js';
+import { MAP_RENDER, basemaps, createMapView, ROUTE_LABEL, BASEMAP_FLAVOR, SERVICE_BOUNDS, serviceTile } from '../../web/map-view.js';
 import { routeColor, palette } from '../../web/route-colors.js';
 import { buildRouteMap, lookupZip } from '../src/route-map/route-map.js';
 import { profiles, boundaries } from './route-map-fixtures.js';
@@ -153,13 +154,15 @@ export class Element {
   replaceChildren(...children) { this.children = children; this.textContent = ''; }
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; delete this[name]; }
+  getAttribute(name) { return this.attributes[name]; }
+  scrollIntoView(options) { this.scrolled = options; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
   focus() { this.focused = true; }
   showModal() { this.open = true; }
   close() { this.open = false; }
 }
 
-export async function fixture(search = '', basemapStatus = 206, storage = null, warehouseOptions = {}) {
+export async function fixture(search = '', basemapStatus = 206, storage = null, warehouseOptions = {}, basemapTile = async () => { throw new Error('mock archive unavailable'); }) {
   const { createMapPage } = await import('../../web/map.js');
   const warehouseModules = await Promise.all([import('../../web/warehouse-layer.js'), import('../../web/warehouse-panel.js')]);
   const ids = ['route-map', ...['district', 'station', 'dsp', 'message', 'retry', 'content', 'selection', 'coverage',
@@ -191,6 +194,8 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
       for (const feature of features.features) {
         const layer = { feature, options: { ...options }, styles: [options.style?.(feature)],
           setStyle(value) { this.styles.push(value); },
+          closeTooltip() { this.tooltipOpen = false; this.tooltipCloses = (this.tooltipCloses || 0) + 1; },
+          openTooltip() { this.tooltipOpen = true; this.listeners.tooltipopen?.(); },
           bindTooltip(value, options) { this.tooltip = value; this.tooltipOptions = options; },
           on(listeners) { this.listeners = listeners; } };
         options.onEachFeature?.(feature, layer); group.layers.push(layer);
@@ -219,11 +224,12 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   };
   const page = createMapPage({ document: doc, leaflet, search, storage,
     loadWarehouseModules: () => Promise.resolve(warehouseModules), ...warehouseOptions, protomaps: {
-    PmtilesSource: class { constructor(url) { this.p = { url, getZxy: async () => { throw new Error('mock archive unavailable'); } }; } },
+    paintRules: flavor => [{ flavor }], labelRules: (flavor, lang) => [{ flavor, lang }],
+    PmtilesSource: class { constructor(url) { this.p = { url, getZxy: (...args) => basemapTile(url, ...args) }; } },
     leafletLayer(options) {
     const layer = { options, on(name, fn) { this.error = fn; }, addTo() { baselayers.push(this); return this; } }; return layer;
   } }, fetch: async (url, options) => {
-    if (url.startsWith('/basemap/')) return { status: basemapStatus, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+    if (url.startsWith('/basemap/')) return { status: typeof basemapStatus === 'function' ? basemapStatus(url) : basemapStatus, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
     if (url === '/api/capabilities' && initialCapabilities) {
       initialCapabilities = false;
       const reply = warehouseOptions.capabilityReply;
@@ -403,10 +409,11 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   assert.equal(map.options.maxBounds, undefined);
   assert.deepEqual(map.zoomTitles, { zoomInTitle: '放大', zoomOutTitle: '缩小' });
   assert.equal(e['map-missing-title'].textContent, '缺少边界的邮编 (2)');
-  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 10, 10, 10, 10, 14]);
-  assert.ok(baselayers.every(layer => layer.options.flavor === 'light'));
-  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/socal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/pnw.pmtiles', '/basemap/az.pmtiles', '/basemap/hawaii.pmtiles', '/basemap/ops.pmtiles']);
-  assert.equal(baselayers[0].options.bounds, undefined);
+  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 10, 10, 10, 10, 14, 14]);
+  assert.ok(baselayers.every(layer => !('flavor' in layer.options) && layer.options.paintRules[0].flavor === BASEMAP_FLAVOR && layer.options.labelRules[0].lang === 'en'));
+  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/socal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/pnw.pmtiles', '/basemap/az.pmtiles', '/basemap/hawaii.pmtiles', '/basemap/ops.pmtiles', '/basemap/service.pmtiles']);
+  assert.deepEqual(basemaps.find(layer => layer.name === 'us').bounds, [[24.0, -125.0], [49.5, -66.5]]);
+  assert.deepEqual(baselayers[0].options.bounds, [[24.0, -125.0], [49.5, -66.5]]);
   assert.deepEqual(baselayers[1].options.bounds, [[35.5, -124.6], [42.5, -119.0]]);
   assert.deepEqual(baselayers[3].options.bounds, [[34.0, -116.5], [47.0, -103.0]]);
   assert.deepEqual(baselayers[4].options.bounds, [[42.0, -124.9], [49.1, -116.4]]);
@@ -448,7 +455,9 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
 test('RM2 missing basemap archives show a hint without blocking route polygons', async () => {
   const { elements: e, page, groups, replies, reply, baselayers } = await fixture('', 404);
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload())); await page.start();
-  assert.equal(baselayers.length, 0);
+  // Service preflight is lazy: the layer exists but requests no data until z11+.
+  assert.equal(baselayers.length, 1);
+  assert.equal(baselayers[0].options.url.url, '/basemap/service.pmtiles');
   assert.equal(e['map-basemap-message'].hidden, false);
   assert.match(e['map-basemap-message'].textContent, /底图尚未安装/);
   assert.equal(groups[0].layers.length, 2);
@@ -498,7 +507,7 @@ test('RM5b outlines stack dark/white route and ZIP strokes, pass events through 
   check(active()[2], '#0b1220', 5); check(active()[3], '#ffffff', 3);
   assert.deepEqual(active()[2].layers[0].feature.geometry, groups[0].layers[0].feature.geometry);
   const before = active(), fits = map.fits.length, calls = requests.length;
-  for (const mode of [1, 0, 1]) controls[1].children[mode].listeners.click();
+  for (const mode of [3, 0, 3]) controls[1].children[mode].listeners.click();
   assert.deepEqual(active(), before); assert.equal(map.fits.length, fits); assert.equal(requests.length, calls);
   const polygon = groups[0].layers[0], baseStyle = polygon.styles.at(-1); polygon.listeners.mouseover();
   assert.deepEqual(polygon.styles.at(-1), hoverStyle(baseStyle));
@@ -527,12 +536,12 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
   const mode = controls[1], legend = controls[2];
   assert.equal(mode.attributes.role, 'group'); assert.equal(mode.attributes['aria-label'], '地图颜色模式');
-  assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按难易度']);
+  assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按 DSP', '按站点', '按难易度']);
   assert.ok(mode.children.every(button => button.type === 'button')); // Native buttons support Enter and Space.
-  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['true', 'false']);
-  assert.equal(legend.hidden, true);
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['true', 'false', 'false', 'false']);
+  assert.equal(legend.hidden, false);
   const fits = map.fits.length, calls = requests.length, count = groups.length;
-  mode.children[1].listeners.click();
+  mode.children[3].listeners.click();
   assert.equal(legend.hidden, false); assert.equal(legend.children[0].textContent, '颜色：线路难度');
   assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据']);
   assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
@@ -552,13 +561,13 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   const highlight = groups.filter(group => !group.options.pane).at(-1).layers[0];
   assert.equal(highlight.styles[0].fillColor, difficultyColor('A')); assert.equal(highlight.styles[0].color, '#334155');
   mode.children[0].listeners.click();
-  assert.equal(legend.hidden, true);
+  assert.equal(legend.hidden, false);
   assert.equal(highlight.styles.at(-1).fillColor, polygonStyle({route_id: 1}, selectRoute(1)).fillColor);
   assert.equal(highlight.tooltip.children.length, 4);
-  mode.children[1].listeners.click();
+  mode.children[3].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
-  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'true']);
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'false', 'false', 'true']);
   groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.hover.color);
   groups[0].layers[0].listeners.mouseout(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.selectedZip.color);
   doc.listeners.keydown({ key: 'Escape' }); assert.equal(legend.children[0].textContent, '颜色：线路难度');
@@ -572,7 +581,7 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
   assert.match(e['map-message'].textContent, /线路详情文件无效，ZIP 难度不可用/);
   assert.equal(e['map-message'].className, 'map-warning');
-  controls[1].children[1].listeners.click(); e['map-routes'].children[0].listeners.click();
+  controls[1].children[3].listeners.click(); e['map-routes'].children[0].listeners.click();
   assert.match(allText(e['map-summary']), /暂无 ZIP 难度数据/);
   assert.doesNotMatch(allText(e['map-summary']), /npm run/);
   assert.ok(groups[0].layers.every(layer => layer.styles.at(-1).fillColor === '#9ca3af'));
@@ -596,7 +605,7 @@ test('RM5 ZIP search highlight uses the same difficulty fields as polygon clicks
   const cache = details(), data = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
   const highlightLayer = () => groups.filter(group => !group.options.pane && group.layers[0]?.styles[0]).at(-1).layers[0];
-  controls[1].children[1].listeners.click();
+  controls[1].children[3].listeners.click();
   replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002', details: cache })));
   await page.searchQuery('00002', true);
   assert.equal(highlightLayer().styles[0].fillColor, '#dc2626');
@@ -647,7 +656,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   assert.equal(e['map-station'].children[3].disabled, true); assert.equal(writes.length, 0);
   assert.equal(e['map-station'].value, 'MOCKA');
   const initial = groups[0];
-  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
+  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, POLYGON_STYLE.outside.fillOpacity);
   assert.equal(e['map-coverage-count'].textContent, '2 / 4 ZIP 已上图');
   assert.equal(e['map-missing'].children[0].children[1].textContent, 'MOCKA');
   e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
@@ -690,7 +699,7 @@ test('RM6 compact ZIP fields, badges, safe four-row tooltips and shared clear bu
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
   e['map-routes'].children[0].listeners.click();
   assert.equal(e['map-clear'].parentNode, e['map-summary-heading']);
-  for (const mode of [0, 1]) {
+  for (const mode of [0, 1, 2, 3]) {
     controls[1].children[mode].listeners.click();
     const tooltip = groups[0].layers[0].tooltip;
     assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>'], ['首票价格', '—']]);
@@ -821,6 +830,7 @@ test('RM8 retains text, hints, filtering, viewport and invalidates old ZIPs acro
 
 
 test('R1 SVG renderers share configurable padding across polygons, highlights and outlines', async () => {
+  assert.equal(MAP_RENDER.svgPadding, 1);
   const { page, groups, renderers, replies, reply } = await fixture();
   replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
   await page.start();
@@ -841,20 +851,23 @@ test('R1 SVG renderers share configurable padding across polygons, highlights an
   }
 });
 
-test('R1 basemap zoom options retain unrestricted US coverage and deferred zoom updates', async () => {
+test('MAP-PERF basemaps hand off US coverage to regional layers and retain buffered tiles', async () => {
   const { baselayers } = await fixture();
   assert.equal(baselayers.length, basemaps.length);
   for (const [index, layer] of baselayers.entries()) {
     const { name, ...options } = basemaps[index];
     assert.equal(layer.options.updateWhenZooming, false);
-    assert.equal(layer.options.flavor, 'light'); assert.equal(layer.options.noWrap, true);
+    assert.equal(layer.options.keepBuffer, 4);
+    assert.equal(layer.options.backgroundColor, BASEMAP_FLAVOR.background); assert.equal(layer.options.noWrap, true);
     for (const [key, value] of Object.entries(options)) assert.deepEqual(layer.options[key], value);
     assert.equal(layer.options.url.url, '/basemap/' + name + '.pmtiles');
   }
   assert.equal(Object.hasOwn(baselayers[0].options, 'minZoom'), false);
-  assert.equal(Object.hasOwn(baselayers[0].options, 'maxZoom'), false);
-  assert.equal(Object.hasOwn(baselayers[6].options, 'minZoom'), false);
-  assert.deepEqual(baselayers.slice(1).map(layer => layer.options.minZoom), [7, 7, 7, 7, 7, undefined, 10]);
+  assert.equal(basemaps[0].maxZoom, 6);
+  assert.equal(baselayers[0].options.maxZoom, 6);
+  assert.equal(basemaps[6].minZoom, 7);
+  assert.equal(baselayers[6].options.minZoom, 7);
+  assert.deepEqual(baselayers.slice(1).map(layer => layer.options.minZoom), [7, 7, 7, 7, 7, 7, 10, 11]);
 });
 
 test('R1 focus outline suppression is scoped to interactive map SVG paths', async () => {
@@ -920,19 +933,19 @@ test('RM10d label dimming matches polygons for station focus, DSP filtering and 
     map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 });
     view.render(data, { fitToStation: false, focusStation: 'A' });
     let layers = groups.at(-1).layers;
-    const check = (dimmed, selected = [false, false]) => {
+    const check = (dimmed, selected = [false, false], outside = [false, false]) => {
       routeMarkers.slice(-2).forEach((marker, index) => {
-        assert.equal(labelVisible(marker), true);
+        assert.equal(labelVisible(marker), !outside[index]);
         assert.equal(marker.node.classList.contains('route-label--dimmed'), dimmed[index]);
         assert.equal(marker.node.classList.contains('route-label--selected'), selected[index]);
         assert.equal(layers[index].styles.at(-1).fillOpacity,
-          dimmed[index] ? POLYGON_STYLE.dimmed.fillOpacity
+          outside[index] ? POLYGON_STYLE.outside.fillOpacity : dimmed[index] ? POLYGON_STYLE.dimmed.fillOpacity
             : selected[index] ? POLYGON_STYLE.selectedRoute.fillOpacity : POLYGON_STYLE.focused.fillOpacity);
       });
     };
-    check([false, true]);
+    check([false, false], [false, false], [false, true]);
     // Beta reverses the match, then removing station focus isolates the DSP filter.
-    view.setDsp('Beta'); check([true, true]);
+    view.setDsp('Beta'); check([true, false], [false, false], [false, true]);
     view.render(data, { fitToStation: false });
     layers = groups.at(-1).layers;
     check([true, false]);
@@ -1018,11 +1031,11 @@ test('R2a label CSS removes divIcon defaults, centers text and uses classes with
   assert.match(css, /transform: translate\(-50%, -50%\)/);
   const labelRules = css.match(/\.route-label[^{}]*\{[^}]*\}/g).join('\n');
   assert.doesNotMatch(labelRules, /text-shadow:/);
-  assert.match(css, /\.route-label > span \{[^}]*background: rgba\(255,255,255,.72\);[^}]*padding: 0 4px;[^}]*border-radius: 2px;[^}]*box-shadow: 0 0 0 1px rgba\(15,23,42,.08\);/);
-  assert.match(css, /\.route-label--selected > span \{[^}]*padding: 1px 5px;[^}]*border-radius: 3px;[^}]*box-shadow: 0 0 0 1px rgba\(15,23,42,.3\), 0 1px 3px rgba\(15,23,42,.2\);/);
+  assert.match(css, /\.route-label > span \{[^}]*background: rgba\(10,16,30,.62\);[^}]*padding: 0 6px;[^}]*border-radius: 999px;[^}]*box-shadow: none;/);
+  assert.match(css, /\.route-label--selected > span \{[^}]*padding: 1px 6px;[^}]*border-radius: 999px;[^}]*box-shadow: 0 0 0 1.5px #fff;/);
   assert.doesNotMatch(labelRules, /\.route-label[^{}]*> span\s*\{[^}]*opacity:/);
-  assert.match(css, /\.route-label--selected > span \{[^}]*font-size: 18px;[^}]*line-height: 22px;[^}]*font-weight: 700;[^}]*color: #0f172a;[^}]*background: rgba\(255,255,255,.95\);/);
-  assert.match(css, /\.route-label\.route-label--dimmed \{ opacity: 0.4; color: #475569; font-weight: 600; \}/);
+  assert.match(css, /\.route-label--selected > span \{[^}]*font-size: 18px;[^}]*line-height: 22px;[^}]*font-weight: 700;[^}]*color: #ffffff;[^}]*background: rgba\(10,16,30,.9\);/);
+  assert.match(css, /\.route-label\.route-label--dimmed \{ opacity: \.35; \}/);
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|cssText|setAttribute\(['"]style/);
 });
 
@@ -1063,7 +1076,7 @@ test('RM10 primary regions beat larger secondary regions at the same priority', 
 test('RM10b tiers use exclusive boundaries, padded collisions and unpadded viewport bounds', async () => {
   const { view, map, data, routeMarkers } = await labelFixture();
   let edge = false;
-  map.latLngToContainerPoint = ([lat, lng]) => ({ x: edge ? 9 : 200 + (lng > 5 ? 30 : 0), y: 200 });
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: edge ? 11 : 200 + (lng > 5 ? 32 : 0), y: 200 });
   map.zoom = 7; view.render(data, { fitToStation: false });
   for (const [zoom, tier, visible] of [[7, 'far', [true, false]], [9, 'far', [true, false]],
     [10, 'mid', [true, true]], [12, 'near', [true, true]]]) {
@@ -1088,10 +1101,12 @@ test('RM10e CSS preserves tier sizes and layout dimensions and selection stays p
   }
   assert.match(css, /\.route-labels--far \.route-label--selected,\s*\.route-labels--mid \.route-label--selected \{ opacity: 1; \}/);
   assert.match(css, /font-size: 17px; line-height: 22px;/);
-  assert.match(css, /\.route-label \{[^}]*font-weight: 700;[^}]*color: #334155;[^}]*opacity: 1;/);
+  assert.match(css, /\.route-label \{[^}]*font-weight: 600;[^}]*color: #ffffff;[^}]*opacity: 1;/);
   assert.match(css, /\.route-label > span \{[^}]*line-height: 22px;/);
+  assert.equal(ROUTE_LABEL.widthPadding, 12);
+  assert.equal(ROUTE_LABEL.selectedWidthPadding, 15);
   assert.deepEqual(ROUTE_LABEL.tiers.map(t => [t.name, t.characterWidth, t.height, t.padding, t.selectedCharacterWidth, t.selectedHeight]), [
-    ['far', 8.5, 18, 10, 10.5, 26], ['mid', 9, 20, 5, 10.5, 26], ['near', 9.5, 22, 2, 11, 26],
+    ['far', 8.5, 18, 16, 10.5, 26], ['mid', 9, 20, 5, 10.5, 26], ['near', 9.5, 22, 2, 11, 26],
   ]);
 });
 
@@ -1124,11 +1139,11 @@ test('RM11 shared assignments persist in view and focused labels track priority'
   assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, selectRoute(1), 'route', 'A', 'Alpha', colors).fillColor);
   const source = await fs.readFile(new URL('../../web/map.js', import.meta.url), 'utf8');
   assert.equal(source.match(/assignRouteColors\(/g).length, 1);
-  assert.match(source, /panel.render\(data, \{ focusStation: station, routeColors \}\)/);
-  assert.match(source, /view.render\(data, \{ fitToStation: true, focusStation: station, routeColors \}\)/);
+  assert.match(source, /panel.render\(data, \{ focusStation: station, routeColors, groupColors \}\)/);
+  assert.match(source, /view.render\(data, \{ fitToStation: true, focusStation: station, routeColors, groupColors \}\)/);
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /\.route-label--focused \{ color: #0f172a; \}/);
-  assert.match(css, /\.route-label--focused > span \{ background: rgba\(255,255,255,\.9\); \}/);
+  // Focused and dimmed labels inherit the normal capsule colors.
+  assert.doesNotMatch(css, /\.route-label(?:--focused|\.route-label--dimmed)\s*(?:> span)?\s*\{[^}]*(?:color|background):/);
 });
 
 
@@ -1154,4 +1169,349 @@ test('RM12 All Stations gives every route label focused priority', async () => {
   assert.ok(routeMarkers.length > 0);
   for (const marker of routeMarkers)
     assert.ok(marker.node.classList.contains('route-label--focused'));
+});
+
+
+test('MVR filter is scoped to the basemap tile pane, with an unfiltered ocean background', async () => {
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  const block = css.split('/* MVR */')[1];
+  const rules = [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  assert.deepEqual(rules.filter(([, , body]) => /(?:^|;)\s*filter:/.test(body)).map(([, selector]) => selector.trim()),
+    ['.map-page .leaflet-tile-pane']);
+  assert.match(block, /filter: none/);
+  assert.match(block, /\.map-page #route-map \{ background: #93dde5;/);
+  const grid = await fs.readFile(new URL('../../node_modules/leaflet/src/layer/tile/GridLayer.js', import.meta.url), 'utf8');
+  assert.match(grid, /pane: 'tilePane'/);
+  const view = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
+  const options = view.match(/protomaps.leafletLayer\(\{([^}]+)\}/)[1];
+  assert.ok(!options.includes('pane:')); // Protomaps inherits GridLayer's tilePane.
+  const { map, groups, view: instance, data, routeMarkers } = await labelFixture();
+  instance.render(data, { fitToStation: false });
+  assert.equal(groups.at(-1).options.pane, undefined); // GeoJSON uses overlayPane.
+  assert.ok(routeMarkers.every(marker => marker.options.pane === 'route-labels'));
+  assert.equal(map.panes['selection-outline'].style.zIndex, '450');
+});
+
+
+test('MVR outside labels hide during route selection and return in overview; mixed membership stays visible', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 });
+  view.render(data, { fitToStation: false, focusStation: 'A' });
+  view.applySelection(selectRoute({ route_id: 1, station: 'A' }));
+  assert.equal(labelVisible(routeMarkers[0]), true);
+  assert.equal(labelVisible(routeMarkers[1]), false);
+  view.applySelection(selectRoute({ route_id: 2, station: 'B' }));
+  assert.equal(labelVisible(routeMarkers[1]), true); // Explicit selection wins over outside.
+  view.render(data, { fitToStation: false });
+  assert.ok(routeMarkers.slice(-2).every(labelVisible));
+  const mixed = structuredClone(data.features.features[1]);
+  mixed.properties.station = 'A';
+  data.features.features.push(mixed);
+  view.render(data, { fitToStation: false, focusStation: 'A' });
+  assert.ok(routeMarkers.slice(-2).every(labelVisible)); // Only all-outside members hide a route label.
+});
+
+
+test('MVR-T3 route legend counts mapped routes by station and DSP, deduplicates and hides without features', async () => {
+  const { mapText: t } = await import('../../web/map-text.js');
+  assert.equal(t.legendRouteCount(2), '2 条线路 · 颜色对应右侧列表');
+  assert.deepEqual(t.legendRouteStates, ['选中', '当前范围', '其他']);
+  const { view, data, controls } = await labelFixture();
+  const legend = controls.at(-1);
+  assert.equal(legend.hidden, true);
+  view.setColorMode('difficulty'); assert.equal(legend.hidden, true);
+  view.setColorMode('route');
+  data.features.features.push(structuredClone(data.features.features[0]));
+  const check = count => {
+    assert.equal(legend.hidden, false);
+    assert.equal(legend.children[0].textContent, t.byRoute);
+    assert.equal(legend.children[1].textContent, t.legendRouteCount(count));
+    assert.deepEqual(legend.children.slice(2).map(row => row.children[1].textContent), t.legendRouteStates);
+    const states = ['selectedRoute', 'focused', count === 2 ? 'dimmed' : 'outside'];
+    legend.children.slice(2).forEach((row, index) => {
+      assert.equal(row.children[0].children[0].style.backgroundColor, `rgba(${palette[0].slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE[states[index]].fillOpacity})`);
+      assert.equal(row.children[0].className, 'map-legend-sample');
+      assert.equal(row.children[0].children[0].style.border, `${POLYGON_STYLE[states[index]].weight}px solid rgba(10, 16, 30, ${POLYGON_STYLE[states[index]].opacity})`);
+    });
+  };
+  view.render(data, { focusStation: null }); check(2);
+  assert.equal(legend.children[4].children[0].children[0].style.backgroundColor, `rgba(${palette[0].slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE.dimmed.fillOpacity})`);
+  view.render(data, { focusStation: 'A' }); check(1);
+  assert.equal(legend.children[4].children[0].children[0].style.backgroundColor, `rgba(${palette[0].slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE.outside.fillOpacity})`);
+  view.setDsp('Beta'); check(0);
+  view.render(data, { focusStation: 'B' }); check(1);
+  view.setDsp(null); check(1);
+  view.applySelection(selectRoute(1)); check(1);
+  view.setColorMode('difficulty');
+  assert.equal(legend.hidden, false);
+  assert.equal(legend.children[0].textContent, t.legendZip(undefined));
+  assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), t.legendItems);
+  view.clear(); assert.equal(legend.hidden, true);
+  view.setColorMode('route'); assert.equal(legend.hidden, true);
+  view.render({ routes: [], features: { type: 'FeatureCollection', features: [] } });
+  assert.equal(legend.hidden, true);
+});
+
+test('MVR-T3 sidebar search does not change route legend count', async () => {
+  const { page, controls, elements: e, replies, reply } = await fixture();
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload()));
+  await page.start();
+  const legend = controls[2], count = legend.children[1].textContent;
+  e['map-search'].value = 'no matching route'; await e['map-search'].listeners.input();
+  assert.equal(e['map-no-match'].hidden, false);
+  assert.equal(legend.children[1].textContent, count);
+});
+
+
+test('MVR-T3 legend CSS scopes the translucent panel and compacts states on narrow screens', async () => {
+  const css = (await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8')).split('/* MVR */')[1];
+  assert.match(css, /background: rgba\(10,16,30,\.86\)/);
+  assert.match(css, /border: 1px solid rgba\(255,255,255,\.12\)/);
+  assert.match(css, /backdrop-filter: blur\(4px\)/);
+  assert.match(css, /max-width: calc\(100vw - 64px\)/);
+  assert.match(css, /width: 18px; height: 12px;[^}]*background: #e9e4d8; border-radius: 3px/);
+  assert.match(css, /width: 10px; height: 10px; border-radius: 50%/);
+  assert.match(css, /@media \(max-width: 450px\)[\s\S]*margin-bottom: 32px/);
+  assert.match(css, /\.map-page \.map-legend \.map-legend-state \{ display: none;/);
+});
+
+
+test('MVR-T5 group modes share map, tooltip, list and legend colors and hide labels', async () => {
+  const { assignGroupColors, dspColorKey, modeColor } = await import('../../web/map-state.js');
+  const { view, data, groups, controls, routeMarkers } = await labelFixture();
+  const features = data.features.features;
+  const groupColors = { dsp: assignGroupColors(features, p => dspColorKey(p.dsp_name)),
+    station: assignGroupColors(features, p => p.station) };
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { doc, elements: e } = await fixture();
+  const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
+  const routes = [...new Map(features.map(f => [f.properties.route_id, { ...f.properties, zip_count: 1 }])).values()];
+  const panelData = { ...payload(), routes };
+  panel.render(panelData, { groupColors });
+  view.render(data, { groupColors });
+  const legend = controls.at(-1);
+  for (const mode of ['dsp', 'station']) {
+    view.setColorMode(mode); panel.setColorMode(mode);
+    assert.ok(routeMarkers.every(marker => !labelVisible(marker)));
+    for (const layer of groups.at(-1).layers) {
+      const p = layer.feature.properties, color = modeColor(p, mode, undefined, groupColors);
+      assert.equal(layer.styles.at(-1).fillColor, color);
+      assert.equal(layer.tooltip.children[0].children[0].children[0].style.backgroundColor, color);
+      const row = e['map-routes'].children.find(row => row.className === 'map-route'
+        && row.children[1].textContent === p.route_name);
+      assert.equal(row.children[0].style.backgroundColor, color);
+      assert.ok(legend.children[1].children.some(row => row.children[0].style.backgroundColor === color));
+    }
+    assert.ok(legend.children[1].children.every(row => Boolean(row.listeners.click) === (mode === 'dsp')));
+    const p = features[0].properties;
+    view.setDsp(p.dsp_name);
+    assert.equal(legend.children[1].children.length, mode === 'dsp' ? 2 : 1);
+    view.setDsp(null);
+    view.render(data, { focusStation: p.station, groupColors });
+    assert.ok(legend.children[1].children.length > 0);
+    view.render(data, { groupColors });
+  }
+});
+
+test('MVR-T6 legend shares DSP dropdown changes, toggles, retains alternatives and rejects ambiguous names', async () => {
+  const { elements: e, page, replies, reply, controls, groups } = await fixture();
+  const data = payload();
+  data.routes.forEach((route, i) => route.dsp_name = i ? 'MOCK-BBB' : 'MOCK-AAA');
+  data.features.features.forEach(feature => feature.properties.dsp_name = data.routes.find(route => route.route_id === feature.properties.route_id).dsp_name);
+  data.features.features.push({ ...data.features.features[0], properties: { ...data.features.features[0].properties, ...data.routes[1], postal_code: '99999' } });
+  replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data));
+  await page.start(); controls[1].children[1].listeners.click();
+  const rows = () => controls[2].children[1].children;
+  const row = key => rows().find(row => row.children[1].textContent.startsWith(key));
+  const count = rows().length;
+  assert.equal(row('AAA').tagName, 'button');
+  groups[0].layers.find(layer => layer.feature.properties.dsp_name === 'MOCK-BBB').listeners.click({});
+  row('AAA').listeners.click();
+  assert.equal(e['map-dsp'].value, 'MOCK-AAA');
+  assert.equal(e['map-summary-panel'].hidden, true); // RM7-5 clears incompatible selection.
+  assert.equal(rows().length, count);
+  assert.equal(row('AAA').attributes['aria-pressed'], 'true');
+  assert.ok(e['map-routes'].children.filter(node => node.className === 'map-route').every(node => node.children[1].textContent === data.routes[0].route_name));
+  row('AAA').listeners.click(); assert.equal(e['map-dsp'].value, '');
+  row('BBB').listeners.click(); assert.equal(e['map-dsp'].value, 'MOCK-BBB');
+  e['map-dsp'].value = 'MOCK-AAA'; e['map-dsp'].listeners.change();
+  assert.equal(row('AAA').attributes['aria-pressed'], 'true');
+
+  const f = await labelFixture();
+  f.data.features.features.forEach((feature, i) => feature.properties.dsp_name = i ? 'B-AAA' : 'A-AAA');
+  const changes = [];
+  const view = createMapView({ leaflet: f.leaflet, document: f.doc, onDsp: value => changes.push(value) });
+  view.render(f.data); view.setColorMode('dsp');
+  const ambiguous = f.controls.at(-1).children[1].children[0];
+  assert.equal(ambiguous.attributes['aria-disabled'], 'true');
+  assert.equal(ambiguous.title, '该公司在多个站点，请先选择站点');
+  ambiguous.listeners.click(); assert.deepEqual(changes, []);
+  view.render(f.data, { focusStation: 'A' });
+  const unique = f.controls.at(-1).children[1].children[0];
+  assert.equal(unique.attributes['aria-disabled'], 'false'); unique.listeners.click();
+  assert.deepEqual(changes, ['A-AAA']);
+});
+
+test('MVR-T6 DSP list groups sort ZIP totals, code ties and route names; search and selection survive mode changes', async () => {
+  const { createMapPanel } = await import('../../web/map-panel.js');
+  const { doc, elements: e } = await fixture(); const selected = [];
+  const panel = createMapPanel({ document: doc, onRoute: id => selected.push(id), onClear() {}, onSearch() {} });
+  const data = payload();
+  data.routes = [
+    { route_id: 1, route_name: 'Z', dsp_name: 'S-BBB', zip_count: 2 },
+    { route_id: 2, route_name: 'A', dsp_name: 'S-BBB', zip_count: 3 },
+    { route_id: 3, route_name: 'C', dsp_name: 'S-AAA', zip_count: 5 },
+    { route_id: 4, route_name: 'D', dsp_name: null, zip_count: 1 },
+  ];
+  panel.render(data, { focusStation: null }); panel.setColorMode('dsp');
+  const nodes = () => e['map-routes'].children;
+  assert.deepEqual(nodes().filter(n => n.tagName === 'h3').map(n => allText(n).trim()), ['AAA · 1 条线路', 'BBB · 2 条线路', '未分配 · 1 条线路']);
+  assert.deepEqual(nodes().filter(n => n.className === 'map-route').map(n => n.children[1].textContent), ['C', 'A', 'Z', 'D']);
+  assert.ok(nodes().filter(n => n.tagName === 'h3').every(n => !n.listeners.click));
+  panel.applySelection(selectRoute(data.routes[0]));
+  const current = nodes().find(n => n.attributes['aria-pressed'] === 'true');
+  assert.deepEqual(current.scrolled, { block: 'nearest' }); current.listeners.click(); assert.deepEqual(selected, [1]);
+  e['map-search'].value = 'A'; e['map-search'].listeners.input();
+  assert.equal(nodes().filter(n => n.className === 'map-route').length, 1);
+  e['map-search'].value = 'missing'; e['map-search'].listeners.input(); assert.equal(e['map-no-match'].hidden, false);
+  e['map-search'].value = ''; e['map-search'].listeners.input();
+  for (const mode of ['route', 'station', 'difficulty']) { panel.setColorMode(mode); assert.ok(nodes().every(n => n.className === 'map-route')); }
+});
+
+test('MVR-T6 transitions opt in on mode change, stop immediately on hover and respect reduced motion', async () => {
+  const { view, data, groups } = await labelFixture(); view.render(data);
+  const layer = groups.at(-1).layers[0]; const classes = new Set();
+  layer.getElement = () => ({ classList: { add: value => classes.add(value), remove: value => classes.delete(value) } });
+  view.setColorMode('dsp'); assert.ok(classes.has('mvr-mode-transition'));
+  layer.listeners.mouseover(); assert.equal(classes.size, 0);
+  view.setColorMode('station'); assert.equal(classes.size, 0);
+  layer.listeners.mouseout(); assert.equal(classes.size, 0);
+  view.setColorMode('route'); assert.ok(classes.has('mvr-mode-transition'));
+  await new Promise(resolve => setTimeout(resolve, 250)); assert.equal(classes.size, 0);
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.map-page \.leaflet-overlay-pane path\.mvr-mode-transition \{ transition: fill \.2s, fill-opacity \.2s; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.map-page \.leaflet-overlay-pane path\.mvr-mode-transition \{ transition: none; \}/);
+});
+
+
+test('MAP-FIX clears hover and tooltips, suppresses drag/zoom and deferred opens, then restores entry', async () => {
+  for (const [start, end] of [['dragstart', 'dragend'], ['zoomstart', 'zoomend']]) {
+    const { view, map, data, groups } = await labelFixture();
+    view.render(data, { fitToStation: false });
+    const [a, b] = groups.at(-1).layers;
+    const base = polygonStyle(b.feature.properties, undefined, 'route', null, null);
+    b.listeners.mouseover(); b.openTooltip();
+    assert.deepEqual(b.styles.at(-1), hoverStyle(base));
+    map.listeners[start]();
+    assert.equal(b.tooltipOpen, false); assert.ok(a.tooltipCloses);
+    assert.deepEqual(b.styles.at(-1), base);
+    const classes = new Set();
+    b.getElement = () => ({ classList: { add: c => classes.add(c), remove: c => classes.delete(c) } });
+    view.setColorMode('station');
+    assert.ok(classes.has('mvr-mode-transition'), 'cleared hoveredLayers allows mode transition');
+    const count = b.styles.length;
+    b.listeners.mouseover(); b.openTooltip();
+    assert.equal(b.styles.length, count); assert.equal(b.tooltipOpen, false);
+    map.listeners[end]();
+    b.openTooltip(); assert.equal(b.tooltipOpen, false, 'deferred Leaflet open stays blocked after end');
+    b.listeners.mouseover();
+    assert.equal(b.tooltipOpen, true);
+    assert.deepEqual(b.styles.at(-1), hoverStyle(polygonStyle(b.feature.properties, undefined, 'station', null, null)));
+    b.listeners.mouseout();
+    assert.deepEqual(b.styles.at(-1), polygonStyle(b.feature.properties, undefined, 'station', null, null));
+    view.applySelection(selectRoute(data.features.features[0].properties));
+    // Select a ZIP to create the interactive highlight, which has its own tooltip.
+    view.applySelection({ route: data.features.features[0].properties, zip: { ...data.features.features[0].properties, geometry: data.features.features[0].geometry } });
+    const highlight = groups.filter(g => !g.options.pane).at(-1).layers[0];
+    highlight.openTooltip(); map.listeners[start]();
+    assert.equal(highlight.tooltipOpen, false);
+    highlight.listeners.mouseover(); highlight.openTooltip(); assert.equal(highlight.tooltipOpen, false);
+    map.listeners[end](); highlight.openTooltip(); assert.equal(highlight.tooltipOpen, false);
+    highlight.listeners.mouseover(); assert.equal(highlight.tooltipOpen, true);
+  }
+});
+
+
+function tileAt(lon, lat, z) {
+  const n = 2 ** z, rad = lat * Math.PI / 180;
+  return { z, x: Math.floor((lon + 180) / 360 * n), y: Math.floor((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2 * n) };
+}
+
+test('MVR P3 generated service bounds and light flavor keys match local sources', async () => {
+  const config = JSON.parse(await fs.readFile(new URL('../../config/basemap-service-region.json', import.meta.url), 'utf8'));
+  assert.equal(config.stations.length, 52);
+  assert.deepEqual(SERVICE_BOUNDS, config.stations.map(station => station.bbox));
+  const keys = object => Object.keys(object).sort();
+  assert.deepEqual(keys(BASEMAP_FLAVOR), keys(namedFlavor('light')));
+  assert.deepEqual(keys(BASEMAP_FLAVOR.landcover), keys(namedFlavor('light').landcover));
+  assert.equal(BASEMAP_FLAVOR.water, '#93dde5');
+  assert.equal(BASEMAP_FLAVOR.roads_label_minor_halo, '#ffffff');
+  const service = basemaps.find(layer => layer.name === 'service');
+  assert.equal(service.minZoom, 11); assert.equal(service.maxDataZoom, 14); assert.equal(service.levelDiff, 0);
+  const boxes = SERVICE_BOUNDS;
+  assert.deepEqual(service.bounds, [[Math.min(...boxes.map(b => b[1])), Math.min(...boxes.map(b => b[0]))],
+    [Math.max(...boxes.map(b => b[3])), Math.max(...boxes.map(b => b[2]))]]);
+});
+
+test('MVR P3 service and regional tile ownership is exclusive, including overzoom and gaps', async () => {
+  const calls = [], preflights = [];
+  const { baselayers } = await fixture('', url => { preflights.push(url); return 206; }, null, {}, async (...args) => { calls.push(args); return { data: new ArrayBuffer(0) }; });
+  const service = baselayers.at(-1), regional = baselayers[1];
+  for (const z of [11, 12, 14, 15, 16]) {
+    for (const [w,s,e,n] of SERVICE_BOUNDS) {
+      const tile = tileAt((w+e)/2, (s+n)/2, z);
+      assert.ok(service._isValidTile(tile));
+      assert.equal(regional._isValidTile(tile), false);
+    }
+    for (const [lon,lat] of [[-140,35],[-110,39],[-124,40]]) {
+      const tile = tileAt(lon,lat,z);
+      assert.equal(service._isValidTile(tile), false);
+      assert.ok(regional._isValidTile(tile));
+    }
+  }
+  const outside = tileAt(-140,35,12);
+  assert.equal(await service.options.url.getZxy(outside.z,outside.x,outside.y), undefined);
+  assert.equal(calls.length,0);
+  assert.ok(!preflights.includes('/basemap/service.pmtiles'));
+  assert.equal(serviceTile(tileAt(-122,37,10)),null);
+});
+
+test('MVR P3 absent tiles are quiet and return ownership to regional fallback', async () => {
+  const { elements: e, baselayers } = await fixture('',206,null,{},async () => undefined);
+  const tile = tileAt(-122,37,14), service = baselayers.at(-1);
+  assert.ok(service._isValidTile(tile));
+  assert.equal(await service.options.url.getZxy(tile.z,tile.x,tile.y),undefined);
+  assert.equal(service._isValidTile(tile),false);
+  assert.ok(baselayers[1]._isValidTile(tile));
+  assert.notEqual(e['map-basemap-message'].hidden,false);
+  assert.equal(e['map-basemap-message'].textContent,'');
+});
+
+test('MVR P3 missing service archive preserves regional layers and route interactions', async () => {
+  const { elements:e, baselayers, page, groups, replies, reply } = await fixture('',url => url.includes('/service.') ? 404 : 206);
+  replies.push(reply(200,{stations:['MOCKA']}),reply(200,payload())); await page.start();
+  assert.equal(baselayers.length,9);
+  const tile = tileAt(-122,37,14);
+  await baselayers.at(-1).options.url.getZxy(tile.z,tile.x,tile.y);
+  assert.ok(baselayers[1]._isValidTile(tile));
+  assert.equal(groups[0].layers.length,2);
+  groups[0].layers[0].listeners.click({});
+  assert.equal(e['map-zip-panel'].hidden,false);
+});
+
+
+test('MVR P3 service Range errors restore fallback while zoom cancellation remains abortable', async () => {
+  let abort = true;
+  const { baselayers, elements:e } = await fixture('',206,null,{},async () => {
+    const error = new Error('synthetic failure'); error.name = abort ? 'AbortError' : 'Error'; throw error;
+  });
+  const tile = tileAt(-122,37,14), service = baselayers.at(-1);
+  await assert.rejects(service.options.url.getZxy(tile.z,tile.x,tile.y), {name:'AbortError'});
+  assert.ok(service._isValidTile(tile));
+  assert.notEqual(e['map-basemap-message'].hidden,false);
+  abort = false;
+  assert.equal(await service.options.url.getZxy(tile.z,tile.x,tile.y),undefined);
+  assert.equal(service._isValidTile(tile),false);
+  assert.ok(baselayers[1]._isValidTile(tile));
+  assert.equal(e['map-basemap-message'].hidden,false);
 });

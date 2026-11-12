@@ -17,10 +17,24 @@ function renderBrand(doc) {
 
 const notice = '数据来自 DMS 抓取，非实时';
 const loginNotice = 'DMS 登录已过期，请在公用电脑打开终端执行 npm run dms:login，登录完成后重新刷新。';
+const languageNotice = 'DMS 界面是英文，程序自动切换中文失败。请在公用电脑打开 DMS，把右上角语言手动切换为中文，然后重新刷新；如仍失败，请运行 npm run dms:login 重新登录。';
+const languageError = reason => typeof reason === 'string' && reason.endsWith(':DmsLanguageError');
 const reasons = { not_in_dms_menu: 'DMS 中无此站点', no_permission: '无权限', disabled: '已停用' };
 const states = { idle: '空闲', running: '更新中', completed: '已完成', stopped: '已停止' };
 const runStates = { completed: '完成', stopped: '已停止', running: '进行中', abandoned: '已放弃' };
-const triggers = { ui: '刷新按钮', cli: '命令行', json_import: 'JSON 导入' };
+const triggers = { schedule: '每日自动', ui: '刷新按钮', cli: '命令行', json_import: 'JSON 导入' };
+const autoResults = { completed: '完成', partial: '部分完成', failed: '失败', needs_login: '需要重新登录', skipped_busy: '繁忙跳过', running: '进行中' };
+const isLoginReason = reason => typeof reason === 'string' && /(^|:)NeedsLoginError$/.test(reason);
+function stopReasonName(reason) {
+  if (languageError(reason)) return 'DMS 界面是英文';
+  if (isLoginReason(reason)) return '登录过期';
+  if (/(^|:)SelectorError$/.test(reason || '')) return '页面结构异常';
+  if (/(^|:)StationSwitchError$/.test(reason || '')) return '切换站点失败';
+  if (['process:Exited', 'worker:Restarted'].includes(reason)) return '进程中断';
+  return '未知错误';
+}
+const pacificTime = value => value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'America/Los_Angeles',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)) : '—';
 
 export function createDataStatus({ document: doc = globalThis.document, fetch: request = globalThis.fetch,
   setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
@@ -59,6 +73,25 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     return response.json();
   };
   const quotationSync = createQuotationSyncStatus({ document: doc, root, get });
+  let autoLine, autoBusy = false;
+  const failureNames = failures => failures.slice(0, 3).map(d => `${districtName(d.district ?? d.id)}（${stopReasonName(d.stop_reason)}）`).join('、')
+    + (failures.length > 3 ? ` 等 ${failures.length - 3} 个` : '');
+  async function loadAutoRefresh() {
+    if (!autoLine || autoBusy || disposed) return;
+    autoBusy = true;
+    try {
+      const data = await get('/api/auto-refresh/status'); if (disposed) return;
+      const last = data.last, ds = last?.districts || [];
+      const failures = ds.filter(d => ['stopped', 'abandoned', 'failed'].includes(d.status));
+      autoLine.textContent = !data.enabled ? '自动刷新 · 关闭'
+        : `自动刷新 · 每天 ${data.time}（${data.time_zone === 'America/Los_Angeles' ? '太平洋时间' : data.time_zone}）`
+          + ` · 上次：${pacificTime(last?.finished_at || last?.started_at)} ${autoResults[last?.result] || '—'}`
+          + ` · 片区：成功 ${ds.filter(d => ['completed', 'skipped_empty'].includes(d.status)).length} / 共 ${ds.length}`
+          + ` · 下次：${pacificTime(data.next_run_at)}`
+          + (failures.length ? ` · 失败：${failureNames(failures)}` : '');
+    } catch { if (!disposed) autoLine.textContent = '自动刷新 · 状态获取失败'; }
+    finally { autoBusy = false; }
+  }
   function dialog(title) {
     const el = node('dialog', undefined, root); el.className = 'data-dialog';
     const heading = node('div', undefined, el); heading.className = 'detail-heading';
@@ -100,13 +133,22 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       }
     }
     const run = freshness?.source === 'json' ? null : freshness?.run;
+    const auto = run?.auto_refresh, failures = auto?.failed || [];
+    const autoLogin = failures.some(d => isLoginReason(d.stop_reason));
+    const autoMessage = failures.length && !autoLogin
+      ? `${Number(auto.day.slice(5, 7))}/${Number(auto.day.slice(8, 10))} 17:00 自动更新${failures.length === auto.district_count ? '失败' : '部分失败'}：${failureNames(failures)}。`
+        + (failures.length === auto.district_count ? '' : '其余片区已更新，') + '当前显示的是各站点最近一次成功的数据。' : '';
     runMessage.textContent = run?.running ? '公用电脑正在更新数据，当前显示的是上次成功的数据'
-      : ['stopped', 'abandoned'].includes(run?.last?.status)
-        ? `最近一次更新失败（${formatUpdated(run.last.finished_at || run.last.started_at)}），当前显示的是上一次成功的数据` : '';
+      : autoLogin ? '' : autoMessage || (['stopped', 'abandoned'].includes(run?.last?.status)
+        ? `最近一次更新失败（${formatUpdated(run.last.finished_at || run.last.started_at)}），当前显示的是上一次成功的数据` : '');
     renderLogin();
   }
   function renderLogin() {
-    login.textContent = statusData?.needs_login || (freshness?.source !== 'json' && freshness?.run?.last?.needs_login) ? loginNotice : '';
+    const reason = statusData?.progress?.stop_reason ?? statusData?.last_run?.stop_reason;
+    const lastReason = freshness?.source !== 'json' ? freshness?.run?.last?.stop_reason : null;
+    if (languageError(reason) || languageError(lastReason)) { login.textContent = languageNotice; return; }
+    login.textContent = statusData?.needs_login || (freshness?.source !== 'json' && (freshness?.run?.last?.needs_login
+      || freshness?.run?.auto_refresh?.failed?.some(d => isLoginReason(d.stop_reason)))) ? loginNotice : '';
   }
   async function loadFreshness() {
     if (freshBusy || disposed) return;
@@ -205,7 +247,8 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       }).join('、') || '—'}`, refresh.content);
     }
     node('p', `最后错误：${p.stop_reason || '—'}`, refresh.content);
-    if (data.needs_login) node('p', loginNotice, refresh.content);
+    if (languageError(p.stop_reason)) node('p', languageNotice, refresh.content);
+    else if (data.needs_login) node('p', loginNotice, refresh.content);
   }
   function schedulePoll() {
     cancel(pollTimer);
@@ -239,6 +282,10 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     try {
       const capabilities = await get('/api/capabilities');
       await quotationSync.start(capabilities);
+      if (capabilities.auto_refresh === true) {
+        autoLine = node('p', '自动刷新 · 加载中…', root); autoLine.setAttribute('role', 'status');
+        await loadAutoRefresh();
+      }
       if (capabilities.refresh === true) {
         refreshButton = button('刷新数据', actions, () => {
           chooseScope(); refresh.open(refreshButton);
@@ -252,7 +299,7 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
       }
     } catch { /* A failed capability check must never grant refresh controls. */ }
     const scheduleFresh = () => {
-      if (!disposed) freshTimer = later(async () => { await Promise.all([loadFreshness(), quotationSync.load()]); scheduleFresh(); }, 60000);
+      if (!disposed) freshTimer = later(async () => { await Promise.all([loadFreshness(), quotationSync.load(), loadAutoRefresh()]); scheduleFresh(); }, 60000);
     };
     scheduleFresh();
   }

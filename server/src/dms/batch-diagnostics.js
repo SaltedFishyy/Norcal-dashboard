@@ -19,7 +19,7 @@ export async function writePageFailureDiagnostic({ runtimeDir, page, error, curr
     try {
       await fileOps.mkdir(runtimeDir, { recursive: true });
       if (expired) return;
-      if (page) { await page.screenshot({ path: path.join(runtimeDir, png), fullPage: false, timeout: 4000 }); screenshot = png; }
+      if (page) { await page.screenshot({ path: path.join(runtimeDir, png), fullPage: false, timeout: 8000 }); screenshot = png; }
     } catch { warn(); }
     if (expired) return;
     try {
@@ -33,7 +33,7 @@ export async function writePageFailureDiagnostic({ runtimeDir, page, error, curr
   };
   try {
     await Promise.race([work(), new Promise(resolve => {
-      timer = setTimeout(() => { expired = true; warn(); resolve(); }, 4500);
+      timer = setTimeout(() => { expired = true; warn(); resolve(); }, 9000);
     })]);
   } finally { clearTimeout(timer); }
   return diagnostic;

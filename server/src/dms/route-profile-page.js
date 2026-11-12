@@ -1,5 +1,5 @@
 import { withPortraitPage } from './portrait-page.js';
-export { NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError } from './portrait-page.js';
+export { DmsLanguageError, NeedsLoginError, SelectorError, LoadLimitError, CircuitBreakerError, CaptureError } from './portrait-page.js';
 
 export async function captureRoutePortrait({ browserType, statePath, baseUrl, station, pageSize = 100,
   maxListRequests = 3, headless = false, log = () => {} }) {

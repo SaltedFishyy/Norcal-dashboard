@@ -8,9 +8,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { transformRoutePortrait, SchemaError } from '../src/transform/route-profile.js';
 import { saveStationSnapshot, writeLastFailure, StoreError } from '../src/store/route-profiles-file.js';
-import { captureRoutePortrait, NeedsLoginError, LoadLimitError, CircuitBreakerError, SelectorError, CaptureError } from '../src/dms/route-profile-page.js';
+import { captureRoutePortrait, DmsLanguageError, NeedsLoginError, LoadLimitError, CircuitBreakerError, SelectorError, CaptureError } from '../src/dms/route-profile-page.js';
 import { resolveRuntimeDir, checkRuntimeDir, parseMaxListRequests } from '../src/config.js';
 import { runScrape } from '../bin/dms-scrape.js';
+import { checkDmsLanguage } from '../src/dms/portrait-page.js';
 
 const fixture = JSON.parse(await fs.readFile(new URL('./fixtures/route-portrait-pagination.json', import.meta.url), 'utf8'));
 const options = { station: 'SFO01', fetchedAt: '2026-09-30T12:00:00Z' };
@@ -131,7 +132,7 @@ test('runtime default, fallback, relative override and warning policy', () => {
   for (const value of ['0','-1','x','1.5']) assert.throws(() => parseMaxListRequests(value));
 });
 
-function pageHarness({ login = false, password = false, requests = 1, status, triggerAt = 'goto', failSelector = false, pending = false, rawFailure = false, precedingBodies = [] } = {}) {
+function pageHarness({ login = false, password = false, requests = 1, status, triggerAt = 'goto', failSelector = false, pending = false, rawFailure = false, precedingBodies = [], english = false } = {}) {
   const page = new EventEmitter(), events = [], logs = []; let closes = 0;
   const url = 'https://example.invalid/areaDepiction';
   const request = () => ({url:()=>'https://example.invalid/prod-api/dlvs-dataApi/roadAreaPortrait/home/frontPage/queryList/pagination?ignored=1',method:()=>'POST',postDataJSON:()=>({ transitStationCodeList: ['synthetic-station'], pageSize: 100 })});
@@ -141,12 +142,12 @@ function pageHarness({ login = false, password = false, requests = 1, status, tr
     if (status) page.emit('response',{url:()=>'https://example.invalid/prod-api/test',status:()=>status});
   };
   const locator = (selector) => ({
-    count:async()=>selector === 'input[type=password]' ? Number(password) : 1,
+    count:async()=>selector === 'header .dbu-web-main-dropdown-trigger:visible' ? 0 : selector === 'input[type=password]' ? Number(password) : 1,
     nth:()=>locator('item'),first:()=>locator(selector), filter:()=>locator(selector),getByText:()=>locator('station-option'),
     locator:(value)=>locator(value),innerText:async()=>'转运站点',
     click:async()=>{ events.push(selector); if(failSelector && selector==='station-option') throw new Error('private selector error'); },
   });
-  page.locator=locator; page.getByText=()=>locator('展开'); page.getByRole=()=>({click:async()=>{events.push('查询'); if(triggerAt==='query')trigger();}});
+  page.locator=locator; page.getByText=()=>locator('展开'); page.getByRole=(_, {name})=>({count:async()=>Number(english ? name.test("Search") : name.test("查询")),click:async()=>{events.push('查询'); if(triggerAt==='query')trigger();}});
   page.keyboard={press:async key=>events.push(key)};
   page.goto=async()=>{if(rawFailure)throw new Error('private navigation error'); if(triggerAt==='goto')trigger(); if(pending)await new Promise(()=>{});};
   page.url=()=>login?'https://example.invalid/login':url;
@@ -158,7 +159,7 @@ function pageHarness({ login = false, password = false, requests = 1, status, tr
     }
     assert.equal(predicate(response),true); return response;
   };
-  const browserType={launch:async({headless})=>{assert.equal(headless,false);return {newContext:async options=>{assert.deepEqual(options,{storageState:'/outside/state.json'});return {newPage:async()=>page};},close:async()=>{closes++;}};}};
+  const browserType={launch:async({headless})=>{assert.equal(headless,false);return {newContext:async options=>{assert.deepEqual(options,{storageState:'/outside/state.json',locale:'zh-CN'});return {newPage:async()=>page};},close:async()=>{closes++;}};}};
   return {events,logs,get closes(){return closes;},run:()=>captureRoutePortrait({browserType,statePath:'/outside/state.json',baseUrl:url,station:'SFO01',log:s=>logs.push(s)})};
 }
 test('page capture returns original body, follows permitted controls and closes browser', async()=>{
@@ -247,11 +248,11 @@ test('failure store discards detail for unknown error types', async t => {
   }
 });
 test('CLI browser failure does not disclose raw error, needs-login gives guidance',async()=>{
-  for(const error of [new Error('private error'),new NeedsLoginError()]) {
+  for(const error of [new Error('private error'),new NeedsLoginError(),new DmsLanguageError()]) {
     const logs=[];const failures=[];
     assert.equal(await runScrape({args:['--station','SFO01'],env:cliEnv,errorLog:s=>logs.push(s),sessionExists:async()=>{},capture:async()=>{throw error;},failure:async value=>failures.push(value)}),1);
     assert.doesNotMatch(logs.join(''),/private error/);
-    if(error instanceof NeedsLoginError){assert.match(logs.join(''),/dms:login/);assert.deepEqual(failures,[]);}else{assert.equal(failures[0].step,'capture');}
+    if(error instanceof DmsLanguageError){assert.match(logs.join(""),/中文/);assert.deepEqual(failures,[]);}else if(error instanceof NeedsLoginError){assert.match(logs.join(''),/dms:login/);assert.deepEqual(failures,[]);}else{assert.equal(failures[0].step,'capture');}
   }
 });
 
@@ -271,4 +272,27 @@ test('CLI actual missing-session entry gives guidance without opening browser', 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Session 文件不存在.*npm run dms:login/);
   assert.deepEqual(await fs.readdir(runtimeDir), []);
+});
+
+test('English portrait with missing language trigger stops before controls', async () => {
+  const h = pageHarness({ english: true });
+  await assert.rejects(h.run(), DmsLanguageError);
+  assert.deepEqual(h.events, []);
+  assert.ok(h.closes);
+});
+
+test('English query button with search icon name throws DmsLanguageError', async () => {
+  const page = { getByRole: (role, { name }) => {
+    assert.equal(role, 'button');
+    return { count: async () => Number(name.test('search Search')) };
+  } };
+  await assert.rejects(checkDmsLanguage({ page, guarded: action => action(), timeout: 0 }), DmsLanguageError);
+});
+
+test('lowercase search icon button alone is not an English query button', async () => {
+  const page = { getByRole: (role, { name }) => {
+    assert.equal(role, 'button');
+    return { count: async () => Number(name.test('search')) };
+  } };
+  await assert.doesNotReject(checkDmsLanguage({ page, guarded: action => action(), timeout: 0 }));
 });

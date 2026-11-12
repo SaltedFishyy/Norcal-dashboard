@@ -23,10 +23,10 @@ test('DA-T1 migrations 001–006 apply in order and skip on repetition', { skip:
   const db = await createTestDb(t), schema = db.schema + '_order', results = [];
   try {
     await migrate(db.owner, { ...db.options, schema, onResult: row => results.push(row) });
-    assert.deepEqual(results, ['001', '002', '003', '004', '005', '006', '007'].map(version => ({ version, result: 'applied' })));
+    assert.deepEqual(results, ['001', '002', '003', '004', '005', '006', '007', '008'].map(version => ({ version, result: 'applied' })));
     results.length = 0;
     await migrate(db.owner, { ...db.options, schema, onResult: row => results.push(row) });
-    assert.deepEqual(results, ['001', '002', '003', '004', '005', '006', '007'].map(version => ({ version, result: 'skipped' })));
+    assert.deepEqual(results, ['001', '002', '003', '004', '005', '006', '007', '008'].map(version => ({ version, result: 'skipped' })));
   } finally { await db.owner.query(`DROP SCHEMA IF EXISTS ${pg.escapeIdentifier(schema)} CASCADE`); }
 });
 

@@ -13,6 +13,8 @@ function columnCode(value, grouped) {
       if (new RegExp(`(^|[^0-9])${band.replace('_', '-')}(?![0-9])`).test(label)) return `${type}.${band}`;
     }
     if (/(^|[^0-9-])40\(lb\)以上|above40(?!\d)/.test(label)) return `${type}.40_plus`;
+    const upperRange = /(^|[^0-9-])40-(\d+)\(lb\)/.exec(label);
+    if (upperRange && Number(upperRange[2]) >= 1000) return `${type}.40_plus`;
   }
   if (label.includes('参考邮编')) return 'reference_postal_code';
   if (label.includes('按重量段')) return null;
@@ -27,11 +29,12 @@ function columnCode(value, grouped) {
 
 function date(value) {
   if (typeof value !== 'string') return null;
-  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
-  const iso = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(value.trim());
-  if (iso) return date(`${iso[2]}/${iso[3]}/${iso[1]}`);
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})$/.exec(value.trim());
+  const iso = /^(\d{4})([/-])(\d{1,2})\2(\d{1,2})$/.exec(value.trim());
+  if (iso) return date(`${iso[3]}/${iso[4]}/${iso[1]}`);
   if (!match) return null;
-  const [, month, day, year] = match.map(Number);
+  const month = Number(match[1]), day = Number(match[2]);
+  const year = Number(match[3]) + (match[3].length === 2 ? 2000 : 0);
   const check = new Date(0);
   check.setUTCFullYear(year, month - 1, day);
   if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
@@ -87,7 +90,11 @@ export function parseQuotationSheet(cells, { headerScanRows = 5 } = {}) {
     }
     const effectiveFrom = date(get('effective_from'));
     const endDate = text(get('end_date')) === null ? null : date(get('end_date'));
-    if (!reason && (!effectiveFrom || (text(get('end_date')) !== null && !endDate))) reason = [get('effective_from'), get('end_date')].some(value => /^#+$/.test(text(value) ?? '')) ? 'date_placeholder' : 'date_invalid';
+    if (!reason && (!effectiveFrom || (text(get('end_date')) !== null && !endDate))) {
+      const dates = [get('effective_from'), get('end_date')];
+      reason = dates.some(value => typeof value === 'number') ? 'date_not_date_cell'
+        : dates.some(value => /^#+$/.test(text(value) ?? '')) ? 'date_placeholder' : 'date_invalid';
+    }
     if (!reason && endDate && endDate < effectiveFrom) reason = 'end_before_effective';
     if (reason) { rejected.push({ ...identity, reason }); continue; }
     const secondParcelHalfPriceRaw = text(get('half_price'));

@@ -5,11 +5,12 @@ import { palette, routeColor } from '../../web/route-colors.js';
 import { BASEMAP_FLAVOR } from '../../web/map-view.js';
 
 test('RM2 selection styles preserve route color and distinguish route, ZIP and dimmed polygons', () => {
-  assert.equal(BASEMAP_FLAVOR, 'light');
+  assert.equal(BASEMAP_FLAVOR.water, '#93dde5');
+  assert.equal(BASEMAP_FLAVOR.roads_label_minor_halo, '#ffffff');
   const properties = { route_id: 1, postal_code: '00001' };
   const normal = polygonStyle(properties), route = polygonStyle(properties, selectRoute(1));
-  assert.equal(normal.fillColor, '#cca300'); assert.equal(normal.fillOpacity, POLYGON_STYLE.focused.fillOpacity);
-  assert.equal(route.fillColor, '#cca300'); assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
+  assert.equal(normal.fillColor, '#cd7ec6'); assert.equal(normal.fillOpacity, POLYGON_STYLE.focused.fillOpacity);
+  assert.equal(route.fillColor, '#cd7ec6'); assert.equal(route.fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
   assert.ok(route.weight > normal.weight);
   const zip = polygonStyle(properties, selectZip(properties)); assert.ok(zip.weight > route.weight);
   const dim = polygonStyle(properties, selectRoute(2)); assert.equal(dim.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity);
@@ -39,7 +40,7 @@ test('unified query classification and station/route/ZIP transitions', () => {
   assert.equal(uncoveredZipStyle().dashArray, '8 6'); assert.equal(uncoveredZipStyle().weight, 5);
   assert.equal(uncoveredZipStyle().fillOpacity, 0.15);
   assert.equal(polygonStyle({ route_id: 1, postal_code: '00002' }, selectZip({ route_id: 1, postal_code: '00002' })).color, POLYGON_STYLE.selectedZip.color);
-  assert.deepEqual([palette[8], palette[14], palette[16], palette[17]], ['#c4a62a', '#d875a8', '#71ad68', '#d9b52c']);
+  assert.deepEqual([palette[8], palette[14], palette[16], palette[17]], ['#00b9a0', '#a98ae7', '#35b886', '#cd7ec6']);
 });
 
 test('RM2 route search trims, ignores case, sorts matches and identifies exact match', () => {
@@ -81,7 +82,7 @@ test('RM5 difficulty style table preserves semantic colors, borders and selectio
   for (const mode of ['route', 'difficulty']) {
     const normal = polygonStyle(properties, clearSelection(), mode);
     const faded = polygonStyle(properties, clearSelection(), mode, 'SMF01');
-    assert.equal(faded.fillColor === normal.fillColor, mode === 'difficulty'); assert.equal(faded.fillOpacity, POLYGON_STYLE.dimmed.fillOpacity); assert.equal(faded.opacity, POLYGON_STYLE.dimmed.opacity);
+    assert.equal(faded.fillColor === normal.fillColor, mode === 'difficulty'); assert.equal(faded.fillOpacity, POLYGON_STYLE.outside.fillOpacity); assert.equal(faded.opacity, POLYGON_STYLE.outside.opacity);
     assert.deepEqual(polygonStyle(properties, clearSelection(), mode, 'SFO01'), { ...normal, ...POLYGON_STYLE.focused, fillColor: mode === 'difficulty' ? normal.fillColor : polygonStyle(properties, selectRoute(properties.route_id)).fillColor });
     const selected = selectRoute({ route_id: 7, station: 'SFO01' });
     assert.deepEqual(polygonStyle(properties, selected, mode, 'SMF01'), polygonStyle(properties, selected, mode));
@@ -132,13 +133,13 @@ test('R1 visual hierarchy and hover cap hold in both color modes', () => {
       && hover.fillOpacity > normal.fillOpacity && normal.fillOpacity > dimmed.fillOpacity);
     assert.ok(zip.weight >= route.weight && route.weight > normal.weight);
     assert.ok(dimmed.opacity < normal.opacity);
-    assert.equal(hover.color, POLYGON_STYLE.hover.color); assert.notEqual(hover.color, '#ffffff');
+    assert.equal(hover.color, POLYGON_STYLE.hover.color); assert.equal(hover.color, '#ffffff');
     assert.equal(hover.fillColor, normal.fillColor);
     assert.equal(hover.fillOpacity, normal.fillOpacity + POLYGON_STYLE.hover.fillOpacityIncrease);
-    assert.equal(hover.weight, Math.max(normal.weight, POLYGON_STYLE.hover.weight));
+    assert.equal(hover.weight, POLYGON_STYLE.hover.weight);
     assert.ok(hoverStyle(dimmed).fillOpacity < route.fillOpacity);
     assert.equal(hoverStyle(zip).fillOpacity, POLYGON_STYLE.selectedZip.fillOpacity);
-    assert.equal(hoverStyle(zip).weight, zip.weight);
+    assert.equal(hoverStyle(zip).weight, POLYGON_STYLE.hover.weight);
     assert.deepEqual(hoverStyle(normal), hover); // The base style is not mutated.
   }
 });
@@ -156,11 +157,11 @@ test('R2a vivid fills preserve palette hue and apply configured saturation/light
     assert.match(vivid, /^#[0-9a-f]{6}$/);
     const hueError = Math.abs(before[0] - after[0]);
     assert.ok(Math.min(hueError, 360 - hueError) <= 1);
-    assert.ok(before[1] === 1 ? after[1] === 1 : after[1] > before[1]);
+    assert.equal(vivid, hex);
     assert.ok(Math.abs(after[1] - Math.min(1, before[1] * ROUTE_FILL.saturation)) < 0.012);
     assert.ok(Math.abs(after[2] - Math.max(0, Math.min(1, before[2] + ROUTE_FILL.lightness))) <= 1 / 255);
   }
-  assert.equal(vividRouteColor('#ffffff'), '#f0f0f0');
+  assert.equal(vividRouteColor('#ffffff'), '#ffffff');
   assert.equal(vividRouteColor('#000000'), '#000000');
 });
 
@@ -176,7 +177,7 @@ test('R2a focused hierarchy intersects Station and DSP filters without overridin
     }
     for (const [station, dsp] of [['B', 'Alpha'], ['A', 'Beta'], ['B', 'Beta']]) {
       const dim = polygonStyle(p, clearSelection(), mode, station, dsp);
-      assert.deepEqual(dim, { ...normal, ...POLYGON_STYLE.dimmed, fillColor: polygonStyle(p, selectRoute(2), mode).fillColor });
+      assert.deepEqual(dim, { ...normal, ...(station === 'B' ? POLYGON_STYLE.outside : POLYGON_STYLE.dimmed), fillColor: polygonStyle(p, selectRoute(2), mode).fillColor });
       assert.ok(dim.fillOpacity < normal.fillOpacity && dim.opacity < normal.opacity);
     }
     assert.deepEqual(polygonStyle(p, selectRoute(1), mode, 'B', 'Beta'), polygonStyle(p, selectRoute(1), mode));
@@ -285,14 +286,14 @@ test('RM11 target, RM12 active, dimmed transforms and missing assignment fallbac
   const p = { route_id: 1, postal_code: '00001' };
   const colors = new Map([[1, '#66c2a5']]);
   const normal = polygonStyle(p, clearSelection(), 'route', null, null, colors);
-  assert.equal(normal.fillColor, '#22ce98');
+  assert.equal(normal.fillColor, '#66c2a5');
   const target = polygonStyle(p, selectRoute(1), 'route', null, null, colors);
   const dim = polygonStyle(p, selectRoute(2), 'route', null, null, colors);
-  assert.equal(target.fillOpacity, .7); assert.equal(dim.fillOpacity, .16);
-  assert.equal(normal.fillColor, '#22ce98'); assert.equal(target.fillColor, '#22ce98'); assert.equal(dim.fillColor, '#77b19f');
-  assert.equal(polygonStyle({ ...p, station: 'A' }, clearSelection(), 'route', 'A', null, colors).fillOpacity, .52);
-  assert.equal(polygonStyle(p, clearSelection(), 'route', 'A', null, colors).fillOpacity, .16);
-  assert.equal(polygonStyle(p, clearSelection(), 'route', null, 'Alpha', colors).fillOpacity, .16);
+  assert.equal(target.fillOpacity, .85); assert.equal(dim.fillOpacity, .15);
+  assert.equal(normal.fillColor, '#66c2a5'); assert.equal(target.fillColor, '#66c2a5'); assert.equal(dim.fillColor, '#92b5aa');
+  assert.equal(polygonStyle({ ...p, station: 'A' }, clearSelection(), 'route', 'A', null, colors).fillOpacity, .6);
+  assert.equal(polygonStyle(p, clearSelection(), 'route', 'A', null, colors).fillOpacity, .05);
+  assert.equal(polygonStyle(p, clearSelection(), 'route', null, 'Alpha', colors).fillOpacity, .15);
   assert.equal(polygonStyle(p, selectZip(p), 'route', null, null, colors).fillColor, target.fillColor);
   assert.deepEqual(polygonStyle(p, clearSelection(), 'route', null, null, new Map()), polygonStyle(p));
   for (const selection of [clearSelection(), selectRoute(1), selectRoute(2), selectZip(p)]) {
@@ -349,22 +350,142 @@ test('RM12 All Stations matches focused route style while difficulty and explici
     polygonStyle(p, selection, mode, station, dsp, colors);
   const expected = (base, fillColor) => ({ fillColor, fillOpacity: base.fillOpacity,
     color: base.color, weight: base.weight, opacity: base.opacity });
-  assert.deepEqual(style(), expected(POLYGON_STYLE.focused, '#22ce98'));
+  assert.deepEqual(style(), expected(POLYGON_STYLE.focused, '#66c2a5'));
   assert.deepEqual(style(), style(clearSelection(), 'route', 'A'));
   assert.deepEqual(style(clearSelection(), 'difficulty'), {
     ...expected(POLYGON_STYLE.normal, '#9ca3af'), fillOpacity: POLYGON_STYLE.normal.difficultyFillOpacity });
   for (const mode of ['route', 'difficulty']) {
-    const target = mode === 'route' ? '#22ce98' : '#9ca3af';
-    const dimmed = mode === 'route' ? '#77b19f' : '#9ca3af';
+    const target = mode === 'route' ? '#66c2a5' : '#9ca3af';
+    const dimmed = mode === 'route' ? '#92b5aa' : '#9ca3af';
     for (const [station, dsp] of [['A', null], [null, 'Alpha'], ['A', 'Alpha']])
       assert.deepEqual(style(clearSelection(), mode, station, dsp), expected(POLYGON_STYLE.focused, target));
     for (const [station, dsp] of [['B', null], [null, 'Beta'], ['A', 'Beta']])
-      assert.deepEqual(style(clearSelection(), mode, station, dsp), expected(POLYGON_STYLE.dimmed, dimmed));
+      assert.deepEqual(style(clearSelection(), mode, station, dsp), expected(station === 'B' ? POLYGON_STYLE.outside : POLYGON_STYLE.dimmed, dimmed));
     for (const [selection, base, fill] of [[selectRoute(1), POLYGON_STYLE.selectedRoute, target],
-      [selectZip(p), POLYGON_STYLE.selectedZip, target], [selectRoute(2), POLYGON_STYLE.dimmed, dimmed]])
+      [selectZip(p), POLYGON_STYLE.selectedZip, target], [selectRoute(2), POLYGON_STYLE.outside, dimmed]])
       assert.deepEqual(style(selection, mode, 'B', 'Beta'), expected(base, fill));
   }
   assert.deepEqual(hoverStyle(style()), { ...style(), color: POLYGON_STYLE.hover.color,
     opacity: POLYGON_STYLE.hover.opacity, weight: POLYGON_STYLE.hover.weight,
     fillOpacity: POLYGON_STYLE.focused.fillOpacity + POLYGON_STYLE.hover.fillOpacityIncrease });
+});
+
+
+test('MVR palette preserves all 19 FNV slots and uses identity target transforms', () => {
+  assert.deepEqual(palette, '#57a3ef #e27897 #9da837 #9292f0 #e57d64 #60b56b #bd83d9 #d68c33 #00b9a0 #da7ab0 #b49f23 #779bf2 #e6797e #81af50 #a98ae7 #e0834a #35b886 #cd7ec6 #c79521'.split(' '));
+  for (const [id, slot] of [[1, 17], [2, 12], ['a', 17], ['', 12]]) assert.equal(routeColor(id), palette[slot]);
+  assert.equal(ROUTE_FILL.saturation, 1); assert.equal(ROUTE_FILL.lightness, 0);
+  assert.deepEqual(ROUTE_FILL.target, { saturation: 1, lightness: 0 });
+  assert.deepEqual(ROUTE_FILL.dimmed, { saturation: .45, lightness: .06 });
+  for (const hex of palette) {
+    assert.equal(vividRouteColor(hex), hex);
+    assert.equal(polygonStyle({ route_id: 1 }, selectRoute(1), 'route', null, null, new Map([[1, hex]])).fillColor, hex);
+  }
+});
+
+test('MVR outside stays behind selection and ahead of fading in both modes', () => {
+  const p = { route_id: 1, station: 'A', dsp_name: 'Alpha', postal_code: '00001' };
+  for (const mode of ['route', 'difficulty']) {
+    for (const selection of [clearSelection(), selectRoute(2)]) {
+      const style = polygonStyle(p, selection, mode, 'B', 'Beta');
+      const { fillColor, ...border } = style;
+      assert.deepEqual(border, POLYGON_STYLE.outside);
+      assert.deepEqual(hoverStyle(style), { ...style, color: '#ffffff', opacity: 1, weight: 2, fillOpacity: .25 });
+      assert.equal(polygonStyle(p, selection, mode, null, 'Beta').fillOpacity, .15);
+    }
+    assert.equal(polygonStyle(p, selectRoute(1), mode, 'B', 'Beta').fillOpacity, .85);
+    assert.equal(polygonStyle(p, selectZip(p), mode, 'B', 'Beta').fillOpacity, .9);
+    assert.equal(hoverStyle(polygonStyle(p, selectZip(p), mode)).fillOpacity, .9);
+  }
+});
+
+
+test('MVR-T5 DSP keys and deterministic unique group allocations preserve preferred slots', async () => {
+  const { dspColorKey, assignGroupColors, modeColor, UNASSIGNED_COLOR } = await import('../../web/map-state.js');
+  for (const name of ['SFO-AAS', 'SFO02-AAS', 'DEN-AAS', 'AAS']) assert.equal(dspColorKey(name), 'AAS');
+  for (const name of [null, undefined, '']) assert.equal(dspColorKey(name), null);
+  const features = Array.from({ length: 24 }, (_, i) => ({ properties: { station: `G${i}`, postal_code: String(i) } }));
+  const before = structuredClone(features), key = p => p.station;
+  const colors = assignGroupColors(features, key);
+  assert.deepEqual(features, before);
+  assert.deepEqual(colors, assignGroupColors(features.toReversed(), key));
+  assert.equal(new Set(assignGroupColors(features.slice(0, 19), key).values()).size, 19);
+  assert.equal(colors.size, 24);
+  assert.ok([...colors.values()].every(color => palette.includes(color)));
+  assert.equal(assignGroupColors([features[0]], key).get('G0'), routeColor('G0'));
+  assert.equal(modeColor({ station: 'G0' }, 'station'), routeColor('G0'));
+  assert.equal(modeColor({}, 'dsp'), UNASSIGNED_COLOR);
+  assert.deepEqual(assignGroupColors([], key), new Map());
+});
+
+
+test('MVR-T5 groups use a/b/c/d cyclic choices including global spacing and reuse', async () => {
+  const { assignGroupColors, GROUP_COLOR_ASSIGN } = await import('../../web/map-state.js');
+  assert.deepEqual(GROUP_COLOR_ASSIGN, { minGlobalDeltaE: 20 });
+  assert.ok(Object.isFrozen(GROUP_COLOR_ASSIGN));
+  const keys = Array.from({ length: 28 }, (_, i) => `group-${String(i).padStart(2, '0')}`);
+  const branches = new Set();
+  // Clique forces c/d; isolated groups force b once global spacing is exhausted.
+  for (const connected of [true, false]) {
+    const features = keys.map(station => ({ properties: { station },
+      ...(connected ? { geometry: { type: 'Polygon', coordinates: [box(0, 0, 1, 1)] } } : {}) }));
+    const assigned = assignGroupColors(features, p => p.station), used = [];
+    for (const key of keys) {
+      const start = palette.indexOf(routeColor(key));
+      const candidates = palette.map((_, i) => palette[(start + i) % palette.length]);
+      const available = candidates.filter(color => !used.includes(color));
+      const score = color => Math.min(...(connected ? used : []).map(other => deltaE(color, other)));
+      const global = available.find(color => score(color) >= 30 && used.every(other => deltaE(color, other) >= 20));
+      const adjacent = available.find(color => score(color) >= 30);
+      const pool = available.length ? available : candidates;
+      const bestScore = Math.max(...pool.map(score));
+      const expected = global || adjacent || pool.find(color => score(color) === bestScore);
+      branches.add(global ? 'a' : adjacent ? 'b' : available.length ? 'c' : 'd');
+      assert.equal(assigned.get(key), expected);
+      used.push(expected);
+    }
+    assert.deepEqual(assignGroupColors(features.toReversed(), p => p.station), assigned);
+  }
+  assert.deepEqual([...branches].sort(), ['a', 'b', 'c', 'd']);
+});
+
+test('MVR-T5 adjacent near preferred colors change even when the slot is unused', async () => {
+  const { assignGroupColors } = await import('../../web/map-state.js');
+  const keys = Array.from({ length: 100 }, (_, i) => `near-${i}`).sort();
+  const a = keys[0], b = keys.find(key => key > a && routeColor(key) !== routeColor(a)
+    && deltaE(routeColor(a), routeColor(key)) < 30);
+  assert.ok(b);
+  const features = [a, b].map((station, i) => ({ properties: { station },
+    geometry: { type: 'Polygon', coordinates: [box(i, 0, 1, 1)] } }));
+  const colors = assignGroupColors(features, p => p.station);
+  assert.equal(colors.get(a), routeColor(a));
+  assert.notEqual(colors.get(b), routeColor(b));
+  assert.ok(deltaE(colors.get(a), colors.get(b)) >= 30);
+});
+
+test('MVR-T5 DSatur prioritizes assigned neighbors then degree, ZIP count and key', async () => {
+  const { assignGroupColors } = await import('../../web/map-state.js');
+  const edges = [['A', 'B'], ['B', 'C'], ['A', 'C'], ['A', 'D'], ['D', 'E']];
+  const features = edges.flatMap(([a, b], i) => [a, b].map(station => ({ properties: { station },
+    geometry: { type: 'Polygon', coordinates: [box(i * 3, 0, 1, 1)] } })));
+  const colors = assignGroupColors(features, p => p.station);
+  assert.deepEqual([...colors.keys()], ['A', 'B', 'C', 'D', 'E']);
+  assert.deepEqual(assignGroupColors(features.toReversed(), p => p.station), colors);
+  const popular = [...features, { properties: { station: 'D' } }];
+  assert.deepEqual([...assignGroupColors(popular, p => p.station).keys()], ['A', 'D', 'B', 'C', 'E']);
+});
+
+test('MVR-T5 group modes preserve route state hierarchy, outlines and hover', () => {
+  const p = { route_id: 1, postal_code: '00001', station: 'A', dsp_name: 'X-AAS' };
+  for (const mode of ['dsp', 'station']) {
+    for (const selection of [clearSelection(), selectRoute(1), selectRoute(2), selectZip(p)]) {
+      for (const [station, dsp] of [[null, null], ['A', null], ['B', 'Other'], [null, 'Other']]) {
+        const { fillColor: routeColor, ...expected } = polygonStyle(p, selection, 'route', station, dsp);
+        const { fillColor, ...actual } = polygonStyle(p, selection, mode, station, dsp);
+        assert.deepEqual(actual, expected);
+        assert.equal(hoverStyle({ fillColor, ...actual }).fillOpacity,
+          hoverStyle({ fillColor: routeColor, ...expected }).fillOpacity);
+      }
+    }
+  }
 });

@@ -63,7 +63,7 @@ export function parseStationBatchArgs(args) {
     } else if (flag === '--scope') options.scope = parseRefreshScope(args[++i]);
     else if (flag === '--trigger') {
       options.trigger = args[++i];
-      if (!['ui', 'cli'].includes(options.trigger)) throw new Error('Invalid trigger');
+      if (!['ui', 'cli', 'schedule'].includes(options.trigger)) throw new Error('Invalid trigger');
     } else if (flag === '--progress-file') {
       options.progressFile = args[++i];
       if (!options.progressFile || options.progressFile.startsWith('--')) throw new Error('Invalid progress file');

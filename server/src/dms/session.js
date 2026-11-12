@@ -27,7 +27,7 @@ export async function runLogin({ statePath, baseUrl, browserType = chromium,
     browser = await browserType.launch({ headless: false });
     if (abort.signal.aborted) throw new Error('cancelled');
     browser.on('disconnected', () => { if (!intentionalClose) cancel(); });
-    const context = await browser.newContext(options);
+    const context = await browser.newContext({ ...options, locale: 'zh-CN' });
     const page = await context.newPage();
     page.on('close', () => { if (!intentionalClose) cancel(); });
     await page.goto(baseUrl, { waitUntil: 'load' });
@@ -47,7 +47,7 @@ export async function runLogin({ statePath, baseUrl, browserType = chromium,
 
   try {
     const context = await open();
-    await question('请在打开的浏览器中手动登录 GOFO DMS。登录完成、看到登录后的页面后，回到这里按 Enter。\n');
+    await question('请在打开的浏览器中手动登录 GOFO DMS。登录完成后按 Enter（界面是英文也没关系，刷新时程序会自动切换为中文）。\n');
     phase = '保存 session';
     await fileOps.mkdir(path.dirname(statePath), { recursive: true });
     temporaryPath = `${statePath}.${randomUUID()}.tmp`;

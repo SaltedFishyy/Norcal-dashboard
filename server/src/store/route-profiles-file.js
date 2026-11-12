@@ -67,7 +67,7 @@ export async function saveStationSnapshot({ runtimeDir, station, stationSnapshot
 }
 
 const steps = new Set(['config', 'session', 'capture', 'transform', 'store']);
-const types = new Set(['NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError', 'Error']);
+const types = new Set(['DmsLanguageError', 'NeedsLoginError', 'SelectorError', 'LoadLimitError', 'CircuitBreakerError', 'CaptureError', 'SchemaError', 'StoreError', 'Error']);
 export async function writeLastFailure({ runtimeDir, station, step, errorType, detail = null, at = new Date().toISOString(), fileOps = fs }) {
   await atomicWrite(path.join(runtimeDir, 'last-failure.json'), {
     at, station: station === 'SFO01' ? station : null,

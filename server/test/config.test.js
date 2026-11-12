@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStatePath, checkStatePath, parseBaseUrl, parseStationBatchConfig, parseRouteDetailBatchDelay } from '../src/config.js';
+import { resolveStatePath, checkStatePath, parseBaseUrl, parseStationBatchConfig, parseRouteDetailBatchDelay, parseStationBatchArgs } from '../src/config.js';
+
+test('station batch accepts schedule, ui and cli triggers and rejects unknown triggers', () => {
+  for (const trigger of ['schedule', 'ui', 'cli'])
+    assert.equal(parseStationBatchArgs(['--trigger', trigger]).trigger, trigger);
+  for (const args of [['--trigger'], ['--trigger', 'invalid']])
+    assert.throws(() => parseStationBatchArgs(args), /Invalid trigger/);
+});
 
 test('batch delays keep command defaults, honor overrides and validate lower bounds', () => {
   assert.equal(parseRouteDetailBatchDelay(undefined), 4000);

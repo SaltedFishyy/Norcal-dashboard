@@ -19,11 +19,11 @@ test('refresh migration runner orders versions, skips repeated versions and roll
     return {};
   } };
   await migrate(client, { onResult: value => results.push(value) });
-  assert.deepEqual(results, [{ version: '001', result: 'applied' }, { version: '002', result: 'applied' }, { version: '003', result: 'applied' }, { version: '004', result: 'applied' }, { version: '005', result: 'applied' }, { version: '006', result: 'applied' }, { version: '007', result: 'applied' }]);
-  assert.equal(calls.filter(s => s === 'BEGIN').length, 7); assert.equal(calls.filter(s => s === 'COMMIT').length, 7);
+  assert.deepEqual(results, [{ version: '001', result: 'applied' }, { version: '002', result: 'applied' }, { version: '003', result: 'applied' }, { version: '004', result: 'applied' }, { version: '005', result: 'applied' }, { version: '006', result: 'applied' }, { version: '007', result: 'applied' }, { version: '008', result: 'applied' }]);
+  assert.equal(calls.filter(s => s === 'BEGIN').length, 8); assert.equal(calls.filter(s => s === 'COMMIT').length, 8);
   results.length = 0;
   await migrate(client, { onResult: value => results.push(value) });
-  assert.deepEqual(results, [{ version: '001', result: 'skipped' }, { version: '002', result: 'skipped' }, { version: '003', result: 'skipped' }, { version: '004', result: 'skipped' }, { version: '005', result: 'skipped' }, { version: '006', result: 'skipped' }, { version: '007', result: 'skipped' }]);
+  assert.deepEqual(results, [{ version: '001', result: 'skipped' }, { version: '002', result: 'skipped' }, { version: '003', result: 'skipped' }, { version: '004', result: 'skipped' }, { version: '005', result: 'skipped' }, { version: '006', result: 'skipped' }, { version: '007', result: 'skipped' }, { version: '008', result: 'skipped' }]);
   calls.length = 0;
   await assert.rejects(migrate({ query: async (sql, args) => {
     calls.push(sql);
@@ -37,8 +37,8 @@ test('refresh migration runner orders versions, skips repeated versions and roll
 test('CD-AC33 migration 002 accepts ui, exposes safe counts/scope and denies scraper scope UPDATE', { skip: dbSkip }, async t => {
   const db = await createTestDb(t), results = [];
   await migrate(db.owner, { ...db.options, onResult: value => results.push(value) });
-  assert.deepEqual(results, [{ version: '001', result: 'skipped' }, { version: '002', result: 'skipped' }, { version: '003', result: 'skipped' }, { version: '004', result: 'skipped' }, { version: '005', result: 'skipped' }, { version: '006', result: 'skipped' }, { version: '007', result: 'skipped' }]);
-  assert.deepEqual((await db.owner.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r => r.version), ['001', '002', '003', '004', '005', '006', '007']);
+  assert.deepEqual(results, [{ version: '001', result: 'skipped' }, { version: '002', result: 'skipped' }, { version: '003', result: 'skipped' }, { version: '004', result: 'skipped' }, { version: '005', result: 'skipped' }, { version: '006', result: 'skipped' }, { version: '007', result: 'skipped' }, { version: '008', result: 'skipped' }]);
+  assert.deepEqual((await db.owner.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r => r.version), ['001', '002', '003', '004', '005', '006', '007', '008']);
   const id = randomUUID(), scope = { type: 'all', district: null, skipped: [{ code: 'MFR01', district: 'first', reason: 'disabled' }] };
   await db.scraper.query(`INSERT INTO scrape_runs (id,trigger,status,requested_stations,options,started_at,scope,json_run_id,app_version,import_digest)
     VALUES ($1,'ui','completed',ARRAY['SFO01'],'{"refresh":false,"private":true}',now(),$2,'private','private','private')`, [id, scope]);

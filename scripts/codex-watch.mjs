@@ -7,11 +7,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const script = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(script), '..');
-const help = `用法：node scripts/codex-watch.mjs [--once | --hold | --window] [<run-dir>]
+const AUTO_CLOSE_SECONDS = 8;
+const help = `用法：node scripts/codex-watch.mjs [--once | --hold | --auto-close | --window] [<run-dir>]
   默认：跟踪最新 run；指定目录相对 cwd 或使用绝对路径。
   --once   打印已有事件后退出
   --hold   run 结束后按 Enter 关闭窗口
-  --window 在新的 Windows Terminal 窗口运行 --hold
+  --auto-close run 结束后 ${AUTO_CLOSE_SECONDS} 秒自动关闭，按 Enter 立即关闭
+  --window 在新的 Windows Terminal 窗口运行 --auto-close
   --help   显示用法`;
 let stopped = false;
 process.on('SIGINT', () => { stopped = true; process.exit(0); });
@@ -131,15 +133,29 @@ async function watch(run, mode) {
       pending += decoder.end();
       if (pending.trim()) parse(pending);
       await summary(mode !== '--once');
-      if (mode === '--hold') {
-        print('按 Enter 关闭窗口');
+      if (mode === '--hold' || mode === '--auto-close') {
+        const autoClose = mode === '--auto-close';
+        print(autoClose ? `窗口将在 ${AUTO_CLOSE_SECONDS} 秒后自动关闭（按 Enter 立即关闭）` : '按 Enter 关闭窗口');
         await new Promise(resolve => {
+          let timer;
+          function finish() {
+            clearTimeout(timer);
+            process.stdin.off('data', onData);
+            process.stdin.off('end', onEnd);
+            process.stdin.pause();
+            resolve();
+          }
+          function onData(chunk) { if (chunk.includes('\n') || chunk.includes('\r')) finish(); }
+          // With no interactive input, auto-close still waits for its timer.
+          function onEnd() { if (!autoClose) finish(); }
+          if (autoClose) timer = setTimeout(finish, AUTO_CLOSE_SECONDS * 1000);
           process.stdin.setEncoding('utf8');
-          process.stdin.on('data', chunk => { if (chunk.includes('\n') || chunk.includes('\r')) resolve(); });
-          process.stdin.once('end', resolve);
+          process.stdin.on('data', onData);
+          process.stdin.once('end', onEnd);
           process.stdin.resume();
         });
         process.stdin.pause();
+        if (autoClose) process.exit(0);
       }
       return;
     }
@@ -151,7 +167,7 @@ async function watch(run, mode) {
 async function windowRun(run) {
   const fallback = `node scripts/codex-watch.mjs '${run.replaceAll("'", "''")}'`;
   try {
-    const child = spawn('wt.exe', ['-w', 'new', 'new-tab', '--title', `Codex watch: ${path.basename(run)}`, '-d', root, process.execPath, script, '--hold', run], {
+    const child = spawn('wt.exe', ['-w', 'new', 'new-tab', '--title', `Codex watch: ${path.basename(run)}`, '-d', root, process.execPath, script, '--auto-close', run], {
       cwd: root, detached: true, stdio: 'ignore', shell: false,
     });
     // Wait for the launcher result to catch nonzero failures, without keeping it alive.
@@ -179,7 +195,7 @@ async function main() {
   if (args.includes('--help')) { print(help); return; }
   const flags = args.filter(arg => arg.startsWith('--'));
   const dirs = args.filter(arg => !arg.startsWith('--'));
-  if (flags.some(flag => !['--once', '--hold', '--window'].includes(flag)) || flags.length > 1 || dirs.length > 1) throw new Error(help);
+  if (flags.some(flag => !['--once', '--hold', '--auto-close', '--window'].includes(flag)) || flags.length > 1 || dirs.length > 1) throw new Error(help);
   const mode = flags[0];
   let run = dirs.length ? path.resolve(dirs[0]) : await latest();
   if (dirs.length && !(await optionalStat(run))?.isDirectory()) throw new Error(`run 目录不存在: ${run}`);

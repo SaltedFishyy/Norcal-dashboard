@@ -46,7 +46,7 @@ test('WH worker shares warehouse route and forces local Host even with supplied 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
   const url = `http://127.0.0.1:${server.address().port}`;
-  assert.deepEqual(await (await fetch(url + '/api/capabilities')).json(), { refresh: true, quotation_sync: true, warehouse_write: true, route_quotation: false });
+  assert.deepEqual(await (await fetch(url + '/api/capabilities')).json(), { refresh: true, quotation_sync: true, auto_refresh: true, warehouse_write: true, route_quotation: false });
   const deleted = await fetch(url + '/api/warehouses?id=00000000-0000-0000-0000-000000000001', {
     method: 'DELETE', headers: { Origin: url, 'X-NC-Warehouse': '1' } });
   assert.equal(deleted.status, 204);

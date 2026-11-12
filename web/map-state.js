@@ -35,22 +35,23 @@ export function selectionOutlineStyles({ zip = false, uncovered = false } = {}) 
 }
 
 export const POLYGON_STYLE = Object.freeze({
-  normal: Object.freeze({ fillOpacity: 0.34, difficultyFillOpacity: 0.4, color: '#334155', opacity: 0.5, weight: 0.8 }),
-  focused: Object.freeze({ fillOpacity: 0.52, color: '#1e293b', opacity: 0.65, weight: 1 }),
-  hover: Object.freeze({ fillOpacityIncrease: 0.15, color: '#0f172a', opacity: 0.9, weight: 1.6 }),
-  selectedRoute: Object.freeze({ fillOpacity: 0.7, color: '#1e293b', opacity: 0.9, weight: 1.2 }),
-  selectedZip: Object.freeze({ fillOpacity: 0.8, color: '#334155', opacity: 1, weight: 3 }),
-  dimmed: Object.freeze({ fillOpacity: 0.16, color: '#334155', opacity: 0.3, weight: 0.8 }),
+  normal: Object.freeze({ fillOpacity: 0.34, difficultyFillOpacity: 0.55, color: '#0A101E', opacity: 0.55, weight: 0.8 }),
+  focused: Object.freeze({ fillOpacity: 0.6, color: '#0A101E', opacity: 0.6, weight: 0.8 }),
+  hover: Object.freeze({ fillOpacityIncrease: 0.2, color: '#ffffff', opacity: 1, weight: 2 }),
+  selectedRoute: Object.freeze({ fillOpacity: 0.85, color: '#0A101E', opacity: 0.9, weight: 1.2 }),
+  selectedZip: Object.freeze({ fillOpacity: 0.9, color: '#334155', opacity: 1, weight: 3 }),
+  dimmed: Object.freeze({ fillOpacity: 0.15, color: '#0A101E', opacity: 0.25, weight: 0.6 }),
+  outside: Object.freeze({ fillOpacity: 0.05, color: '#0A101E', opacity: 0.12, weight: 0.5 }),
 });
 
 export function hoverStyle(baseStyle) {
   const c = POLYGON_STYLE;
   return { ...baseStyle, color: c.hover.color, opacity: c.hover.opacity,
-    weight: Math.max(baseStyle.weight, c.hover.weight),
+    weight: c.hover.weight,
     fillOpacity: Math.min(baseStyle.fillOpacity + c.hover.fillOpacityIncrease, c.selectedZip.fillOpacity) };
 }
 
-export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null, routeColors) {
+export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null, routeColors, groupColors) {
   const active = selection.route !== null;
   const selected = active && selection.route.route_id === properties.route_id;
   const faded = active ? !selected : (focusStation !== null && properties.station !== focusStation)
@@ -58,11 +59,12 @@ export function polygonStyle(properties, selection = clearSelection(), colorMode
   const zip = selected && selection.zip?.postal_code === properties.postal_code;
   const level = selected ? properties.zip_detail_status === 'available' ? difficultyLevel(properties.zip_difficulty) : null
     : difficultyLevel(properties.route_difficulty);
-  const style = faded ? POLYGON_STYLE.dimmed : zip ? POLYGON_STYLE.selectedZip
+  const outside = focusStation !== null && properties.station !== focusStation && !selected;
+  const style = outside ? POLYGON_STYLE.outside : faded ? POLYGON_STYLE.dimmed : zip ? POLYGON_STYLE.selectedZip
     : selected ? POLYGON_STYLE.selectedRoute
-      : (focusStation !== null || dsp !== null || colorMode === 'route') ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
-  const vivid = vividRouteColor(routeColors?.get(properties.route_id) ?? routeColor(properties.route_id));
-  const transform = style === POLYGON_STYLE.normal ? null : style === POLYGON_STYLE.dimmed ? ROUTE_FILL.dimmed : ROUTE_FILL.target;
+      : (focusStation !== null || dsp !== null || colorMode !== 'difficulty') ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
+  const vivid = vividRouteColor(modeColor(properties, colorMode, routeColors, groupColors, selection));
+  const transform = style === POLYGON_STYLE.normal ? null : (style === POLYGON_STYLE.dimmed || style === POLYGON_STYLE.outside) ? ROUTE_FILL.dimmed : ROUTE_FILL.target;
   return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : transform ? transformRouteColor(vivid, transform) : vivid,
     fillOpacity: style === POLYGON_STYLE.normal && colorMode === 'difficulty' ? style.difficultyFillOpacity : style.fillOpacity,
     color: style.color, weight: style.weight, opacity: style.opacity };
@@ -81,8 +83,8 @@ export function filteredRoutes(routes, query, focusStation = null, dsp = null) {
     && (dsp === null || route.dsp_name === dsp)), classified.kind === 'zip' ? '' : query);
 }
 
-export const ROUTE_FILL = Object.freeze({ saturation: 1.4, lightness: -0.06,
-  target: Object.freeze({ saturation: 1.2, lightness: -0.05 }),
+export const ROUTE_FILL = Object.freeze({ saturation: 1, lightness: 0,
+  target: Object.freeze({ saturation: 1, lightness: 0 }),
   dimmed: Object.freeze({ saturation: 0.45, lightness: 0.06 }) });
 
 export const vividRouteColor = hex => transformRouteColor(hex, ROUTE_FILL);
@@ -250,10 +252,10 @@ function routeLab(hex) {
   return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
 }
 
-export function assignRouteColors(features) {
+function groupNeighbors(features, keyOf) {
   const vertices = new Map(), neighbors = new Map();
   for (const feature of features) {
-    const id = feature.properties.route_id;
+    const id = keyOf(feature.properties);
     if (id == null) continue;
     if (!neighbors.has(id)) neighbors.set(id, new Set());
     for (const rings of geometryParts(feature.geometry)) for (const ring of rings) for (const point of ring) {
@@ -274,8 +276,14 @@ export function assignRouteColors(features) {
       if (count >= ROUTE_COLOR_ASSIGN.sharedVertices) { neighbors.get(a).add(b); neighbors.get(b).add(a); }
     }
   }
-  const labs = new Map(palette.map(color => [color, routeLab(color)]));
-  const distance = (a, b) => Math.hypot(...labs.get(a).map((value, i) => value - labs.get(b)[i]));
+  return neighbors;
+}
+
+const labs = new Map(palette.map(color => [color, routeLab(color)]));
+const colorDistance = (a, b) => Math.hypot(...labs.get(a).map((value, i) => value - labs.get(b)[i]));
+
+export function assignRouteColors(features) {
+  const neighbors = groupNeighbors(features, p => p.route_id);
   const ordered = [...neighbors.keys()].sort((a, b) => neighbors.get(b).size - neighbors.get(a).size
     || (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
   const assigned = new Map();
@@ -285,11 +293,62 @@ export function assignRouteColors(features) {
     let best, bestDistance = -Infinity;
     for (let offset = 0; offset < palette.length; offset++) {
       const color = palette[(start + offset) % palette.length];
-      const minimum = Math.min(...adjacent.map(other => distance(color, other)));
+      const minimum = Math.min(...adjacent.map(other => colorDistance(color, other)));
       if (minimum > bestDistance) { best = color; bestDistance = minimum; }
       if (minimum >= ROUTE_COLOR_ASSIGN.minDeltaE) { best = color; break; }
     }
     assigned.set(id, best);
   }
   return assigned;
+}
+
+
+// Empty DSPs have no allocation key and always use the neutral swatch.
+export const dspColorKey = name => name ? String(name).slice(String(name).lastIndexOf('-') + 1) || null : null;
+export const UNASSIGNED_COLOR = '#94a3b8';
+
+export const GROUP_COLOR_ASSIGN = Object.freeze({ minGlobalDeltaE: 20 });
+
+export function assignGroupColors(features, keyOf) {
+  const neighbors = groupNeighbors(features, keyOf), counts = new Map();
+  for (const { properties } of features) {
+    const key = keyOf(properties);
+    if (key != null) counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const assigned = new Map(), used = new Set(), pending = new Set(counts.keys());
+  const saturation = key => [...neighbors.get(key)].filter(id => assigned.has(id)).length;
+  while (pending.size) {
+    // DSatur counts assigned neighboring groups, with stable district-wide tie breaks.
+    const key = [...pending].sort((a, b) => saturation(b) - saturation(a)
+      || neighbors.get(b).size - neighbors.get(a).size || counts.get(b) - counts.get(a)
+      || (a < b ? -1 : a > b ? 1 : 0))[0];
+    pending.delete(key);
+    const preferred = routeColor(key), start = palette.indexOf(preferred);
+    const candidates = palette.map((_, i) => palette[(start + i) % palette.length]);
+    const adjacent = [...neighbors.get(key)].filter(id => assigned.has(id)).map(id => assigned.get(id));
+    const minimum = color => Math.min(...adjacent.map(other => colorDistance(color, other)));
+    const available = candidates.filter(color => !used.has(color));
+    const maximin = colors => colors.reduce((best, color) => minimum(color) > minimum(best) ? color : best);
+    const color = available.length
+      ? available.find(color => minimum(color) >= ROUTE_COLOR_ASSIGN.minDeltaE
+        && [...used].every(other => colorDistance(color, other) >= GROUP_COLOR_ASSIGN.minGlobalDeltaE))
+        || available.find(color => minimum(color) >= ROUTE_COLOR_ASSIGN.minDeltaE)
+        || maximin(available)
+      : maximin(candidates);
+    assigned.set(key, color); used.add(color);
+  }
+  return assigned;
+}
+
+export function modeColor(p, mode = 'route', routeColors, groupColors, selection = clearSelection()) {
+  if (mode === 'difficulty') {
+    const selected = selection.route?.route_id === p.route_id;
+    return difficultyColor(difficultyLevel(selected
+      ? p.zip_detail_status === 'available' ? p.zip_difficulty : null : p.route_difficulty));
+  }
+  if (mode === 'dsp' || mode === 'station') {
+    const key = mode === 'dsp' ? dspColorKey(p.dsp_name) : p.station;
+    return key == null ? UNASSIGNED_COLOR : groupColors?.[mode]?.get(key) ?? routeColor(key);
+  }
+  return routeColors?.get(p.route_id) ?? routeColor(p.route_id);
 }

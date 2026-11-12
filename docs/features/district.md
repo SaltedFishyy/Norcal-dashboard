@@ -238,10 +238,11 @@ District 可带可选的 `scrape_disabled` 对象：key 必须是本片区 Stati
 ### 南加州片区（2026-10-09）
 
 - SC1 在配置末尾追加 `south-cal`：南加州片区 / Southern California District，保持 `schema_version: 1` 及已有两个片区的内容。
-- Station 固定顺序：CNO01 → LAX01 → LAX02 → LAX03 → SFV01 → SFV02 → VTC01 → SMX01 → BKD01 → FAT01 → PLM01 → SAN01 → YUM02 → YUM01 → HNL01。
+- Station 固定顺序（2026-11-05 按 SC4 更新）：CNO01 → LAX01 → LAX02 → LAX03 → SFV01 → SFV02 → VTC01 → SMX01 → BKD01 → FAT01 → PLM01 → SAN01 → YUM02 → YUM01 → HNL01。
+- SC4（Product Owner 2026-11-05，取代 SC2 / SC3）：LAX02 / LAX03 均保留在南加州，共 15 站，不配置 `scrape_disabled`。刷新时若确认 DMS 菜单已展开、有其他 Station、却没有目标 Station，则关闭菜单并验证页头未变，运行时以 `not_in_dms_menu` 跳过；历史数据与归属保持不变，批次继续。
 - 沿用配置驱动的 API、刷新范围、地图、仓库过滤和前端选择器，没有新增代码分支，也没有修改 `server/src/`、`server/bin/` 或 `web/` 产品代码。
-- 按 brief 中 Claude 已确认的当前状态，15 个 Station 都没有快照，继续显示现有“暂无数据”状态。本次没有读取正式运行数据核验，也没有抓取数据。
-- 没有配置 `scrape_disabled`；DMS 菜单待核对，见 [open questions](../open-questions.md)。
+- 按 SC1 brief 中 Claude 当时确认的状态，原 15 个 Station 都没有快照，继续显示现有“暂无数据”状态。本次没有读取正式运行数据核验，也没有抓取数据。
+- LAX02 / LAX03 使用 SC4 运行时缺站判断；DMS 菜单核对历史见 [open questions](../open-questions.md)。
 - 新增 `server/test/district-config.test.js`，在测试索引注册。使用真实配置和合成 snapshot / mock 边界 / fake 仓库数据，覆盖 brief 的 11 组断言；Worker 只请求 GET 预览，注入禁止 spawn 的替身。Route Profile 依现有页面没有 DSP 选择器，地图测试覆盖空 DSP 状态。
 - 未修改现有测试断言或 fixture 配置；`server/test/index.js` 仅新增模块注册。未新增依赖，未运行 DMS、写正式库、重启服务、提交、推送或部署。
 - 验证：`npm.cmd test`（同一 `npm test` script）565 项通过，0 失败、0 跳过；针对性测试 34 项通过（包含复用地图测试模块的 22 项），日志为 `.handoff/SC1-tests.log` 和 `.handoff/SC1-targeted-tests.log`。`git diff --check` 通过；没有配置 lint / build scripts。未进行真实数据浏览器预览，Product Owner 预览签字仍待后续完成。

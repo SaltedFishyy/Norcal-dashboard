@@ -13,6 +13,7 @@ import path from 'node:path';
 import { readBasemap } from '../store/basemap-file.js';
 import { createFreshnessHandlers } from './freshness.js';
 import { createWarehouseHandlers } from '../warehouses/warehouse-api.js';
+import { buildRouteHistory } from './route-history.js';
 
 const defaultWebDir = fileURLToPath(new URL('../../../web/', import.meta.url));
 export const defaultGeoDir = fileURLToPath(new URL('../../../geo/', import.meta.url));
@@ -22,7 +23,7 @@ const defaultProtomapsDir = fileURLToPath(new URL('../../../node_modules/protoma
 export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = defaultGeoDir,
   leafletDir = defaultLeafletDir, protomapsDir = defaultProtomapsDir,
   basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, districtsPath, log,
-  capabilities, extraHandlers = new Map(), warehouses = {}, dataSource = createJsonDataSource({ runtimeDir }) } = {}) {
+  capabilities, extraHandlers = new Map(), warehouses = {}, now = () => new Date(), dataSource = createJsonDataSource({ runtimeDir }) } = {}) {
   const readPriceIndex = async () => {
     if (dataSource.source !== 'db') return null;
     try { return buildPriceIndex(await dataSource.readCurrentFirstPrices()); }
@@ -70,6 +71,14 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
       const priceIndex = await readPriceIndex();
       return { ...snapshot, rows: snapshot.rows.map(row => ({ ...row, ...routePriceSummary(priceIndex, row) })) };
     }, log,
+    getRouteHistory: async (routeId, days) => {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles',
+        year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now());
+      const part = type => parts.find(value => value.type === type).value;
+      const today = `${part('year')}-${part('month')}-${part('day')}`;
+      const history = await dataSource.readRouteHistory({ routeId, days, today });
+      return history === null ? { available: false } : buildRouteHistory(history.rows, { routeId, days, ...history });
+    },
     getRouteQuotation: async routeId => {
       let profiles;
       try { profiles = await dataSource.readRouteProfiles(); }

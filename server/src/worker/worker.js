@@ -1,55 +1,20 @@
-import { spawn as nodeSpawn } from 'node:child_process';
-import { readFile, unlink } from 'node:fs/promises';
-import path from 'node:path';
 import { createApiServer } from '../api/server.js';
 import { sendJson } from '../api/http-utils.js';
 import { projectRun, needsLogin } from '../api/freshness.js';
-import { readDistrictConfig, DistrictNotFoundError } from '../store/districts-file.js';
-import { parseRefreshScope, planRefresh } from '../batch/refresh-plan.js';
-import { processIsAlive } from '../batch/scrape-lock.js';
-import { writeFileAtomic } from '../store/atomic-file.js';
+import { DistrictNotFoundError } from '../store/districts-file.js';
+import { createRefreshLauncher } from './refresh-launcher.js';
 import { readQuotationSyncStatus } from '../quotations/quotation-sync-status.js';
 
-const progressKeys = ['run_id', 'scope', 'started_at', 'updated_at', 'phase', 'station', 'district',
-  'station_index', 'station_total', 'route_index', 'route_total', 'completed', 'skipped', 'failed',
-  'finished_at', 'status', 'stop_reason'];
-async function readJson(filename) {
-  try { return JSON.parse(await readFile(filename, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-}
-function forward(stream, log) {
-  let buffer = '';
-  stream?.on('data', chunk => {
-    buffer += chunk.toString();
-    const lines = buffer.split(/\r?\n/); buffer = lines.pop();
-    for (const line of lines) log(`[scrape] ${line}`);
-  });
-  stream?.on('end', () => { if (buffer) log(`[scrape] ${buffer}`); buffer = ''; });
-}
-
 export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districtsPath,
-  spawn = nodeSpawn, isAlive = processIsAlive, log = () => {}, quotationSyncIntervalMinutes = 0, ...options }) {
-  const progressFile = path.join(runtimeDir, 'refresh-progress.json');
-  const lockFile = path.join(runtimeDir, 'scrape.lock');
-  let child = null, starting = false;
-  const lockState = async () => {
-    try {
-      const lock = await readJson(lockFile);
-      if (!lock) return { lock: null, alive: false };
-      // Malformed or inaccessible locks fail closed; never probe pid 0 or negative pids.
-      if (!Number.isSafeInteger(lock.pid) || lock.pid <= 0) return { lock, alive: true };
-      return { lock, alive: await isAlive(lock.pid) };
-    } catch { return { lock: null, alive: true }; }
-  };
+  spawn, isAlive, log = () => {}, quotationSyncIntervalMinutes = 0, ...options }) {
+  const launcher = createRefreshLauncher({ runtimeDir, repoRoot, districtsPath, spawn, isAlive, log });
   const status = async () => {
-    const { alive } = await lockState();
-    const raw = await readJson(progressFile);
-    let progress = raw ? Object.fromEntries(progressKeys.filter(k => Object.hasOwn(raw, k)).map(k => [k, raw[k]])) : null;
+    let { busy, progress } = await launcher.status();
     const last = await dataSource.readLastScrapeRun();
-    if (!child && !starting && !alive && progress && last
+    if (!busy && progress && last
       && Date.parse(last.started_at) > Date.parse(progress.started_at)) progress = null;
     let state;
-    if (child || starting || alive) state = 'running';
+    if (busy) state = 'running';
     else if (progress) {
       state = progress.status === 'completed' ? 'completed' : 'stopped';
       if (progress.status === 'running') {
@@ -59,17 +24,10 @@ export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districts
     return { state, progress, last_run: projectRun(last),
       needs_login: needsLogin(progress?.stop_reason ?? last?.stop_reason) };
   };
-  const plan = async value => {
-    const scope = parseRefreshScope(value);
-    const config = await readDistrictConfig({ districtsPath });
-    const result = planRefresh({ config, scope });
-    const decorate = item => ({ ...item, district_name_zh: config.districts.find(d => d.id === item.district).name_zh });
-    return { scope: result.scope, stations: result.stations.map(decorate), skipped: result.skipped.map(decorate) };
-  };
   const preview = async ({ url, respond }) => {
     const scopes = url.searchParams.getAll('scope');
     if (scopes.length !== 1) { respond(400, { error: 'invalid_scope' }); return; }
-    try { respond(200, await plan(scopes[0])); }
+    try { respond(200, await launcher.plan(scopes[0])); }
     catch (error) {
       if (error.name === 'DistrictConfigInvalidError') throw error;
       respond(error instanceof DistrictNotFoundError ? 404 : 400, { error: error instanceof DistrictNotFoundError ? 'district_not_found' : 'invalid_scope' });
@@ -93,41 +51,18 @@ export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districts
       }
       body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch { respond(400, { error: 'invalid_body' }); return; }
-    let result;
-    try { result = await plan(body?.scope); }
-    catch (error) {
-      if (error.name === 'DistrictConfigInvalidError') throw error;
-      respond(400, { error: 'invalid_scope' }); return;
+    const result = await launcher.start({ scope: body?.scope, trigger: 'ui' });
+    if (!result.started) {
+      respond(result.error === 'refresh_in_progress' ? 409 : 400, { error: result.error }); return;
     }
-    if (!result.stations.length) { respond(400, { error: 'empty_scope' }); return; }
-    if (child || starting) { respond(409, { error: 'refresh_in_progress' }); return; }
-    // Reserve before awaiting the filesystem so concurrent POSTs cannot both spawn.
-    starting = true;
-    try {
-      const { lock, alive } = await lockState();
-      if (alive) { respond(409, { error: 'refresh_in_progress' }); return; }
-      if (lock) await unlink(lockFile);
-      // Persist a launch marker before spawning: an early crash must not show an older completed run.
-      const startedAt = new Date().toISOString();
-      await writeFileAtomic(progressFile, JSON.stringify({ run_id: null, scope: result.scope,
-        started_at: startedAt, updated_at: startedAt, phase: 'config', station: null, district: null,
-        station_index: 0, station_total: result.stations.length, route_index: 0, route_total: null,
-        completed: [], skipped: result.skipped.map(item => item.code), failed: [], finished_at: null,
-        status: 'running', stop_reason: null }));
-      child = spawn(process.execPath, ['--env-file-if-exists=.env', 'server/bin/dms-scrape-stations.js',
-        '--scope', body.scope, '--trigger', 'ui', '--new-run', '--progress-file', progressFile],
-      { cwd: repoRoot, shell: false, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false });
-      const current = child;
-      const finished = () => { if (child === current) child = null; };
-      child.once('exit', finished); child.once('error', finished);
-      forward(child.stdout, log); forward(child.stderr, log);
-      respond(202, await status());
-    } finally { starting = false; }
+    respond(202, await status());
   };
   post.methods = ['POST'];
   server = createApiServer({ ...options, runtimeDir, districtsPath, dataSource, log,
     warehouses: { ...options.warehouses, allowedHosts: () => [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`] },
-    capabilities: { refresh: true, quotation_sync: true }, extraHandlers: new Map([
+    capabilities: { refresh: true, quotation_sync: true, auto_refresh: true }, extraHandlers: new Map([
+      ['/api/auto-refresh/status', async ({ respond }) => respond(200,
+        server.autoRefreshScheduler?.status() ?? { enabled: false })],
       ['/api/quotation-sync/status', async ({ respond }) => respond(200, {
         enabled: quotationSyncIntervalMinutes > 0, interval_minutes: quotationSyncIntervalMinutes,
         status: await readQuotationSyncStatus(runtimeDir),
@@ -135,6 +70,7 @@ export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districts
       ['/api/refresh/preview', preview], ['/api/refresh', post],
       ['/api/refresh/status', async ({ respond }) => respond(200, await status())],
     ]) });
+  server.refreshLauncher = launcher;
   const handler = server.listeners('request')[0];
   server.removeListener('request', handler);
   server.on('request', (req, res) => {

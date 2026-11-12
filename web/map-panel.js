@@ -1,8 +1,7 @@
 import { difficultyColor, difficultyLevel } from './difficulty.js';
 import { formatNumber, formatUpdated, formatValue, formatPrice, formatPriceRange } from './format.js';
 import { openPriceDetail } from './price-detail.js';
-import { routeColor } from './route-colors.js';
-import { filteredRoutes, classifyQuery, clearSelection } from './map-state.js';
+import { modeColor, dspColorKey, filteredRoutes, classifyQuery, clearSelection } from './map-state.js';
 import { routeDifficultyText, mapText as t } from './map-text.js';
 
 // Compare instants before formatting; API order and timezone offsets need not match chronology.
@@ -27,7 +26,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     if (difficultyLevel(value)) { node.children[1].className = 'difficulty system-difficulty'; node.children[1].style.backgroundColor = difficultyColor(difficultyLevel(value)); node.children[1].style.color = '#ffffff'; }
     return node;
   };
-  let data, routeColors, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
+  let data, routeColors, groupColors, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   const search = element('search');
   function renderRoutes() {
     const query = search.value || '', classified = classifyQuery(query);
@@ -35,14 +34,29 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     element('routes').replaceChildren();
     element('no-match').hidden = matches.length !== 0;
     element('search-hint').hidden = !classified.zipHint;
-    const groups = !focusStation && data?.stations;
-    const ordered = groups ? data.stations.flatMap(station => matches.filter(route => route.station === station.code)) : matches;
+    const dspGroups = new Map();
+    if (colorMode === 'dsp') for (const route of matches) {
+      const key = dspColorKey(route.dsp_name);
+      if (!dspGroups.has(key)) dspGroups.set(key, { routes: [], zips: 0 });
+      const group = dspGroups.get(key); group.routes.push(route); group.zips += route.zip_count;
+    }
+    const sortedGroups = [...dspGroups].sort((a, b) => b[1].zips - a[1].zips || String(a[0]).localeCompare(String(b[0])));
+    const groups = colorMode !== 'dsp' && !focusStation && data?.stations;
+    const ordered = colorMode === 'dsp' ? sortedGroups.flatMap(([, group]) => group.routes.sort((a, b) => a.route_name.localeCompare(b.route_name)))
+      : groups ? data.stations.flatMap(station => matches.filter(route => route.station === station.code)) : matches;
     let previous;
     for (const route of ordered) {
+      if (colorMode === 'dsp' && previous !== dspColorKey(route.dsp_name)) {
+        previous = dspColorKey(route.dsp_name);
+        const heading = text('h3', '', 'map-dsp-group');
+        const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = modeColor(route, colorMode, routeColors, groupColors);
+        heading.append(swatch, text('span', t.dspRouteGroup(previous ?? t.unassignedDsp, dspGroups.get(previous).routes.length)));
+        element('routes').append(heading);
+      }
       if (groups && previous !== route.station) { element('routes').append(text('h3', route.station)); previous = route.station; }
       const button = text('button', ''); button.type = 'button'; button.className = 'map-route';
       button.setAttribute('aria-pressed', String(selection.route !== null && selection.route.route_id === route.route_id));
-      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = colorMode === 'difficulty' ? difficultyColor(difficultyLevel(route.route_difficulty)) : (routeColors?.get(route.route_id) ?? routeColor(route.route_id));
+      const swatch = text('span', '', 'map-swatch'); swatch.style.backgroundColor = modeColor(route, colorMode, routeColors, groupColors);
       button.append(swatch, text('span', query && !focusStation ? route.station + ' · ' + route.route_name : route.route_name));
       if (colorMode === 'difficulty') button.append(text('span', difficultyLevel(route.route_difficulty) || '—', 'map-level'));
       button.append(text('span', `${route.zip_count} ZIP`));
@@ -57,6 +71,7 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   element('clear').addEventListener('click', onClear);
   function applySelection(next) {
     selection = next; renderRoutes();
+    if (next.route) [...element('routes').children].find(row => row.getAttribute?.('aria-pressed') === 'true')?.scrollIntoView?.({ block: 'nearest' });
     element('clear').disabled = !next.route && !next.zip;
     element(next.zip ? 'zip-heading' : 'summary-heading').append(element('clear'));
     element('summary').replaceChildren();
@@ -122,8 +137,8 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
     if (element('station-times')) element('station-times').textContent = '';
     element('source').textContent = ''; element('updated').textContent = '—'; element('updated').removeAttribute('title');
   }
-  function render(next, { focusStation: focus = null, routeColors: colors } = {}) {
-    routeColors = colors;
+  function render(next, { focusStation: focus = null, routeColors: colors, groupColors: groups } = {}) {
+    routeColors = colors; groupColors = groups;
     data = next; focusStation = focus;
     const scoped = focus ? next.routes.filter(route => route.station === focus) : next.routes;
     const missing = focus ? next.missing.filter(row => row.station === focus) : next.missing;

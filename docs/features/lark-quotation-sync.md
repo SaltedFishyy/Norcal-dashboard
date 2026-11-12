@@ -248,6 +248,14 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 
 - 最终验证：`npm.cmd test` 全量 768/768 通过，0 失败、0 跳过，包含测试库集成；`git diff --check` 通过。项目无 lint / build 命令。完整业务页面人工预览及 Product Owner UI 签字尚未执行；真实工作表重新摸底和正式白名单启用属于 LQ-T8 / T9。
 
+### LQ-T10（2026-11-06）
+
+- 日期解析新增 `YYYY-MM-DD`（月 / 日允许 1–2 位）和 `M/D/YY`（固定映射到 20YY），沿用日历有效性检查；生效和结束日期的数字单元格拒绝为 `date_not_date_cell`，不转换序列号，保留 `date_placeholder`。原有线路、价格校验优先级不变。
+- 首票 / 续票新增 `40-<n>(lb)` 且 n ≥ 1000 的 `40_plus` 识别，复用空白和 `(Ib)` 规范化及首票分组规则；测试验证 1000 / 999999、拒绝 999 及错误范围边界，并保留 SFO / LAX01 / SMF / CNO 回归覆盖。测试价格全部为合成值。
+- `web/quotation-sync-status.js` 中 Unicode 转义全部替换为 UTF-8 字面量，未改变文案或行为；现有页面测试不变。定向测试 34/34 通过；使用现有 Playwright + headless Chromium、拦截请求加载本地模块和合成状态，验证中文结果、工作表计数、失败列表截断，浏览器无 console / page errors。
+- 无 migration、schema 或依赖变更，未访问真实 Lark 或非测试数据库，未查看或修改 `.env`、未重启服务，保留其他任务的工作区改动。未提交、推送或部署。完整业务页面人工预览及 Product Owner 签字未执行。
+- 最终验证：`npm.cmd test` 全量 771/771 通过，0 失败、0 跳过（包含测试库集成）；`git diff --check` 通过。项目未配置 lint / build 命令。
+
 ## 13. 多工作表扩展（LQ-M，Product Owner 2026-11-06 授权实现）
 
 ### 13.1 背景
@@ -270,7 +278,7 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 | LQ-D16 | SFV 两个生效日期列不猜测，保持表头无效，待 Product Owner 看样例后决定（LQ-Q11） |
 | LQ-D17 | 结构特殊的表（总表、总表解释、洛杉矶路线难度、LAX暂停线路、LAX (LAV+ONT+VTC)、HNL、SAF、PRC、CGZ+FLG、LAS、PHX 报价版本）本阶段不接 |
 | LQ-D18 | DMS 中没有匹配线路的表（BZN、GJT、IFP）跳过，不做模糊匹配 |
-| LQ-D19 | **不使用报价日期**：不读取、不写入、不在 API 和页面展示，不参与任何价格判断；当前价格只看生效日期和结束日期。`route_quotation_lines.quotation_date` 列保留（不改 schema），Lark 同步始终写 NULL |
+| LQ-D19 | **不使用报价日期**：不读取、不写入、不在 API 和页面展示，不参与任何价格判断；当前价格只看生效日期和结束日期。`route_quotation_imports.quotation_date` 列保留（不改 schema；Claude 2026-11-06 更正：该列在导入表上，不在行表上），Lark 同步始终写 NULL |
 
 ### 13.3 技术说明
 
@@ -337,3 +345,12 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 | 任务 | 内容 | 执行者 |
 |---|---|---|
 | LQ-T10 | 本节 LQ-AC19–AC22 | Codex（Product Owner 2026-11-06 已授权） |
+
+### LQ-T10 review / LQ-T9（Claude 2026-11-06）
+
+- LQ-T10 review：LQ-AC19–AC22 满足；`40-999999` 不误配其他重量段；中文转义已还原。Claude 复跑 `npm test` 771/771、`git diff --check` 通过。修复轮次 0。
+- LQ-D22 核实：LAX02 / LAV 中的 `46118` 在 FormattedString / FormattedValue / ToString 三种读取方式下都返回数字（同表真正的日期单元格返回 `4/6/2026`），判定为普通数字单元格，不转换，拒绝为 `date_not_date_cell`。
+- LQ-T9（Product Owner 2026-11-06 授权，26 张 A 类表一次接入）：本机 `.env` 增加 `LARK_QUOTATION_SHEET_IDS`（26 个 ID，SFO 在首位；保留 `LARK_QUOTATION_SHEET_ID=uAaPvG`，已包含在列表中）。dry-run 与 LQ-T8 摸底完全一致：新增 901、不变 261、作废 0、拒绝 39、警告 19。正式同步结果相同：新增 25 条导入记录，正式库共 26 条导入记录、1162 行、16268 个价格（= 1162 × 14），覆盖 28 个 DMS 站点；当前 0–1 lb 首票 $1.55–$2.20，无 0 或空价格；行的 Station 与 DMS 线路 Station 不一致的为 0；8 行已过结束日期（BOI 2 行当日有效报价、SEA 6 行），按规则只作历史。IDA / BIL 的线路名为空的拒绝行使「删除作废」被跳过（`removals_skipped`），符合 LQ-D2 / Product Owner 要求。
+- 确认无运行中的刷新后，停止 3000 / 3100 的 Node 进程，由 `run-service.ps1`（readonly / worker）守护自动重启（16:22）。重启后 Worker 首次定时同步（16:23）26 张表全部 `unchanged`。3100 状态行：「报价同步 · 定时：每 60 分钟 · 最近成功：2026-11-06 16:23 PST · 最近一次：无变化 · 工作表：26/26 · 拒绝行数：39」。
+- 页面 / API 核对：`/api/route-quotations` 不再返回 `quotation_date`；价格详情不再显示「报价日期」，DEN01-001 生效日期 2026-10-26（由 `2026/10/26` 解析）；线路档案 DEN01 28 条单价 / 4 条区间 / 1 条无报价，PHX01 37 / 37 单价，SEA01 16 单价 / 3 区间 / 4 无报价，SMF01 11 单价 / 7 区间，SFV01 全部 `—`；地图 ZIP 接口：80111（DEN01）$1.85、85004（PHX01）$2.05、95814（SMF01）$2.00、94607（SFO02）$2.00。
+- 未接入：B / C / D 类，等待表格维护方修正（LQ-Q11–Q13）。STG（两位年份）、OAR（40 lb+ 表头）在 LQ-T10 后理论上可解析，但仍按 Product Owner 决定暂不接入。

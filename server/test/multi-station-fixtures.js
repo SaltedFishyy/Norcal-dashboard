@@ -5,10 +5,11 @@ import { runStationsBatch } from '../bin/dms-scrape-stations.js';
 export const record = (station, id) => ({ roadAreaId: id, roadAreaName: `MOCK-${id}`, transitStationName: station,
   postalCodeList: '', postalCodeNum: 0 });
 export function stationPage({ lists = { SFO01: [record('SFO01', 1)], MFR01: [record('MFR01', 2)] },
-  original = 'SFO01', switchStatus = 200, headerChanges = true, menuCount = 1, switchTimeout = false,
+  missingStations = [], menuVisible = true, closeMenu = true, closeChangesHeader = false, english = false, original = 'SFO01', switchStatus = 200, headerChanges = true, menuCount = 1, switchTimeout = false,
   listStatus = 200, missingTable = false, headerCount = 1, mutateBody = value => value, waitEvent,
   headerState, automaticListMissed = false, automaticListStatus = listStatus, networkIdleTimeout = false } = {}) {
   const page = new EventEmitter(), events = [], listeners = [];
+  let menuOpen = false;
   let station = original, pageNum = 1, querySize = 10, launches = 0, closed = false, requests = 0, elapsed = 0;
   const req = (route, method = 'POST', body = {}) => ({ url: () => `https://example.invalid/prod-api/${route}?token=SECRET`,
     method: () => method, postDataJSON: () => body });
@@ -23,10 +24,10 @@ export function stationPage({ lists = { SFO01: [record('SFO01', 1)], MFR01: [rec
       mutateBody({ success: true, data }, station, pageNum), 'POST', { pageNum, pageSize: querySize });
   };
   const locator = (selector, target) => ({
-    count: async () => selector === 'input[type=password]' ? 0 : selector.includes('menu-item') ? menuCount
+    count: async () => selector === 'header .dbu-web-main-dropdown-trigger:visible' ? 0 : selector === 'input[type=password]' ? 0 : selector.includes('menu-item') ? (selector.endsWith(':visible') ? (menuOpen && menuVisible ? Object.keys(lists).length : 0) : missingStations.includes(target) ? 0 : menuCount)
       : selector === 'header .dbu-web-main-dropdown-trigger span.groupCheck' ? (headerState?.(station, elapsed)?.count ?? headerCount) : 1,
     innerText: async () => headerState?.(station, elapsed)?.text ?? station, first: () => locator(selector, target), nth: () => locator(selector, target),
-    filter: filter => locator(selector, filter.hasText?.source?.replace(/^\^\\s\*/, '').replace(/\\s\*\$$/, '')),
+    filter: filter => filter.hasText?.source?.includes('[A-Z]') ? { count: async () => menuOpen && menuVisible ? Object.keys(lists).length : 0 } : locator(selector, filter.hasText?.source?.replace(/^\^\\s\*/, '').replace(/\\s\*\$$/, '')),
     isEnabled: async () => true, isVisible: async () => headerState?.(station, elapsed)?.visible ?? true, getAttribute: async () => null,
     waitFor: () => selector === 'input[type=password]' ? new Promise(() => {})
       : closed ? Promise.reject(new Error('closed')) : Promise.resolve(),
@@ -38,9 +39,13 @@ export function stationPage({ lists = { SFO01: [record('SFO01', 1)], MFR01: [rec
     click: async () => {
       if (closed) throw new Error('closed');
       events.push(`click:${selector}`);
-      if (selector.includes('menu-item')) {
+      if (selector === 'header .dbu-web-main-dropdown-trigger') {
+        if (!menuOpen) menuOpen = true; else if (closeMenu) menuOpen = false;
+        if (!menuOpen && closeChangesHeader) station = 'RNO01';
+      } else if (selector.includes('menu-item')) {
+        menuOpen = false;
         // Model a long dropdown: target is outside the initial viewport; locator click scrolls it.
-        if (!/^[A-Z]{3}\d{2}$/.test(target)) throw new Error('Non-exact menu item');
+        if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$/.test(target)) throw new Error('Non-exact menu item');
         events.push(`locator-scroll:${target}`);
         events.push(`switch:${target}`);
         if (switchTimeout) { for (const pending of listeners.splice(0)) pending.reject(new Error('timeout')); return; }
@@ -55,7 +60,7 @@ export function stationPage({ lists = { SFO01: [record('SFO01', 1)], MFR01: [rec
       else if (selector === 'query') { pageNum = 1; list(); }
     },
   });
-  page.locator = locator; page.getByText = () => locator('expand'); page.getByRole = () => locator('query');
+  page.locator = locator; page.getByText = () => locator('expand'); page.getByRole = (_, { name }) => ({ ...locator('query'), count: async () => Number(english ? name.test('Search') : name.test('查询')) });
   page.url = () => 'https://example.invalid/areaDepiction'; page.mainFrame = () => page;
   page.goto = async () => { events.push('goto'); }; page.screenshot = async () => {};
   page.isClosed = () => closed;
@@ -67,7 +72,7 @@ export function stationPage({ lists = { SFO01: [record('SFO01', 1)], MFR01: [rec
   page.waitForResponse = predicate => new Promise((resolve, reject) => listeners.push({ predicate, resolve, reject }));
   const browserType = { launch: async () => { launches++; return { newContext: async () => ({ newPage: async () => page }), close: async () => { closed = true; } }; } };
   return { page, events, browserType, emit, lists, setStation: value => { station = value; },
-    get station() { return station; }, get launches() { return launches; }, get requests() { return requests; },
+    get menuOpen() { return menuOpen; }, get station() { return station; }, get launches() { return launches; }, get requests() { return requests; },
     context: { page, guarded: async action => action() } };
 }
 export function batchFixture(pageOptions = {}) {

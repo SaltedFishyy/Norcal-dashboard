@@ -1,3 +1,4 @@
+import { writePageFailureDiagnostic } from '../src/dms/batch-diagnostics.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -5,7 +6,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { runRouteDetailsBatch, parseBatchArgs, selectBatchRoutes, diagnosticMessage } from '../bin/dms-scrape-route-details.js';
-import { withPortraitPage, SelectorError, CaptureError } from '../src/dms/portrait-page.js';
+import { withPortraitPage, checkDmsLanguage, DmsLanguageError, SelectorError, CaptureError } from '../src/dms/portrait-page.js';
 import { confirmPortraitRoute, closeRouteDetailModals } from '../src/dms/route-detail-page.js';
 import { listCachedRouteIds, saveRouteDetail, writeRouteDetailsBatchRun, RouteDetailInvalidError } from '../src/store/route-details-file.js';
 import { transformRouteDetail } from '../src/transform/route-detail.js';
@@ -19,13 +20,13 @@ const request = suffix => ({ url: () => `https://example.invalid/prod-api/${suff
   postDataJSON: () => ({ transitStationCodeList: ['SFO01'], pageSize: 100 }) });
 
 function pageSession({ body = { data: { records, total: 3 } }, startup = [], status, password = false,
-  nextBodies = [], nextButtons = 1, nextEnabled = true, nextQuery = {}, modalVisible = false, nextRequests = 1 } = {}) {
+  english = false, nextBodies = [], nextButtons = 1, nextEnabled = true, nextQuery = {}, modalVisible = false, nextRequests = 1 } = {}) {
   const page = new EventEmitter(), events = [];
   let launches = 0, closes = 0, queries = 0, login = false, pageNum = 1, responseNumber = 0;
   let showPassword;
   const passwordAppeared = new Promise(resolve => { showPassword = resolve; });
   const locator = selector => ({
-    count: async () => selector === 'input[type=password]' ? Number(password) : selector.includes('next-btn') ? nextButtons : 1,
+    count: async () => selector === 'header .dbu-web-main-dropdown-trigger:visible' ? 0 : selector === 'input[type=password]' ? Number(password) : selector.includes('next-btn') ? nextButtons : 1,
     isEnabled: async () => nextEnabled,
     getAttribute: async () => null,
     fill: async value => events.push(`filter:${value}`),
@@ -43,7 +44,7 @@ function pageSession({ body = { data: { records, total: 3 } }, startup = [], sta
     } },
   });
   page.locator = locator; page.getByText = () => locator('展开');
-  page.getByRole = () => ({ click: async () => {
+  page.getByRole = (_, { name }) => ({ count: async () => Number(english ? name.test("Search") : name.test("查询")), click: async () => {
     queries++; page.emit('request', request('roadAreaPortrait/home/frontPage/queryList/pagination'));
   } });
   page.keyboard = { press: async key => events.push(key) };
@@ -152,8 +153,10 @@ test('RD3-14 method/attempt records and summary preserve write-close-restore ord
 
 test('RD3-15 retry metadata reaches run records and sanitized failure diagnostics', async () => {
   const success = batchHarness();
-  assert.equal(await success.run({ capture: async (_context, { routeId }) => ({ ...result(routeId), click_retry: 1 }) }), 0);
+  assert.equal(await success.run({ capture: async (_context, { routeId }) => ({ ...result(routeId), click_retry: 1, click_late: true, click_wait_reason: 'navigation_wait' }) }), 0);
   assert.ok(success.runs[0].routes.every(route => route.click_retry === 1));
+  assert.ok(success.runs[0].routes.every(route => route.click_late === true && route.click_wait_reason === 'navigation_wait'));
+  assert.equal(success.runs[0].diagnostic, null);
   const failure = batchHarness();
   let diagnostic;
   assert.equal(await failure.run({ capture: async () => {
@@ -622,7 +625,7 @@ test('RD3 diagnostic uses control cause and screenshots before closing into runt
     let wrapped;
     h.page.screenshot = async options => {
       assert.equal(h.pageHarness.closes, 0);
-      assert.equal(options.fullPage, false); assert.ok(options.timeout > 0 && options.timeout <= 5000);
+      assert.equal(options.fullPage, false); assert.equal(options.timeout, 8000);
       assert.equal(options.path, path.join(runtimeDir, 'route-details-batch-failure.png'));
       h.events.push('screenshot'); await fs.writeFile(options.path, 'synthetic screenshot');
     };
@@ -694,4 +697,55 @@ test('RD3 failure callback is batch-only, bounded, preserves existing SelectorEr
       } }, context => context.control('outer', () => { throw original; })), error => error === original);
     assert.equal(calls, mode === 'single' ? 0 : 1); assert.ok(h.events.includes('closed'));
   }
+});
+
+test('English batch with missing language trigger keeps safe stop reason', async () => {
+  const h = batchHarness({ english: true });
+  assert.equal(await h.run(), 1);
+  assert.equal(h.runs[0].stop_reason, 'capture:DmsLanguageError');
+  const { safeStopReason, needsLogin } = await import('../src/api/freshness.js');
+  assert.equal(safeStopReason(h.runs[0].stop_reason), h.runs[0].stop_reason);
+  assert.equal(needsLogin(h.runs[0].stop_reason), false);
+  assert.equal(h.pageHarness.queries, 0);
+  assert.deepEqual(h.saved, []);
+  assert.ok(!h.events.some(value => /展开|sizes|station|capture:/.test(value)));
+  assert.match(h.logs.join(''), /中文/);
+});
+
+test('language guard tolerates absent or mixed controls and waits for late Search', async () => {
+  for (const controls of [[], ['查询'], ['查询', 'Search'], ['SEARCH'], ['Search records']]) {
+    const page = { getByRole: (_, { name }) => ({ count: async () => controls.filter(value => name.test(value)).length }) };
+    const run = () => checkDmsLanguage({ page, guarded: action => action(), timeout: 0 });
+    await assert.doesNotReject(run());
+  }
+  let englishReads = 0;
+  const page = { getByRole: (_, { name }) => ({ count: async () => name.test('Search') ? Number(++englishReads > 1) : 0 }) };
+  await assert.rejects(checkDmsLanguage({ page, guarded: action => action(), timeout: 500 }), DmsLanguageError);
+  assert.equal(englishReads, 2);
+});
+
+test('global Station mode checks language before handing page to batch callback', async () => {
+  const h = pageSession({ english: true });
+  let called = false;
+  await assert.rejects(h.session({ globalStationMode: true, batch: true,
+    statePath: '/synthetic/state.json', baseUrl: 'https://example.invalid/areaDepiction' },
+  async () => { called = true; }), DmsLanguageError);
+  assert.equal(called, false);
+  assert.equal(h.queries, 0);
+  assert.deepEqual(h.events, ['browser-close']);
+});
+
+
+test('RD3-16 diagnostic total deadline is 9000ms', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let finished = false;
+  const pending = writePageFailureDiagnostic({ runtimeDir: '/synthetic/not-written',
+    page: { screenshot: async () => new Promise(() => {}) }, error: new SelectorError('synthetic'),
+    fileOps: { mkdir: async () => {} } }).then(value => { finished = true; return value; });
+  await Promise.resolve();
+  t.mock.timers.tick(8999);
+  await Promise.resolve();
+  assert.equal(finished, false);
+  t.mock.timers.tick(1);
+  assert.equal(await pending, null);
 });

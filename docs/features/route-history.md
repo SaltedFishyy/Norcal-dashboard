@@ -1,6 +1,6 @@
 # 线路历史（Route History，RH）
 
-状态：**Approved**（Product Owner 2026-11-11 批准需求与方案；**尚未授权进入实现**）
+状态：**Approved — 已实现（DB-T1、RH-T1、RH-T2，2026-11-11），待正式库 migration 008 和 UI 签字；RH-T3 另行授权**
 
 ## 1. 目标
 
@@ -36,7 +36,7 @@
 
 ### 4.2 API（只读服务）
 
-- `GET /api/route-profiles/<route_id>/history?days=7|30`（默认 7；其他值返回 400）。
+- `GET /api/route-history?route_id=<n>&days=7|30`（默认 7；其他值返回 400）。
 - 以 `route_id` 为键。返回：`{ route_id, days, points: [{ day, route_name, station, dsp_name, pickup_volume, pph, first_mile_distance, zip_count, route_difficulty }], changes: [{ day, field, from, to }], first_seen, last_seen, former_names: [] }`。`changes` 只覆盖难度、DSP、ZIP 集合（ZIP 集合只给增减数量，不返回完整列表）。
 - 统计值（当前 / 平均 / 最高 / 最低 / 趋势）由前端计算，API 只返回数据点，规则只写一处（前端纯函数，可单元测试）。
 - `DATA_SOURCE=json` 时返回 `{ available: false }`，前端显示“当前数据源不支持历史”。
@@ -50,7 +50,7 @@
   - 4 个指标卡：当前值、平均、最高、最低、趋势。
   - 每个指标一个小折线图（inline SVG，不新增依赖）；缺少数据的日子断开，不插值。
   - 变化标记：难度、DSP、ZIP 集合变化的日子在图上标点，下方列出“10/21 难度 3 → 4”之类的文字。
-  - 覆盖说明：“30 天中有 N 天数据”。
+  - 覆盖说明：“最近 N 天中有 M 天数据（N = 所选窗口）”；M 为当前响应 points 中的不同日期数，每次切换只请求所选窗口的数据。
 - 统计规则：
   - **当前** = 窗口内最近一个数据点（不一定是今天，显示日期）。
   - 平均 / 最高 / 最低 只用非 null 值。
@@ -85,4 +85,16 @@
 
 ## 7. 实现记录（Implementation Notes）
 
-（待填写）
+- 2026-11-11 DB-T1：新增 migration `008_route_history.sql`，包含 schedule trigger、Pacific 每站每日最后快照的历史视图、route_id 索引及 scraper / reader SELECT 授权。按任务 brief 使用 `coalesce(activated_at, created_at)`（实际 schema 无 `captured_at` 列），同时间按 id DESC。指标仅接受 JSON number，难度沿用 profile 文本，ZIP 非数组为 NULL。补充真实 DB 集成测试及迁移版本断言；代码中已定义，未部署到正式库。测试执行结果见本次交付总结。
+
+- 2026-11-11 RH-T1?? task brief ???????? API ?? `/api/route-history?route_id=<n>&days=7|30`???? Route API ?????? route_id ????????? createApiServer??????? Worker ????? 7 ????? 7/30????????
+- RH-T1 ?????? reader ????? REPEATABLE READ READ ONLY ??????? America/Los_Angeles ?? today???? `day > today - days`??? SQL ? text?????? first_seen / last_seen / ?????????? latest_day?????? number?null ???????????????????????DSP ? ZIP ?????? null ??????ZIP ????????JSON ???? available:false?
+- RH-T1 ?????????HTTP?? Pacific ??? Worker??reader DB ??/???? 30 ? ? 550 Route ??????????? 2000 ms??????? 500 ms ??????? `node --test server/test/`???? .env??????? NC_TEST_DB_*?DB ???????????????
+- RH-T1 ???????????? 822 ??764 ???56 ???2 ????????? CD-AC30 / CD-AC31 ????????????NC_TEST_DB_*?????? API ??????????? HTTP ??????? DB/??????????????????????git diff --check ???? lint/build ???
+
+- 2026-11-11 RH-T1 review round 1: replace invalid synthetic station code `MOCK` with `TST01` without changing the CHECK constraint. Existing migrations grant reader SELECT on views only, not `station_snapshots`; add a DB assertion for that restriction and retain the view-based `latest_day` query as permitted by R2, without a new migration. The 30x550 API assertion remains < 2000 ms (local target < 500 ms); measured results are reported in the delivery summary.
+
+- 2026-11-11 RH-T2：在现有 `web/route-detail.js` 内新增概况 / 历史 tab、左右方向键和 ARIA 状态；保留概况原有子树、请求、ZIP 高亮及返回结果。每次打开默认概况、7 天；历史按需读取。沿用弹窗 `sequence` 隔离关闭 / 重开请求，并用面板请求序号隔离 7 / 30 天竞态。第 1 轮修复 R1：覆盖说明跟随所选窗口，以当前响应 points 的不同日期数计数；去掉额外 30 天请求，每次切换只请求一次。测试覆盖 7 → 30 → 7 的请求数量、覆盖文案及重复日期去重。
+- RH-T2：导出 `summarizeMetric`，忽略 null / 非有限数字，取最近有效日期，平均和趋势按 brief 计算；inline SVG 按 Pacific 当日为终点的完整日历窗口等距绘制，缺失日断开，单点和变化日均有标记。新增领件量、PPH、首公里距离、ZIP 数量卡和变化记录、空数据 / 不支持 / 错误状态。样式仅追加 `/* RH */` 区块，390px 单列，并支持 reduced motion。地图页无此弹窗，本次未修改地图。
+- RH-T2 测试：新增 `server/test/route-history-web.test.js` 并接入现有 `server/test/index.js`；定向测试 92 项通过，原概况测试断言未修改。按 brief 执行 `node --test server/test/`（未加载 `.env`）：825 项，767 通过、56 跳过、2 失败；失败为 CD-AC30 / CD-AC31，均因未配置 `NC_TEST_DB_*`。无 lint / build 配置。`git diff --check` 通过。
+- RH-T2 本地合成预览：本次临时脚本 `.handoff/rh-t2-preview.mjs`（不纳入版本控制）通过 Playwright 请求拦截加载现有前端模块和 CSS，API 全部返回合成数据，无 DMS / DB / 运行时目录访问，不启动或重启服务。可在当前工作区执行 `node .handoff/rh-t2-preview.mjs` 重现；截图 `.handoff/rh-t2-{1280|390}-{7|30}.png`。四种组合均验证页面及 dialog 无横向溢出，390px 卡片单列，无浏览器 JavaScript 错误。真实应用预览：在已有只读服务 `http://127.0.0.1:3000/` 点击线路名称 → 历史 → 7 / 30 天；JSON 模式显示不支持提示。仍待 Claude review、带测试库配置的完整测试及 Product Owner UI 预览签字。

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { batchFixture, record } from './multi-station-fixtures.js';
+import { batchFixture, record, stationPage } from './multi-station-fixtures.js';
 import { parseStationBatchArgs, parseStationBatchConfig, stationRequestCap } from '../src/config.js';
 import { prepareStationBatchState, writeStationBatchFile, readStationBatchState } from '../src/store/station-batch-file.js';
-import { switchStation } from '../src/dms/station-switch.js';
+import { switchStation, restoreHeaderOrigin } from '../src/dms/station-switch.js';
 import { saveStationSnapshot } from '../src/store/route-profiles-file.js';
 import { saveRouteDetail } from '../src/store/route-details-file.js';
 import { withPortraitPage, SelectorError } from '../src/dms/portrait-page.js';
@@ -273,4 +273,61 @@ test('MS actual shared locator stops before L5 on second page', async () => {
     guarded: async action => action(), control: async (step, action) => action() };
   try { await assert.rejects(captureRouteDetailOnPage(context, { routeName: 'MOCK-1', routeId: 1 }), /L5 不可用于第 2 页以后/); }
   finally { globalThis.getComputedStyle = previousStyle; globalThis.document = previousDocument; }
+});
+
+test('Station batch English interface stops before switching or querying', async () => {
+  const h = batchFixture({ english: true });
+  assert.equal(await h.run(), 1);
+  assert.equal(h.files.at(-1).record.stop_reason, 'capture:DmsLanguageError');
+  assert.deepEqual(h.saves, []);
+  assert.ok(!h.events.some(value => value.startsWith('click:') || value.startsWith('switch:')));
+  assert.equal(h.pageHarness.requests, 0);
+  assert.match(h.logs.join(''), /程序自动切换中文失败。请在公用电脑打开 DMS，把右上角语言手动切换为中文/);
+});
+
+test('SC4 runtime skip continues, preserves history and completes progress and run record', async () => {
+  const h = batchFixture({ lists: { SFO01: [], MFR01: [], RNO01: [] }, missingStations: ['MFR01'] });
+  h.snapshots.MFR01 = { historical: true }; h.details.old = { historical: true };
+  const history = structuredClone({ snapshot: h.snapshots.MFR01, detail: h.details.old }), updates = [];
+  assert.equal(await h.run({ args: ['--stations', 'SFO01,MFR01,RNO01', '--progress-file', 'synthetic.json'],
+    progressWriter: async (_, value) => updates.push(JSON.parse(value)) }), 0);
+  const entry = { code: 'MFR01', district: null, reason: 'not_in_dms_menu' }, record = h.files.at(-1).record;
+  assert.deepEqual(record.skipped, [entry]); assert.equal(record.status, 'completed'); assert.equal(record.stop_reason, null);
+  assert.deepEqual(record.completed_stations, ['SFO01', 'RNO01']); assert.deepEqual(record.missing_stations, []);
+  assert.deepEqual(h.saves, ['SFO01', 'RNO01']); assert.ok(h.state.finished_at);
+  assert.deepEqual({ snapshot: h.snapshots.MFR01, detail: h.details.old }, history);
+  assert.deepEqual(updates.at(-1).skipped, [entry]); assert.deepEqual(updates.at(-1).failed, []);
+  assert.match(h.logs.at(-1), /MFR01:not_in_dms_menu/);
+});
+
+test('SC5 organization origin completes capture and restores label', async () => {
+  const h = batchFixture({ original: 'GOFO-EXPRESS' });
+  assert.equal(await h.run(), 0);
+  const summary = h.files.at(-1).record;
+  assert.equal(summary.original_station, 'GOFO-EXPRESS');
+  assert.equal(summary.original_kind, 'label');
+  assert.equal(summary.original_station_restored, true);
+  assert.ok(summary.success_count > 0);
+});
+for (const failure of ['missing', 'duplicate', 'confirmation']) test(`SC5 restoration ${failure} preserves completed status`, async () => {
+  const h = batchFixture({ original: 'GOFO-EXPRESS', missingStations: failure === 'missing' ? ['GOFO-EXPRESS'] : [] });
+  assert.equal(await h.run({ restoreOrigin: async context => {
+    if (failure === 'missing') return restoreHeaderOrigin(context, { kind: 'label', value: 'GOFO-EXPRESS' });
+    const fixture = stationPage({ menuCount: failure === 'duplicate' ? 2 : 1, headerChanges: false });
+    return restoreHeaderOrigin(fixture.context, { kind: 'label', value: 'GOFO-EXPRESS' });
+  } }), 0);
+  const summary = h.files.at(-1).record;
+  assert.equal(summary.original_station_restored, false);
+  assert.equal(summary.status, 'completed');
+  assert.equal(summary.stop_reason, null);
+  assert.equal(h.logs.filter(value => value.includes('\u539f\u9875\u5934\u4e3a\u7ec4\u7ec7\u6807\u7b7e\uff0c\u672a\u80fd\u6062\u590d')).length, 1);
+});
+
+test('SC5 failed label restoration preserves capture stop reason', async () => {
+  const h = batchFixture({ original: 'GOFO-EXPRESS', missingStations: ['GOFO-EXPRESS'] });
+  assert.equal(await h.run({ capture: async () => { throw new SelectorError(); } }), 1);
+  const summary = h.files.at(-1).record;
+  assert.equal(summary.original_station_restored, false);
+  assert.equal(summary.status, 'stopped');
+  assert.equal(summary.stop_reason, 'capture:SelectorError');
 });
