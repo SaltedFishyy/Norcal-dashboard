@@ -72,7 +72,7 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
    .\scripts\services\register-tasks.ps1
    ```
 
-   脚本用 `Get-Command node` 保存 Node 绝对路径。任务名为 `NC Ops Console Services`，当前用户登录触发，`Interactive` / `Limited`，隐藏窗口，不需要保存 Windows 密码或管理员权限。现有同名任务先显示配置，再覆盖；其他用户的任务拒绝覆盖。配置为忽略重复实例、失败后每分钟重启（最多 999 次）、无执行时间限制、允许电池运行、可用时启动。权限失败时明确报错，不尝试提权。Node 安装位置或 repo 移动后需重新注册。
+   脚本用 `Get-Command node` 保存 Node 绝对路径。任务名为 `NC Ops Console Services`，触发器为当前用户登录时 + 每 5 分钟自愈（无限期重复），`Interactive` / `Limited`，隐藏窗口，不需要保存 Windows 密码或管理员权限。现有同名任务先显示配置，再覆盖；其他用户的任务拒绝覆盖。配置为忽略重复实例、失败后每分钟重启（最多 999 次）、无执行时间限制、允许电池运行、可用时启动。权限失败时明确报错，不尝试提权。Node 安装位置或 repo 移动后需重新注册。
 6. 管理员 PowerShell 添加下述防火墙规则。
 7. 只对可信办公网络设置 Private，方法见下文。
 8. Product Owner 手动设置插电时不睡眠。
@@ -120,7 +120,7 @@ $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1)
 .\scripts\services\register-tasks.ps1 -Unregister
 ```
 
-停止脚本通过现有 Node 配置解析 Worker 的真实 runtime 路径，仅返回路径，不显示 env 内容；无法解析时拒绝操作，可明确传入 `-RuntimeDir '<实际目录>'`。存在活 PID 的刷新锁或锁无法解析时默认拒绝，提示检查后才使用 `-Force`。强制停止会中断刷新，可能需要人工清理 running run。脚本只停止当前用户、当前脚本路径对应的 supervisor / guardian 及其 Node 服务和抓取后代，并复查创建时间以防 PID 复用，不对所有 Node 进程执行批量终止。手动运行、其他 repo 的 Node 不会被停止；任务停止后下一次登录仍会启动，维护期间如需长期停用，应删除任务。
+停止脚本通过现有 Node 配置解析 Worker 的真实 runtime 路径，仅返回路径，不显示 env 内容；无法解析时拒绝操作，可明确传入 `-RuntimeDir '<实际目录>'`。存在活 PID 的刷新锁或锁无法解析时默认拒绝，提示检查后才使用 `-Force`。强制停止会中断刷新，可能需要人工清理 running run。脚本只停止当前用户、当前脚本路径对应的 supervisor / guardian 及其 Node 服务和抓取后代，并复查创建时间以防 PID 复用，不对所有 Node 进程执行批量终止。手动运行、其他 repo 的 Node 不会被停止；任务停止后仍可能被 5 分钟重复触发重新拉起，维护前应先禁用或删除任务，不能只结束进程。
 
 日志位于 `%LOCALAPPDATA%\nc-ops-console\logs\`：
 
@@ -141,6 +141,26 @@ $basePath = Join-Path $env:LOCALAPPDATA 'nc-ops-console'
 ```
 
 ## 刷新、登录与故障恢复
+
+### SVC-T1 启动修复（2026-11-13，脚本待 review / 重新注册）
+
+两个根因：Windows PowerShell 5.1 在 Stop 模式下可能将原生命令 stderr 转为终止异常，导致 `pg_ctl status` 在数据库停止时打断后续启动；supervisor 意外退出后，原有登录触发和失败重启设置未能恢复它。退出状态 `0xC000013A` 已观察到，但具体是谁结束进程尚未确定。
+
+- 两个守护脚本共享 `native-command.ps1`：探测命令使用 `Invoke-Native`，仅函数内使用 Continue，重定向丢弃 stdout / stderr，以退出码判断结果，不记录原始输出。`pg_ctl start` 不能经过管道或重定向等待，即使带 `-l`，PowerShell 5.1 仍可能等待后代进程继承的管道句柄关闭。启动改用 `Invoke-NativeDetached`：`ProcessStartInfo` 不重定向 stdout / stderr、隐藏窗口，只等待直接进程最多 30 秒，返回退出码或 `timeout`，超时不杀进程；不用会等待整个进程树的 `Start-Process -Wait`。保留 `-W`、`-l postgres.log` 和原有最多 60 秒 `pg_isready` 轮询，继续用就绪探测确认数据库是否启动。
+- `services.log` 保留 `pg_ctl start exit code 0.`、`PostgreSQL ready.`；失败包含 `step`、`exit`、`exception`（无异常为 `none`，未执行为 `not-run`），例如 `PostgreSQL start failed: step=pg_ctl start exit=1 exception=none; checking readiness.`。supervisor 的 finally 记录 `Services supervisor exiting: <reason>`，仅记录异常类型，无法确定中断原因时明确标注。强制终止进程或系统断电可能无法执行 finally，不能保证留下退出行。
+- 登录触发器增加无结束时间的 5 分钟重复。正常运行时 Task Scheduler 的 IgnoreNew 抑制重复任务，Global Mutex 继续防止手动启动的重复实例；重复提示只使用 `Write-Debug`，避免周期性刷日志。未额外增加解锁或唤醒触发器，现有重复触发和 StartWhenAvailable 用于恢复。
+
+- guardian 使用按服务 Name 和用户 SID 区分的 Global Mutex，整个生命周期保持单实例；supervisor 重启后不会叠加重复的 guardian。重复实例只写 debug 并以退出码 0 退出，不写服务日志；supervisor 每 60 秒再次尝试启动的短暂进程开销可接受。旧 guardian 尚未持有此锁，需要在获批维护窗口更新后才能生效。
+
+Claude review 后须经 Product Owner 同意才能部署，按以下顺序验证（本任务未执行）：
+
+1. 当前部署用户在普通 PowerShell 执行 `.\scripts\services\register-tasks.ps1`，幂等覆盖同名任务；检查登录触发、5 分钟无限期重复、Interactive / Limited、IgnoreNew。脚本只注册，不立即启动。如执行策略阻止脚本，可对本次 PowerShell 进程使用 `-ExecutionPolicy Bypass`，不修改机器策略。
+2. 在获批维护窗口手动停止数据库，或等下次开机；注意存活的 supervisor 会自行尝试恢复数据库。
+3. 在 Task Scheduler 手动运行任务（已有 supervisor 时由 IgnoreNew / Mutex 保持单实例）。
+4. 观察 `services.log` 出现 `pg_ctl start exit code 0.`、`PostgreSQL ready.`，确认 3000 恢复。
+5. 结束 supervisor 进程，保持当前用户登录，验证 5 分钟内重新拉起；检查没有重复 guardian / Node 服务。再验证下一次登录能自动启动。
+
+这些实际恢复验证不能由结构测试或只读 `pg_ctl status` 替代。
 
 - 在公用电脑打开 `http://127.0.0.1:3100`，选择范围并确认刷新。其他电脑的 3000 入口只读，浏览不会产生 DMS 请求。
 - DMS 登录过期：在**交互式终端**运行 `npm run dms:login`，在浏览器完成登录后回到终端按 Enter。登录时确认界面为中文（右上角语言选择中文）。scraper 遇到英文界面会自动尝试切换。Claude Code 的 `!` 方式不能完成该交互。登录后重新刷新，不自动重试失败抓取。

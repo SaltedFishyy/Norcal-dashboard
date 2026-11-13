@@ -7,6 +7,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+. (Join-Path $scriptDir 'native-command.ps1')
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$mutex = New-Object Threading.Mutex($false, "Global\NcOpsConsoleGuardian-$Name-$sid")
+$ownsMutex = $false
+try {
+    try { $ownsMutex = $mutex.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
+    if (!$ownsMutex) { Write-Debug 'Another guardian is running; exiting.'; exit 0 }
 if (-not $RepoRoot) { $RepoRoot = [IO.Path]::GetFullPath((Join-Path $scriptDir '..\..')) }
 $logDir = Join-Path $Base 'logs'
 $null = New-Item -ItemType Directory -Path $logDir -Force
@@ -20,8 +28,8 @@ function Write-ServiceLog([string]$Message) {
 function Test-Database {
     $ready = Join-Path $Base 'pgsql\bin\pg_isready.exe'
     if (!(Test-Path -LiteralPath $ready)) { return $false }
-    & $ready -h 127.0.0.1 -p 5432 *> $null
-    return ($LASTEXITCODE -eq 0)
+    $exitCode = Invoke-Native -FilePath $ready -Arguments @('-h', '127.0.0.1', '-p', '5432')
+    return ($exitCode -eq 0)
 }
 function Test-ServicePort {
     $port = if ($Name -eq 'worker') { 3100 } else { 3000 }
@@ -115,4 +123,11 @@ while ($true) {
     Write-ServiceLog "Restart in $delay seconds."
     Start-Sleep -Seconds $delay
     $retry = [Math]::Min($retry + 1, 2)
+}
+} finally {
+    try {
+        if ($ownsMutex) { $mutex.ReleaseMutex() }
+    } finally {
+        $mutex.Dispose()
+    }
 }

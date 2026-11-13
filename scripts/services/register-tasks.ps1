@@ -26,13 +26,17 @@ try {
         -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$entry`" -NodePath `"$node`"" `
         -WorkingDirectory $repo
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+    # AtLogOn has no repetition parameters; reuse the CIM repetition object
+    # from a Once trigger. Omitting Duration means repeat indefinitely.
+    $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
+    $trigger.Repetition = $repeat.Repetition
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 `
         -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     $null = Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $trigger `
         -Principal $principal -Settings $settings -Force
-    Write-Output 'Task registered for current-user logon; it has not been started.'
+    Write-Output 'Task registered for current-user logon with indefinite 5-minute recovery; it has not been started.'
 } catch {
     Write-Error 'Task registration/removal failed. Check current-user Task Scheduler permissions and Node installation. No elevation attempted.'
     exit 1
