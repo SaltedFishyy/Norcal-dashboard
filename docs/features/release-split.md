@@ -1,6 +1,6 @@
 # 开发版 / 正式版分离（Release Split，RS）
 
-状态：**Implemented，待部署**。Product Owner 2026-11-13 批准需求并授权实现 SVC-T2 / RS-T1 / RS-T2 / RS-T4，已全部经 Claude review 通过（RS-T2 第一次交接因 spec 与 brief 依赖规则不一致停止，已统一后重做）。**RS-T3（首次发布、重新注册任务、重启 readonly）待 Product Owner 确认。**
+状态：**Done（待 Product Owner 签字）**。Product Owner 2026-11-13 批准需求、授权实现，并确认“提交并发布”。SVC-T2 / RS-T1 / RS-T2 / RS-T4 已经 Claude review 通过；RS-T3 首次发布已执行并验证（见第 7 节）。
 
 ## 1. 背景与目标
 
@@ -133,3 +133,15 @@ SVC-T1 实测发现：挂在“登录时”触发器上的 5 分钟重复不会�
 - 新增 3 项结构测试；service-scripts 共 9 项通过。`npm.cmd test`：893/893 通过；`git diff --check` 通过；两个 PowerShell 脚本语法解析通过。无 lint/build 配置。未修改前端，因此未做页面交互回归。
 - RS-AC3 / AC5 的真实 3000 切换、重启时长、LAN 连通性，以及 AC4 的真实服务持续可用，均留待 RS-T3 授权后验证。测试发布副本未发现 `.env` / `readonly.env`；git archive 排除未跟踪文件，未写入真实 releases、未打开真实配置或凭据。
 - 临时目录清理命令被自动审批以 `blocked by policy` 拒绝（未提供具体原因），路径校验后的逐项删除也被拒绝；`.handoff/rs-t2-base/` 和两个无凭据临时 env 文件暂留，需后续清理。不代表正式部署完成。
+
+### RS-T3 首次发布与部署验证（Claude，2026-11-13）
+
+- 提交 ea8f552 并 push 后，执行 `release.ps1 -SkipRestart`：导出 `ea8f552754`，依赖从开发目录复制，冒烟检查通过，`current.txt` 已切换，发布副本中没有 `.env`。
+- **意外情况**：原 supervisor 已在 10:48 左右退出，日志没有 `exiting` 记录，原因不明。当时新的时间触发器还没注册，所以结束旧的 readonly guardian 后没有被自动拉起，3000 中断约 4.5 分钟（13:12–13:17）。重新注册任务并手动运行后，3 秒内恢复。之后的发布只重启 node，不会再出现这种情况。
+- 重新注册任务：`NextRunTime` 有值（每 5 分钟一次）。
+- **RS-AC2**：在开发目录的 `web/styles.css` 临时追加探针注释。3200 能读到，3000 读不到，说明 3000 运行的是发布副本。探针已撤销。
+- **RS-AC3**：发布 `55bed67c64`（与 ea8f552 的 web / server 代码完全相同），只重启 node。整个过程 10 秒，3000 不可用约 2–5 秒，每 0.5 秒探测一次，失败 4 次。
+- **RS-AC5**：`-Rollback` 回到 `ea8f552754`，用时 18 秒。局域网 `10.9.23.170:3000` 和 `http://KENNY:3000/map` 都返回 200。
+- **RS-AC7**：13:20 左右结束 supervisor，13:22:00 被时间触发器重新拉起。guardian 仍然只有原来两个，没有重复。用 `Stop-Process -Force` 强制结束时不会执行 `finally`，因此没有 `exiting` 日志，这是预期行为。
+- **未覆盖**：RS-AC4（冒烟失败时不切换）和 RS-AC6（`current.txt` 缺失时回退）只在 RS-T2 的临时目录中实测过，没有在正式环境中故意制造失败。
+- 发布目录现在有 `ea8f552754`（当前版本）和 `55bed67c64`（测试用），旧版本不会自动删除（RS-Q2）。
