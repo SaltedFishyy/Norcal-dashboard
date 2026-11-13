@@ -59,6 +59,8 @@ export function createWorkerServer({ runtimeDir, repoRoot, dataSource, districts
   };
   post.methods = ['POST'];
   server = createApiServer({ ...options, runtimeDir, districtsPath, dataSource, log,
+    // Worker shares the API handler but retains its original response encoding.
+    compressResponses: false,
     warehouses: { ...options.warehouses, allowedHosts: () => [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`] },
     capabilities: { refresh: true, quotation_sync: true, auto_refresh: true }, extraHandlers: new Map([
       ['/api/auto-refresh/status', async ({ respond }) => respond(200,

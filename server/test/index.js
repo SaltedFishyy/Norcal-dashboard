@@ -18,6 +18,7 @@ import './tableau-export.test.js';
 import './boundaries-file.test.js';
 import './route-map.test.js';
 import './route-map-api.test.js';
+import './response-compression.test.js';
 import './route-map-web.test.js';
 import './basemap-file.test.js';
 import './map-state.test.js';

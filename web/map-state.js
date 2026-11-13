@@ -252,17 +252,22 @@ function routeLab(hex) {
   return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
 }
 
-function groupNeighbors(features, keyOf) {
+function groupNeighbors(features, keyOf, vertexIndex) {
   const vertices = new Map(), neighbors = new Map();
   for (const feature of features) {
     const id = keyOf(feature.properties);
     if (id == null) continue;
     if (!neighbors.has(id)) neighbors.set(id, new Set());
+    if (vertexIndex) continue;
     for (const rings of geometryParts(feature.geometry)) for (const ring of rings) for (const point of ring) {
       const key = point.slice(0, 2).map(value => value.toFixed(ROUTE_COLOR_ASSIGN.coordinatePrecision)).join(',');
       if (!vertices.has(key)) vertices.set(key, new Set());
       vertices.get(key).add(id);
     }
+  }
+  if (vertexIndex) for (const [vertex, members] of vertexIndex) {
+    const ids = new Set(members.map(index => keyOf(features[index].properties)).filter(id => id != null));
+    vertices.set(vertex, ids);
   }
   const shared = new Map();
   for (const ids of vertices.values()) {
@@ -282,8 +287,8 @@ function groupNeighbors(features, keyOf) {
 const labs = new Map(palette.map(color => [color, routeLab(color)]));
 const colorDistance = (a, b) => Math.hypot(...labs.get(a).map((value, i) => value - labs.get(b)[i]));
 
-export function assignRouteColors(features) {
-  const neighbors = groupNeighbors(features, p => p.route_id);
+export function assignRouteColors(features, vertexIndex) {
+  const neighbors = groupNeighbors(features, p => p.route_id, vertexIndex);
   const ordered = [...neighbors.keys()].sort((a, b) => neighbors.get(b).size - neighbors.get(a).size
     || (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
   const assigned = new Map();
@@ -309,8 +314,8 @@ export const UNASSIGNED_COLOR = '#94a3b8';
 
 export const GROUP_COLOR_ASSIGN = Object.freeze({ minGlobalDeltaE: 20 });
 
-export function assignGroupColors(features, keyOf) {
-  const neighbors = groupNeighbors(features, keyOf), counts = new Map();
+export function assignGroupColors(features, keyOf, vertexIndex) {
+  const neighbors = groupNeighbors(features, keyOf, vertexIndex), counts = new Map();
   for (const { properties } of features) {
     const key = keyOf(properties);
     if (key != null) counts.set(key, (counts.get(key) || 0) + 1);
@@ -351,4 +356,22 @@ export function modeColor(p, mode = 'route', routeColors, groupColors, selection
     return key == null ? UNASSIGNED_COLOR : groupColors?.[mode]?.get(key) ?? routeColor(key);
   }
   return routeColors?.get(p.route_id) ?? routeColor(p.route_id);
+}
+
+// Retain vertex membership rather than thresholded ZIP pairs: group thresholds
+// count each distinct vertex once even when several ZIPs belong to one group.
+export function assignAllColors(features) {
+  const vertices = new Map();
+  features.forEach((feature, index) => {
+    for (const rings of geometryParts(feature.geometry)) for (const ring of rings) for (const point of ring) {
+      const key = point.slice(0, 2).map(value => value.toFixed(ROUTE_COLOR_ASSIGN.coordinatePrecision)).join(',');
+      if (!vertices.has(key)) vertices.set(key, new Set());
+      vertices.get(key).add(index);
+    }
+  });
+  const index = new Map([...vertices].map(([key, members]) => [key, [...members]]));
+  return { routeColors: assignRouteColors(features, index), groupColors: {
+    dsp: assignGroupColors(features, p => dspColorKey(p.dsp_name), index),
+    station: assignGroupColors(features, p => p.station, index),
+  } };
 }

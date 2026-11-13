@@ -1,5 +1,5 @@
 import { pacificToday, requestDay } from './date-view.js';
-import { sendJson } from './http-utils.js';
+import { sendJson, sendJsonCompressed, sendBody } from './http-utils.js';
 import { isStaticPath } from './static-files.js';
 import { basemapPaths, createBasemapHandler } from './basemap.js';
 
@@ -36,7 +36,7 @@ const errorMappings = new Map([
 ]);
 
 export function createRequestHandler({ getSnapshotDays, today = () => pacificToday(() => new Date()), getSnapshot, getRouteDetail, getRouteQuotation, getRouteHistory, getRouteMap, getDistrictMap, getDistricts, getZip, getMapStations, getStaticFile, getBasemap,
-  capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
+  compressResponses = true, capabilities = { refresh: false }, extraHandlers = new Map(), readHandlers = new Map(), log = () => {} }) {
   // Never log caller-controlled URLs or exception details; they may contain secrets.
   const record = status => { try { log(`HTTP ${status}`); } catch { /* Logging must not affect responses. */ } };
   const stationEndpoint = read => async ({ url, respond, day }) => {
@@ -95,11 +95,13 @@ export function createRequestHandler({ getSnapshotDays, today = () => pacificTod
     }
     return routeEndpoint(routeId => getRouteHistory(routeId, Number(values[0] ?? 7)))(context);
   };
-  const staticFile = async ({ rawPath, res }) => {
+  const staticFile = async ({ rawPath, req, res }) => {
     const { body, contentType } = await getStaticFile(rawPath);
-    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
-    res.end(body); record(200);
+    const headers = { 'Content-Type': contentType, 'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp };
+    if (compressResponses) await sendBody(req, res, 200, body, headers);
+    else { res.writeHead(200, headers); res.end(body); }
+    record(200);
   };
   const handlers = new Map([
     ['/api/snapshot-days', snapshotDays], ['/api/health', health], ['/api/route-profiles', profiles], ['/api/route-details', routeEndpoint(getRouteDetail)],
@@ -124,7 +126,16 @@ export function createRequestHandler({ getSnapshotDays, today = () => pacificTod
     handlers.set(pathname, handler);
   }
   return (req, res) => {
-    const respond = (status, body) => { sendJson(res, status, body); record(status); };
+    // Existing route handlers may call respond without returning its promise.
+    let pendingResponse;
+    const respond = (status, body) => {
+      pendingResponse = (async () => {
+        if (compressResponses) await sendJsonCompressed(req, res, status, body);
+        else sendJson(res, status, body);
+        record(status);
+      })();
+      return pendingResponse;
+    };
     void (async () => {
       let url;
       try { url = new URL(req.url, 'http://127.0.0.1'); }
@@ -140,7 +151,7 @@ export function createRequestHandler({ getSnapshotDays, today = () => pacificTod
       if (!methods.includes(req.method)) {
         res.setHeader('Allow', methods.join(', ')); respond(405, { error: 'method_not_allowed' }); return;
       }
-      try { await handler({ url, rawPath, req, res, respond }); }
+      try { await handler({ url, rawPath, req, res, respond }); await pendingResponse; }
       catch (error) {
         if (res.headersSent) { res.destroy(); return; }
         const [status, code] = isStatic ? [500, 'internal_error']

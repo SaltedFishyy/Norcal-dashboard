@@ -2,9 +2,11 @@ import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNa
 import { dspOptions } from './format.js';
 import { createMapView } from './map-view.js';
 import { createMapPanel } from './map-panel.js';
-import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, assignRouteColors, assignGroupColors, dspColorKey } from './map-state.js';
+import { clearSelection, selectRoute, selectZip, classifyQuery, filteredRoutes, assignAllColors } from './map-state.js';
 import { mapText as t, warehouseText, localizeMap } from './map-text.js';
 import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
+
+export const DISTRICT_CACHE_MS = 5 * 60 * 1000;
 
 const knownErrors = new Set(['district_config_invalid', 'district_not_found', 'invalid_district', 'invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
@@ -16,6 +18,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   localizeMap(doc);
   const districtSelect = element('district'), stationSelect = element('station'), message = element('message'), retry = element('retry');
   let selection = clearSelection(), sequence = 0, zipSequence = 0, stationsLoaded = false, stationData, colorMode = 'route';
+  let districtCache = null;
   let districts = [], selected = {}, scope = readMapScope(storage), dsp = null;
   const dspSelect = element('dsp');
   const dateSelect = element('date');
@@ -62,6 +65,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     }
   }
   async function changeDate(date) {
+    districtCache = null;
     setViewDate(date);
     if (dateSelect) dateSelect.value = date || '';
     return loadStation();
@@ -147,7 +151,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       element('warehouse-message').textContent = warehouseText.loadError;
     }
   }
-  function clear() { dspSelect.disabled = true; zipSequence++; stationData = null; selection = clearSelection(focus()); view.clear(); panel.clear(); }
+  function clear() { districtCache = null; dspSelect.disabled = true; zipSequence++; stationData = null; selection = clearSelection(focus()); view.clear(); panel.clear(); }
   function status(state, value) {
     message.textContent = value;
     message.className = state === 'error' ? 'map-error' : '';
@@ -194,9 +198,48 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       if (current === zipSequence) panel.searchStatus('error', t.zipError('network_error'));
     }
   }
-  async function loadStation() {
+  function applyStation({ data, routeColors, groupColors }, station, district, reuse = false) {
+    stationData = data; panel.render(data, { focusStation: station, routeColors, groupColors });
+    if (reuse) view.setFocusStation(station, { fit: true });
+    else view.render(data, { fitToStation: true, focusStation: station, routeColors, groupColors });
+    updateSelection(clearSelection(station));
+    const options = dspOptions(data.routes, station);
+    if (!options.includes(dsp)) dsp = null;
+    dspSelect.replaceChildren();
+    for (const name of ['', ...options]) {
+      const option = doc.createElement('option'); option.value = name; option.textContent = name || t.allDsp;
+      dspSelect.append(option);
+    }
+    dspSelect.value = dsp || ''; dspSelect.disabled = false;
+    view.setDsp(dsp); panel.setDsp(dsp);
+    retainedZipHint();
+    const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
+    const day = days.find(item => item.day === viewDate);
+    const empty = viewDate && (data.empty === true || routes.length === 0 || (station
+      ? day ? !day.stations_with_data?.includes(station) : routes.length === 0
+      : !day || day.has_data === false));
+    status(empty ? 'empty' : 'success', empty ? historicalEmpty(station) : routes.length === 0 ? t.noRoutes
+      : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
+    if (!empty && routes.some(route => route.mapped_count > 0)) message.className = 'sr-only';
+    if (data.details_status === 'invalid') {
+      message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
+    }
+    if (warehouseDistrict !== district) {
+      void loadWarehouses(district);
+    }
+  }
+  async function loadStation({ reuseCache = false } = {}) {
     const current = ++sequence, station = focus(), district = districtSelect.value;
     if (warehouseDistrict !== district) { warehouseSequence++; warehouseLayer.clear(); warehouseDistrict = undefined; }
+    const cached = districtCache;
+    const reuse = reuseCache && cached && cached.district === district && cached.viewDate === viewDate
+      && (viewDate || Date.now() - cached.loadedAt <= DISTRICT_CACHE_MS);
+    if (reuse) {
+      zipSequence++;
+      updateDateView();
+      try { applyStation(cached, station, district, true); return true; }
+      catch { clear(); status('error', t.networkError); return; }
+    }
     clear();
     updateDateView();
     status('loading', t.loadingStation(station || currentDistrict()?.name_zh));
@@ -205,34 +248,9 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       const data = await response.json();
       if (current !== sequence) return;
       if (response.status !== 200) { showError(data?.error, station); return; }
-      const routeColors = assignRouteColors(data.features.features);
-      const groupColors = { dsp: assignGroupColors(data.features.features, p => dspColorKey(p.dsp_name)),
-        station: assignGroupColors(data.features.features, p => p.station) };
-      stationData = data; panel.render(data, { focusStation: station, routeColors, groupColors }); view.render(data, { fitToStation: true, focusStation: station, routeColors, groupColors }); updateSelection(clearSelection(station));
-      const options = dspOptions(data.routes, station);
-      if (!options.includes(dsp)) dsp = null;
-      dspSelect.replaceChildren();
-      for (const name of ['', ...options]) {
-        const option = doc.createElement('option'); option.value = name; option.textContent = name || t.allDsp;
-        dspSelect.append(option);
-      }
-      dspSelect.value = dsp || ''; dspSelect.disabled = false;
-      view.setDsp(dsp); panel.setDsp(dsp);
-      retainedZipHint();
-      const routes = station ? data.routes.filter(route => route.station === station) : data.routes;
-      const day = days.find(item => item.day === viewDate);
-      const empty = viewDate && (data.empty === true || routes.length === 0 || (station
-        ? day ? !day.stations_with_data?.includes(station) : routes.length === 0
-        : !day || day.has_data === false));
-      status(empty ? 'empty' : 'success', empty ? historicalEmpty(station) : routes.length === 0 ? t.noRoutes
-        : routes.reduce((sum, route) => sum + route.mapped_count, 0) === 0 ? t.noBoundaries : t.loaded(station || currentDistrict()?.name_zh));
-      if (!empty && routes.some(route => route.mapped_count > 0)) message.className = 'sr-only';
-      if (data.details_status === 'invalid') {
-        message.textContent += ` ${t.invalidDetail}`; message.className = 'map-warning';
-      }
-      if (warehouseDistrict !== district) {
-        void loadWarehouses(district);
-      }
+      const { routeColors, groupColors } = assignAllColors(data.features.features);
+      applyStation({ data, routeColors, groupColors }, station, district);
+      districtCache = { district, viewDate, data, routeColors, groupColors, loadedAt: Date.now() };
       return true;
     } catch {
       if (current === sequence) { clear(); status('error', t.networkError); }
@@ -277,7 +295,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     scope = stationSelect.value ? 'station' : 'district';
     if (stationSelect.value) selected.station = stationSelect.value;
     saveSelection(storage, selected); saveMapScope(storage, scope);
-    return loadStation();
+    return loadStation({ reuseCache: true });
   });
   async function changeDistrict() {
     const current = ++sequence;
@@ -294,7 +312,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     return loadStation();
   }
   districtSelect.addEventListener('change', changeDistrict);
-  retry.addEventListener('click', () => stationsLoaded ? loadStation() : start());
+  retry.addEventListener('click', () => { districtCache = null; return stationsLoaded ? loadStation() : start(); });
   doc.addEventListener('keydown', event => { if (event.key === 'Escape' && !warehousePanel.isOpen() && !panel.closeCoverage()) deselect(); });
   void initializeWarehouses();
   const basemapReady = view.loadBasemaps();

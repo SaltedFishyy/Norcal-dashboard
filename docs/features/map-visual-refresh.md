@@ -484,3 +484,89 @@ Product Owner 2026-11-13 反馈：拖动地图时一卡一卡的。
 | 任务 | 内容 | 授权 |
 |---|---|---|
 | MVR-T8 | 两个底图图层加 `updateWhenIdle: true`，选项集中成常量，更新测试 | Product Owner 2026-11-13（“好，先做方案 1”） |
+
+### MVR-T8 实现记录（Implementation Notes）
+
+- 在 `MAP_RENDER.basemapGrid` 中集中并冻结 GridLayer 选项，service 和 regional 底图共用；新增 `updateWhenIdle: true`，其余选项保持原值。
+- 现有底图测试增加 `updateWhenIdle === true` 断言，保留原有断言。
+- 按任务要求不做浏览器检查；拖动性能由 Claude 在 3200 复测，Product Owner 预览签字仍待完成。
+
+## 13. 切换站点卡顿：复用片区数据（MVR-P6，Approved，Product Owner 2026-11-13）
+
+Product Owner 2026-11-13 反馈：“有时候我按了一个站点，整个画面会完全卡住，点都点不了。”
+
+**Claude 排查**（3200，Playwright headless，正常 CPU，5 个片区、59 个站点逐个切换）：
+
+- 线路地图每次切换站点，主线程连续阻塞 0.2–0.6 秒，南加州最重。按办公电脑慢 3–4 倍估算，约 1–2.5 秒完全无响应。线路档案页切换站点没有长任务。
+- 同一片区内切站点，数据完全相同（色块数不变），但 `loadStation()` 每次都会：
+  1. 重新请求 `/api/route-map/district`：南加州 2.5 MB，北加州 1.8 MB，没有压缩；
+  2. 重新执行 `assignRouteColors` 和两次 `assignGroupColors`，`groupNeighbors` 共算 3 遍，自身约 210 ms；
+  3. `view.render()` 清空并重建全部 GeoJSON 色块，为每个色块预先生成 tooltip（`zipDetails`，约 100 ms）。
+  4. 另外，`refreshStyles()` 在每次选择或 DSP 变化时，也会给所有色块重新生成 tooltip。
+
+**决策（A–D 全做）**：
+
+- **A 同片区切站点复用数据。**
+  - 片区和日期都不变时，切换站点不重新请求，不重算配色，不重建色块。
+  - 只更新聚焦站点：色块样式、图例、编号标签、定位到站点、左侧列表，以及 DSP 选项、状态文案、清空选择等 `loadStation()` 里与站点相关的部分。
+  - 切换片区、切换日期、点重试时，仍然重新加载。
+  - 缓存只保存当前片区和日期的这一份数据。
+  - 查看“最新”数据时，缓存最多用 5 分钟（常量，可配置），超时后切站点照常重新加载，避免同事长时间开着页面看不到每日更新。
+  - 查看历史日期时，同片区内一直复用。
+- **B 配色计算只做一次。**
+  - ZIP 级的相邻关系（共享顶点）每份数据只算一次，按线路、DSP、站点三种分组共用。
+  - 分配结果必须和现在**完全一致**（同样的输入得到同样的颜色），用测试断言。
+- **C tooltip 改为悬停时才生成。**
+  - 用 Leaflet 支持的函数形式 `bindTooltip(layer => …)`，或者在 `tooltipopen` 时设置内容。
+  - 显示内容和现在完全一致。
+  - `refreshStyles()`、`applySelection()` 不再为全部色块生成 tooltip 字符串或 DOM。
+- **D 只读服务响应压缩。**
+  - 3000 / 3200 的 JSON 和静态文本（html / js / css）在请求带 `Accept-Encoding: gzip` 且内容大于 1 KB 时，用 gzip 压缩。
+  - 加 `Vary: Accept-Encoding`。
+  - 使用 Node 自带的 `zlib`，异步压缩，不阻塞服务。
+  - 底图 PMTiles 的 Range 请求不压缩。
+  - Worker（3100）不改。
+  - 不新增依赖。
+
+**验收**：
+
+- **MVR-P6-AC1** 在同一片区内切换站点时，不发出 `/api/route-map/district` 请求。在 3200 上用同样的测量方法，南加州切站点的最长阻塞小于 100 ms（正常 CPU）。
+- **MVR-P6-AC2** 切站点后，下面这些表现和现在一致：
+  - 聚焦站点的色块样式、`outside` / `dimmed`；
+  - 图例数量；
+  - 编号标签；
+  - 定位范围；
+  - 左侧列表；
+  - DSP 选项及已选 DSP 的保留规则；
+  - 状态文案，包括按日期查看时的空数据提示；
+  - 选择被清空；
+  - ZIP 搜索提示的保留。
+- **MVR-P6-AC3** 切换片区、切换日期、重试仍会重新请求。查看最新数据时，缓存超过 5 分钟后切站点会重新请求。
+- **MVR-P6-AC4** 线路、DSP、站点三种配色的分配结果，和改之前逐项相同（测试断言）。
+- **MVR-P6-AC5** 悬停任意 ZIP，tooltip 内容和现在一致，包括 ML-P2 的“领件量（日均）”。全量渲染和 `refreshStyles()` 不再预先生成 tooltip。
+- **MVR-P6-AC6** 带 gzip 请求时，`/api/route-map/district?district=south-cal` 返回 `Content-Encoding: gzip`，解压后内容和原文一致。不带 gzip 时行为不变。PMTiles Range 响应不变。
+- **MVR-P6-AC7** `npm test`、`git diff --check` 通过。浏览器 console / pageerror 为 0。Product Owner 在 3200 预览签字后，再和 MVR-T8 一起提交、发布。
+
+| 任务 | 内容 | 授权 |
+|---|---|---|
+| MVR-T9 | A + B + C（前端：`map.js`、`map-view.js`、`map-panel.js`、`map-state.js`） | Product Owner 2026-11-13（“可以，A–D 都做”） |
+| MVR-T10 | D（`server/src/api` 只读服务响应压缩） | 同上 |
+
+### MVR-T9 实现记录（Implementation Notes）
+
+- `map.js` 将取数与 `applyStation` 分开；站点选择事件允许复用当前片区 / 日期缓存，保留 DSP、搜索提示、日期空状态、详情警告及仓库加载流程。直接调用 `loadStation()` 仍强制取数；日期、片区、重试、清空及失败路径不复用。最新缓存上限由导出的 `DISTRICT_CACHE_MS`（5 分钟）控制，历史日期不超时，保留 sequence 防竞态。
+- `map-state.js` 新增 `assignAllColors`，只遍历一次几何建立顶点到 ZIP 成员的索引，再分别聚合线路 / DSP / 站点邻接。每个顶点内按分组 Set 去重，保持原共享顶点阈值、顺序及配色规则；原函数保留。80 个合成 ZIP、17 条线路、多 DSP / 站点、共享边及逆序 / 空输入均与旧算法逐项比较通过。
+- `map-view.js` 新增 `setFocusStation`，保留 polygon / 编号 marker，清理 hover、tooltip、highlight 和 outline 后更新聚焦、图例、标签及定位。空选择或 DSP 没变化时跳过重复刷新。普通 polygon 与选中 ZIP highlight 均使用函数形式 tooltip，样式刷新不重新绑定；内容读取打开时的状态，拖动 / 缩放屏蔽逻辑保留。
+- 更新已有测试中“切站必请求 / 移除 polygon 和标签”的断言，模拟 tooltip 函数内容解析；新增延迟生成、缓存复用、最新缓存过期、历史缓存持久复用及失败失效测试。历史空状态测试改为通过重试验证响应错误，避免响应队列因缓存命中错位。未修改需求和验收标准。
+- 使用现有 Playwright headless 检查运行中的 3200：南加州全部站点 → FAT01 → LAX02 → 全部站点新增片区请求 0；切北加州重新请求。ZIP tooltip 包含“领件量（日均）”，DSP / 站点着色切换正常，console error / pageerror 均为 0。两次观察窗口最长 longtask 为 179 ms、186 ms，**未达到 AC1 的小于 100 ms 目标**；这些测量包含定位后的绘制，未将长任务归因于具体模块。
+- 截图：`.handoff/MVR-T9-south.png`、`.handoff/MVR-T9-station-mode.png`、`.handoff/MVR-T9-north.png`。已查看 south 截图；完整视觉签收仍由 Claude / Product Owner 完成。脚本使用 try/finally 和 120 秒硬超时关闭浏览器，随后进程检查未发现 chrome-headless 残留。未启停任何服务。
+- 未新增 web 文件、依赖、API、schema 或运营数据；保留本轮开始前 MVR-T8 及其他工作区改动。未 commit / push / 部署，未打开环境文件或写入凭据。检查结果在下方补充。
+- 最终检查：`npm.cmd test` 896/896 通过，0 失败 / 跳过；定向地图测试 102/102 通过；`git diff --check` 通过（仅已有 LF/CRLF 提示）。无 lint / build 命令。AC2–AC5 的实现及自动化检查通过；AC1 零请求部分通过、性能门槛未通过；AC7 测试及浏览器错误检查通过，Product Owner 预览签字待完成。
+
+### MVR-T10 实现记录（Implementation Notes）
+
+- `http-utils.js` 新增共享异步响应发送函数，JSON 与静态文本复用 `promisify(zlib.gzip)`，使用默认压缩级别。按 `Accept-Encoding` token（大小写不敏感）解析 gzip 与 q 值，仅对大于 1024 个 UTF-8 字节的响应压缩，设置 `Content-Encoding: gzip` 并保留已有 Vary 值后加入 `Accept-Encoding`；保留 Content-Type、no-store、nosniff、静态 CSP。
+- `app.js` 接入 JSON / 静态压缩并等待未显式返回的 respond promise；保留原 `sendJson` 默认行为。`server.js` 传递 `compressResponses` 开关，Worker 因复用 API handler，在构造时显式关闭压缩，JSON 和静态资源均维持原行为。PMTiles 继续走独立流式响应，无改动；已有 Content-Encoding、HEAD 不压缩，现有路由对 HEAD 返回 405 的规则不变。
+- 新增 `response-compression.test.js` 并在测试入口导入，使用临时 loopback 随机端口与合成数据验证片区 JSON 压缩 / 原文一致、无 gzip / q=0 / 非完整 token、严格字节阈值及中文、静态安全头、PMTiles 200 / 206 / 416、已有编码 / Vary、HEAD、原 sendJson 和实际 Worker API / 静态响应不压缩。首轮全量测试发现 204 空响应兼容问题，已修复并补充回归测试。
+- 最终检查：定向测试 7/7 通过；`npm.cmd test` 903/903 通过，0 失败 / 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目没有 lint / build 命令。MVR-P6-AC6 自动化验证通过，3200 的真实南加州数据响应待 Claude 重启后验证；AC7 自动化检查通过，本轮按任务限制未在 3200 实测浏览器 console / pageerror，Product Owner 预览签字仍待完成。
+- 保留已有 MVR-T8 / T9 及其他工作区改动；无依赖、schema、数据集或运营数据变化，未读取环境文件、写入凭据、启停任何既有服务、commit / push / 部署。

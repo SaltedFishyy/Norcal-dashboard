@@ -4,7 +4,11 @@ import { formatPrice, formatNumber } from './format.js';
 import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
 
-export const MAP_RENDER = Object.freeze({ svgPadding: 1 });
+export const MAP_RENDER = Object.freeze({
+  svgPadding: 1,
+  // Vector tiles render on the main thread and cause drag stutter, so draw new tiles only after dragging ends.
+  basemapGrid: Object.freeze({ noWrap: true, updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4 }),
+});
 export const ROUTE_LABEL = Object.freeze({ sameRouteDistance: 160, widthPadding: 12, selectedWidthPadding: 15,
   tiers: Object.freeze([
     Object.freeze({ name: 'far', maxZoom: 10, characterWidth: 8.5, height: 18, padding: 16, selectedCharacterWidth: 10.5, selectedHeight: 26 }),
@@ -487,11 +491,9 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   function refreshStyles() {
     layers.forEach(layer => {
       layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors));
-      layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     highlightLayers.forEach(layer => {
       layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors));
-      if (selection.route) layer.bindTooltip(tooltip(layer.feature.properties), { direction: 'auto', sticky: true });
     });
     updateLegend();
     layoutRouteLabels();
@@ -563,7 +565,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
             onBasemapError(); return undefined;
           }
         };
-        const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: protomaps.paintRules(BASEMAP_FLAVOR), labelRules: protomaps.labelRules(BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, noWrap: true, updateWhenZooming: false, keepBuffer: 4 });
+        const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: protomaps.paintRules(BASEMAP_FLAVOR), labelRules: protomaps.labelRules(BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, ...MAP_RENDER.basemapGrid });
         // GridLayer bounds only understands one rectangle. Refine admission to the union
         // and give each display tile exactly one owner; regional overzoom fills the rest.
         const validTile = layer._isValidTile?.bind(layer) ?? (() => true);
@@ -577,6 +579,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     refreshCoverage();
   }
   function applySelection(next) {
+    if (!next.route && !next.zip && !selection.route && !selection.zip && next.station === selection.station) return;
     selection = next;
     refreshStyles();
     if (highlight) map.removeLayer(highlight);
@@ -592,7 +595,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
         onEachFeature(_, layer) {
           highlightLayers.push(layer);
           layer.options.bubblingMouseEvents = false;
-          if (selection.route) layer.bindTooltip(tooltip(properties), { direction: 'auto', sticky: true });
+          if (selection.route) layer.bindTooltip(() => tooltip(properties), { direction: 'auto', sticky: true });
           layer.on({ ...tooltipEvents(layer), click: () => onZip(zip) });
         },
       }).addTo(map);
@@ -642,7 +645,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors),
       onEachFeature(feature, layer) {
         layers.push(layer);
-        layer.bindTooltip(tooltip(feature.properties), { direction: 'auto', sticky: true });
+        layer.bindTooltip(() => tooltip(feature.properties), { direction: 'auto', sticky: true });
         layer.options.bubblingMouseEvents = false;
         const events = tooltipEvents(layer);
         layer.on({
@@ -668,6 +671,19 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (fitToStation) fitStation();
     layoutRouteLabels();
   }
-  function setDsp(value) { dsp = value; refreshStyles(); }
-  return { map, render, clear, applySelection, fitStation, fitRoute, fitZip, loadBasemaps, setColorMode, setDsp };
+  function setFocusStation(station, { fit = true } = {}) {
+    clearInteraction();
+    hoveredLayers.clear(); blockedTooltips.clear();
+    clearOutlines();
+    if (highlight) map.removeLayer(highlight);
+    highlight = null; highlightLayers.length = 0;
+    selection = clearSelection(station);
+    focusStation = station;
+    fitButton.setAttribute('aria-label', station ? t.fit : '\u5b9a\u4f4d\u7247\u533a');
+    fitButton.title = station ? t.fit : '\u5b9a\u4f4d\u7247\u533a';
+    refreshStyles();
+    if (fit) fitStation();
+  }
+  function setDsp(value) { if (dsp === value) return; dsp = value; refreshStyles(); }
+  return { map, render, clear, setFocusStation, applySelection, fitStation, fitRoute, fitZip, loadBasemaps, setColorMode, setDsp };
 }

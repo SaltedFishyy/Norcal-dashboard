@@ -200,7 +200,8 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
           setStyle(value) { this.styles.push(value); },
           closeTooltip() { this.tooltipOpen = false; this.tooltipCloses = (this.tooltipCloses || 0) + 1; },
           openTooltip() { this.tooltipOpen = true; this.listeners.tooltipopen?.(); },
-          bindTooltip(value, options) { this.tooltip = value; this.tooltipOptions = options; },
+          bindTooltip(value, options) { this.tooltipContent = value; this.tooltipOptions = options; },
+          get tooltip() { this.tooltipCalls = (this.tooltipCalls || 0) + 1; return typeof this.tooltipContent === 'function' ? this.tooltipContent() : this.tooltipContent; },
           on(listeners) { this.listeners = listeners; } };
         options.onEachFeature?.(feature, layer); group.layers.push(layer);
       }
@@ -302,11 +303,13 @@ test('DV-T4 partial district, empty dates, unknown calendar date and station 404
   assert.equal(e['map-message'].className, 'sr-only');
   for (const result of [reply(404, { error: 'station_not_found' }), reply(404, { error: 'snapshot_not_found' }),
     reply(200, { ...payload(), routes: [], features: { type: 'FeatureCollection', features: [] } })]) {
-    e['map-station'].value = 'MOCKB'; replies.push(result); await e['map-station'].listeners.change();
+    e['map-station'].value = 'MOCKB'; await e['map-station'].listeners.change();
+    replies.push(result); await e['map-retry'].listeners.click();
     assert.equal(e['map-message'].textContent, '该站点在 11/08 没有数据');
     assert.equal(e['map-message'].className, '');
   }
-  e['map-station'].value = ''; replies.push(reply(200, payload())); await e['map-station'].listeners.change();
+  replies.push(reply(200, payload())); await e['map-retry'].listeners.click();
+  e['map-station'].value = ''; await e['map-station'].listeners.change();
   e['map-date'].value = '2026-11-07'; replies.push(reply(200, payload())); await e['map-date'].listeners.change();
   assert.equal(e['map-message'].textContent, '该日无数据');
   const other = await fixture('?date=2026-01-01', 206, storage, { daysReply: calendarReply });
@@ -419,11 +422,11 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   map.listeners.click();
   assert.equal(e['map-zip-panel'].hidden, true);
   assert.equal(layer.styles.at(-1).weight, POLYGON_STYLE.focused.weight);
-  replies.push(reply(200, { ...payload(), station: 'MOCKB' })); e['map-station'].value = 'MOCKB';
+  e['map-station'].value = 'MOCKB';
   await e['map-station'].listeners.change();
   assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
-  assert.equal(map.removed.filter(layer => layer.options?.pane !== 'route-labels').length, 6);
-  assert.equal(map.removed.filter(layer => layer.options?.pane === 'route-labels').length, 1);
+  assert.equal(map.removed.filter(layer => layer.options?.pane !== 'route-labels').length, 5);
+  assert.equal(map.removed.filter(layer => layer.options?.pane === 'route-labels').length, 0);
 });
 
 test('map page loading, no data, known errors, retries and network failures clear stale data', async () => {
@@ -620,7 +623,7 @@ test('RM5b outlines stack dark/white route and ZIP strokes, pass events through 
   polygon.listeners.mouseout(); assert.equal(polygon.styles.at(-1).color, '#334155');
   doc.listeners.keydown({ key: 'Escape' }); assert.equal(active().length, 0);
   e['map-routes'].children[0].listeners.click();
-  e['map-station'].value = 'MOCKB'; replies.push(reply(200, { ...payload(), station: 'MOCKB' }));
+  e['map-station'].value = 'MOCKB';
   await e['map-station'].listeners.change(); assert.equal(active().length, 0);
   const uncoveredProfiles = profiles(); uncoveredProfiles.stations.MOCKA.rows.find(row => row.route_id === 1).postal_codes = ['00002'];
   replies.push(reply(200, lookupZip({ profiles: uncoveredProfiles, boundaries: boundaries(), postalCode: '00123' })));
@@ -765,7 +768,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, POLYGON_STYLE.outside.fillOpacity);
   assert.equal(e['map-coverage-count'].textContent, '2 / 4 ZIP 已上图');
   assert.equal(e['map-missing'].children[0].children[1].textContent, 'MOCKA');
-  e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = ''; await e['map-station'].listeners.change();
   assert.equal(controls[0].children[0].attributes['aria-label'], '定位片区'); assert.equal(values.get('nc-ops-console.map-scope'), 'district');
   assert.equal(JSON.parse(values.get('nc-ops-console.selection')).station, 'MOCKA');
   assert.deepEqual(e['map-routes'].children.filter(node => node.tagName === 'h3').map(node => node.textContent), ['MOCKA', 'MOCKB']);
@@ -773,7 +776,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   const before = writes.length;
   replies.push(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })));
   await page.searchQuery('00009', true); assert.equal(e['map-station'].value, ''); assert.equal(writes.length, before);
-  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = 'MOCKA'; await e['map-station'].listeners.change();
   assert.equal(controls[0].children[0].attributes['aria-label'], '定位站点');
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
   assert.equal(e['map-routes'].children[0].children[1].children[0].textContent, 'Mock-C');
@@ -887,13 +890,13 @@ test('RM7 Station, overview and District changes retain only available DSPs; cro
   replies.push(reply(200, { districts }), reply(200, data)); await page.start();
   const change = value => { e['map-dsp'].value = value; e['map-dsp'].listeners.change(); };
   change('Shared');
-  e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = 'MOCKB'; await e['map-station'].listeners.change();
   assert.equal(e['map-dsp'].value, 'Shared');
-  e['map-station'].value = ''; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = ''; await e['map-station'].listeners.change();
   assert.deepEqual(e['map-dsp'].children.map(o => o.value), ['', 'Only-A', 'Shared']);
-  change('Only-A'); e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  change('Only-A'); e['map-station'].value = 'MOCKB'; await e['map-station'].listeners.change();
   assert.equal(e['map-dsp'].value, '');
-  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change(); change('Shared');
+  e['map-station'].value = 'MOCKA'; await e['map-station'].listeners.change(); change('Shared');
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
   assert.equal(e['map-routes'].children[0].children[1].children[0].textContent, 'Mock-C');
   await page.searchQuery('Mock-C', true); assert.equal(e['map-summary-panel'].hidden, false);
@@ -912,12 +915,12 @@ test('RM8 retains text, hints, filtering, viewport and invalidates old ZIPs acro
   let release; replies.push(() => new Promise(resolve => { release = resolve; }));
   const pending = page.searchQuery('00002', true);
   const fits = map.fits.length, calls = requests.length;
-  e['map-station'].value = 'MOCKB'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = 'MOCKB'; await e['map-station'].listeners.change();
   assert.equal(e['map-search'].value, '00002'); assert.match(e['map-search-message'].textContent, /已保留 ZIP 00002，按 Enter 在当前范围重新查询/);
-  assert.equal(requests.length, calls + 1);
+  assert.equal(requests.length, calls);
   release(reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00002' }))); await pending;
   assert.equal(e['map-zip-panel'].hidden, true);
-  e['map-station'].value = 'MOCKA'; replies.push(reply(200, data)); await e['map-station'].listeners.change();
+  e['map-station'].value = 'MOCKA'; await e['map-station'].listeners.change();
   assert.ok(map.fits.length > fits);
   e['map-dsp'].listeners.change(); assert.equal(e['map-search'].value, '00002');
   e['map-district'].value = 'mock'; replies.push(reply(200, data)); await e['map-district'].listeners.change();
@@ -963,6 +966,7 @@ test('MAP-PERF basemaps hand off US coverage to regional layers and retain buffe
   for (const [index, layer] of baselayers.entries()) {
     const { name, ...options } = basemaps[index];
     assert.equal(layer.options.updateWhenZooming, false);
+    assert.equal(layer.options.updateWhenIdle, true);
     assert.equal(layer.options.keepBuffer, 4);
     assert.equal(layer.options.backgroundColor, BASEMAP_FLAVOR.background); assert.equal(layer.options.noWrap, true);
     for (const [key, value] of Object.entries(options)) assert.deepEqual(layer.options[key], value);
@@ -1244,7 +1248,7 @@ test('RM11 shared assignments persist in view and focused labels track priority'
   view.setColorMode('difficulty'); view.setColorMode('route'); view.setDsp('Alpha');
   assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, selectRoute(1), 'route', 'A', 'Alpha', colors).fillColor);
   const source = await fs.readFile(new URL('../../web/map.js', import.meta.url), 'utf8');
-  assert.equal(source.match(/assignRouteColors\(/g).length, 1);
+  assert.equal(source.match(/assignAllColors\(/g).length, 1);
   assert.match(source, /panel.render\(data, \{ focusStation: station, routeColors, groupColors \}\)/);
   assert.match(source, /view.render\(data, \{ fitToStation: true, focusStation: station, routeColors, groupColors \}\)/);
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
@@ -1888,4 +1892,51 @@ test('ML-T4 label preference persists without requests, marker rebuilds or selec
     assert.deepEqual(writes, [['nc-ops-map-route-labels', 'false'], ['nc-ops-map-route-labels', 'true']]);
     assert.equal(requests, 0); assert.equal(selections, 0);
   }
+});
+
+
+test('MVR-T9 station changes reuse polygon identity and defer tooltip content', async () => {
+  const { page, elements: e, replies, reply, requests, groups } = await fixture();
+  replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
+  await page.start();
+  const layer = groups[0].layers[0], count = requests.length;
+  assert.equal(layer.tooltipCalls || 0, 0);
+  assert.equal(typeof layer.tooltipContent, 'function');
+  for (const station of ['MOCKB', 'MOCKA', '']) {
+    e['map-station'].value = station;
+    await e['map-station'].listeners.change();
+    assert.equal(requests.length, count);
+    assert.equal(layer.tooltipCalls || 0, 0);
+  }
+  assert.match(allText(layer.tooltip), /\u9886\u4ef6\u91cf\uff08\u65e5\u5747\uff09/);
+  replies.push(reply(200, payload()));
+  await e['map-retry'].listeners.click();
+  assert.equal(requests.length, count + 1);
+});
+
+
+test('MVR-T9 latest cache expires, historical cache persists and failures invalidate it', async () => {
+  const { DISTRICT_CACHE_MS } = await import('../../web/map.js');
+  const originalNow = Date.now;
+  let now = originalNow();
+  Date.now = () => now;
+  try {
+    for (const historical of [false, true]) {
+      const { page, elements: e, replies, reply, requests, groups, map } = await fixture(historical ? '?date=2026-11-08' : '',
+        206, null, historical ? { daysReply: calendarReply } : {});
+      replies.push(reply(200, { stations: ['MOCKA', 'MOCKB'] }), reply(200, payload()));
+      await page.start();
+      const count = requests.length, polygons = groups[0];
+      now += DISTRICT_CACHE_MS + 1;
+      if (!historical) replies.push(reply(500, { error: 'boundary_invalid' }));
+      e['map-station'].value = 'MOCKB'; await e['map-station'].listeners.change();
+      assert.equal(requests.length, count + (historical ? 0 : 1));
+      assert.equal(map.removed.includes(polygons), !historical);
+      if (!historical) {
+        replies.push(reply(200, payload()));
+        e['map-station'].value = 'MOCKA'; await e['map-station'].listeners.change();
+        assert.equal(requests.length, count + 2);
+      }
+    }
+  } finally { Date.now = originalNow; }
 });

@@ -501,3 +501,19 @@ test('MVR-P4 polygon constants match the daytime basemap specification', () => {
     outside: { fillOpacity: .05, color: '#0A101E', opacity: .12, weight: .5 },
   });
 });
+
+
+test('MVR-T9 shared vertex index exactly preserves all legacy allocations', async () => {
+  const { assignAllColors, assignGroupColors, dspColorKey } = await import('../../web/map-state.js');
+  const features = Array.from({ length: 80 }, (_, i) => {
+    const x = i % 10, y = Math.floor(i / 10);
+    return { properties: { route_id: i % 17, station: `S${i % 4}`, dsp_name: i % 9 ? `S-D${i % 7}` : null },
+      geometry: { type: 'Polygon', coordinates: [[[x,y],[x+1,y],[x+1,y+1],[x,y+1],[x,y]]] } };
+  });
+  for (const input of [features, features.toReversed(), []]) {
+    const result = assignAllColors(input);
+    assert.deepEqual(result.routeColors, assignRouteColors(input));
+    assert.deepEqual(result.groupColors.dsp, assignGroupColors(input, p => dspColorKey(p.dsp_name)));
+    assert.deepEqual(result.groupColors.station, assignGroupColors(input, p => p.station));
+  }
+});

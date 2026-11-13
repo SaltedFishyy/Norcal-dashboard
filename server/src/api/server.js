@@ -24,7 +24,7 @@ const defaultProtomapsDir = fileURLToPath(new URL('../../../node_modules/protoma
 export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = defaultGeoDir,
   leafletDir = defaultLeafletDir, protomapsDir = defaultProtomapsDir,
   basemapDir = runtimeDir ? path.join(runtimeDir, 'basemap') : undefined, districtsPath, log,
-  capabilities, extraHandlers = new Map(), warehouses = {}, now = () => new Date(), dataSource = createJsonDataSource({ runtimeDir }) } = {}) {
+  compressResponses = true, capabilities, extraHandlers = new Map(), warehouses = {}, now = () => new Date(), dataSource = createJsonDataSource({ runtimeDir }) } = {}) {
   const readPriceIndex = async () => {
     if (dataSource.source !== 'db') return null;
     try { return buildPriceIndex(await dataSource.readCurrentFirstPrices()); }
@@ -71,6 +71,7 @@ export function createApiServer({ runtimeDir, webDir = defaultWebDir, geoDir = d
     warehouseHandlers.set(pathname, handler);
   }
   return http.createServer(createRequestHandler({
+    compressResponses,
     capabilities: { refresh: false, ...capabilities, warehouse_write: Boolean(warehouses.writeEnabled), route_quotation: dataSource.source === 'db' },
     extraHandlers: warehouseHandlers, readHandlers: createFreshnessHandlers({ dataSource, districtsPath }),
     today: () => pacificToday(now),
