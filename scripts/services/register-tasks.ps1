@@ -25,18 +25,17 @@ try {
     $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$entry`" -NodePath `"$node`"" `
         -WorkingDirectory $repo
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-    # AtLogOn has no repetition parameters; reuse the CIM repetition object
-    # from a Once trigger. Omitting Duration means repeat indefinitely.
-    $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
-    $trigger.Repetition = $repeat.Repetition
+    $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
+    # A separate time trigger starts recovery without waiting for another logon.
+    # Omitting Duration means repeat indefinitely.
+    $timer = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 `
         -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    $null = Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $trigger `
+    $null = Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger @($logon, $timer) `
         -Principal $principal -Settings $settings -Force
-    Write-Output 'Task registered for current-user logon with indefinite 5-minute recovery; it has not been started.'
+    Write-Output 'Task registered for current-user logon and a separate indefinite 5-minute timer; it has not been manually started.'
 } catch {
     Write-Error 'Task registration/removal failed. Check current-user Task Scheduler permissions and Node installation. No elevation attempted.'
     exit 1

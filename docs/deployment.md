@@ -72,7 +72,7 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
    .\scripts\services\register-tasks.ps1
    ```
 
-   脚本用 `Get-Command node` 保存 Node 绝对路径。任务名为 `NC Ops Console Services`，触发器为当前用户登录时 + 每 5 分钟自愈（无限期重复），`Interactive` / `Limited`，隐藏窗口，不需要保存 Windows 密码或管理员权限。现有同名任务先显示配置，再覆盖；其他用户的任务拒绝覆盖。配置为忽略重复实例、失败后每分钟重启（最多 999 次）、无执行时间限制、允许电池运行、可用时启动。权限失败时明确报错，不尝试提权。Node 安装位置或 repo 移动后需重新注册。
+   脚本用 `Get-Command node` 保存 Node 绝对路径。任务名为 `NC Ops Console Services`，触发器为当前用户登录时 + 独立 5 分钟时间触发器（从注册时刻开始，无限期重复），`Interactive` / `Limited`，隐藏窗口，不需要保存 Windows 密码或管理员权限。现有同名任务先显示配置，再覆盖；其他用户的任务拒绝覆盖。配置为忽略重复实例、失败后每分钟重启（最多 999 次）、无执行时间限制、允许电池运行、可用时启动。权限失败时明确报错，不尝试提权。Node 安装位置或 repo 移动后需重新注册。
 6. 管理员 PowerShell 添加下述防火墙规则。
 7. 只对可信办公网络设置 Private，方法见下文。
 8. Product Owner 手动设置插电时不睡眠。
@@ -142,19 +142,19 @@ $basePath = Join-Path $env:LOCALAPPDATA 'nc-ops-console'
 
 ## 刷新、登录与故障恢复
 
-### SVC-T1 启动修复（2026-11-13，脚本待 review / 重新注册）
+### SVC-T1 / SVC-T2 启动修复（2026-11-13，脚本待 review / 重新注册）
 
 两个根因：Windows PowerShell 5.1 在 Stop 模式下可能将原生命令 stderr 转为终止异常，导致 `pg_ctl status` 在数据库停止时打断后续启动；supervisor 意外退出后，原有登录触发和失败重启设置未能恢复它。退出状态 `0xC000013A` 已观察到，但具体是谁结束进程尚未确定。
 
 - 两个守护脚本共享 `native-command.ps1`：探测命令使用 `Invoke-Native`，仅函数内使用 Continue，重定向丢弃 stdout / stderr，以退出码判断结果，不记录原始输出。`pg_ctl start` 不能经过管道或重定向等待，即使带 `-l`，PowerShell 5.1 仍可能等待后代进程继承的管道句柄关闭。启动改用 `Invoke-NativeDetached`：`ProcessStartInfo` 不重定向 stdout / stderr、隐藏窗口，只等待直接进程最多 30 秒，返回退出码或 `timeout`，超时不杀进程；不用会等待整个进程树的 `Start-Process -Wait`。保留 `-W`、`-l postgres.log` 和原有最多 60 秒 `pg_isready` 轮询，继续用就绪探测确认数据库是否启动。
 - `services.log` 保留 `pg_ctl start exit code 0.`、`PostgreSQL ready.`；失败包含 `step`、`exit`、`exception`（无异常为 `none`，未执行为 `not-run`），例如 `PostgreSQL start failed: step=pg_ctl start exit=1 exception=none; checking readiness.`。supervisor 的 finally 记录 `Services supervisor exiting: <reason>`，仅记录异常类型，无法确定中断原因时明确标注。强制终止进程或系统断电可能无法执行 finally，不能保证留下退出行。
-- 登录触发器增加无结束时间的 5 分钟重复。正常运行时 Task Scheduler 的 IgnoreNew 抑制重复任务，Global Mutex 继续防止手动启动的重复实例；重复提示只使用 `Write-Debug`，避免周期性刷日志。未额外增加解锁或唤醒触发器，现有重复触发和 StartWhenAvailable 用于恢复。
+- 保留不带重复的登录触发器，另加从注册时刻开始的独立 5 分钟时间触发器；省略 `RepetitionDuration`，表示无限期重复。SVC-T1 实测登录触发器上的重复导致 `NextRunTime` 为空，手动运行后结束 supervisor，等待 400 秒仍未恢复，因此不再将重复挂在登录触发器上。正常运行时 Task Scheduler 的 IgnoreNew 抑制重复任务，Global Mutex 继续防止手动启动的重复实例；重复提示只使用 `Write-Debug`，避免周期性刷日志。未额外增加解锁或唤醒触发器，现有重复触发和 StartWhenAvailable 用于恢复。
 
 - guardian 使用按服务 Name 和用户 SID 区分的 Global Mutex，整个生命周期保持单实例；supervisor 重启后不会叠加重复的 guardian。重复实例只写 debug 并以退出码 0 退出，不写服务日志；supervisor 每 60 秒再次尝试启动的短暂进程开销可接受。旧 guardian 尚未持有此锁，需要在获批维护窗口更新后才能生效。
 
 Claude review 后须经 Product Owner 同意才能部署，按以下顺序验证（本任务未执行）：
 
-1. 当前部署用户在普通 PowerShell 执行 `.\scripts\services\register-tasks.ps1`，幂等覆盖同名任务；检查登录触发、5 分钟无限期重复、Interactive / Limited、IgnoreNew。脚本只注册，不立即启动。如执行策略阻止脚本，可对本次 PowerShell 进程使用 `-ExecutionPolicy Bypass`，不修改机器策略。
+1. 当前部署用户在普通 PowerShell 执行 `.\scripts\services\register-tasks.ps1`，幂等覆盖同名任务；检查登录触发器、独立时间触发器的 5 分钟无限期重复、Interactive / Limited、IgnoreNew，并确认 `Get-ScheduledTaskInfo` 的 `NextRunTime` 有值。脚本只注册，不手动启动任务。如执行策略阻止脚本，可对本次 PowerShell 进程使用 `-ExecutionPolicy Bypass`，不修改机器策略。
 2. 在获批维护窗口手动停止数据库，或等下次开机；注意存活的 supervisor 会自行尝试恢复数据库。
 3. 在 Task Scheduler 手动运行任务（已有 supervisor 时由 IgnoreNew / Mutex 保持单实例）。
 4. 观察 `services.log` 出现 `pg_ctl start exit code 0.`、`PostgreSQL ready.`，确认 3000 恢复。
@@ -168,6 +168,33 @@ Claude review 后须经 Product Owner 同意才能部署，按以下顺序验证
 - run 卡在 running：先确认没有任何抓取运行，再执行 `npm run db:abandon-run -- <run_id> --confirm-no-scrape-running`。`<run_id>` 是实际 UUID，该命令只把 running 改为 abandoned；不要在活跃抓取期间执行。
 - 残留 `scrape.lock`：Windows 可能复用 PID，存活检测不足以证明抓取仍在进行。先确认 Worker 进度、相关进程及命令行均无刷新，再人工删除**实际 runtime 目录**中的 `scrape.lock`。不要只依据 PID 或自动删除锁；锁损坏也需人工确认。
 - PostgreSQL 不可用时先看日志与内存，不要反复初始化数据库。2026-10-08 曾因可用内存仅约 0.6 GB 导致 PostgreSQL 崩溃（`0xC0000142`）。公用电脑不要长期运行大量常驻应用，应保留足够可用内存。
+
+## 发布 / 回滚
+
+发布前须完成 3200 预览签字，由 Product Owner 确认 commit，且已经 push；收到单独的发布授权后才执行以下命令。本节脚本交付不代表已执行正式发布。
+
+```text
+%LOCALAPPDATA%\nc-ops-console\
+  config\readonly.env           仓库外只读配置，不复制进版本目录
+  releases\<10位commit>\        已提交代码与 node_modules
+  releases\current.txt          当前版本目录名
+  releases\history.log          时间、目录名、完整 commit SHA
+  logs\services.log             版本切换记录
+```
+
+```powershell
+.\scripts\services\release.ps1 -Commit HEAD
+.\scripts\services\release.ps1 -Rollback
+.\scripts\services\release.ps1 -Version <已有版本目录名>
+```
+
+脚本仅用 `git archive` 导出指定 commit，未提交文件不会进入发布副本，工作区不干净时只提示。依赖按 lockfile 的 SHA256 比较：优先复制当前发布版本的 `node_modules`，其次复制开发目录的；均不匹配时才在 staging 内运行 `npm ci --omit=dev`（需要网络）。复制不修改来源目录；robocopy 退出码小于 8 视为成功。不安装或升级 lockfile 之外的依赖。
+
+新版本先在 loopback 临时端口 3299 冒烟检查，最多 30 秒等待 `/api/districts` 返回 200，然后结束临时进程并确认端口释放。检查失败不切换 `current.txt`，仅清理本次 staging，正式旧版本不变。检查成功才原子更新指针、追加历史，结束 readonly guardian 的 Node 子进程，由 guardian 加载新版本；不重启 guardian、Worker 或 PostgreSQL。找不到 guardian 时仅提示下次启动生效。切换后若正式服务就绪超时，脚本报错；指针已经切换，需人工检查或授权回滚。
+
+readonly guardian 每次启动 Node 前重新读取 `current.txt`，合法目录名为 7–40 位小写十六进制，且必须有 `server/bin/server.js`。指针缺失时使用 repo 根目录，guardian 启动时记录一次警告；指针无效时每次启动均记录警告并使用 repo 根目录。Worker 继续使用开发目录。
+
+旧正式版本不会自动删除。回滚同样先冒烟再切换，`-Rollback` 从历史中反向寻找与当前不同且仍存在的版本。`-Version` 可选择指定已有版本。临时测试使用 `-Base <临时目录> -EnvFile <临时JSON配置> -SkipRestart`，可用 `-SmokePort` 覆盖冒烟端口、`-NodePath` 指定 Node；不要将测试指向正式 releases。默认 Base 为上图目录，默认 EnvFile 为 `<Base>\config\readonly.env`。
 
 ## 回退与验收
 

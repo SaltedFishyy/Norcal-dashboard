@@ -1,6 +1,6 @@
 # 开发版 / 正式版分离（Release Split，RS）
 
-状态：**Approved（需求）**，Product Owner 2026-11-13（“我觉得可以，就按照你说的做”）。**实现待授权**：RS-T3 涉及计划任务重新注册和服务重启，单独确认。
+状态：**Implemented，待部署**。Product Owner 2026-11-13 批准需求并授权实现 SVC-T2 / RS-T1 / RS-T2 / RS-T4，已全部经 Claude review 通过（RS-T2 第一次交接因 spec 与 brief 依赖规则不一致停止，已统一后重做）。**RS-T3（首次发布、重新注册任务、重启 readonly）待 Product Owner 确认。**
 
 ## 1. 背景与目标
 
@@ -36,7 +36,7 @@
 - 发布脚本（如 `scripts/services/release.ps1 -Commit <sha>`）：
   1. 只接受**已提交**的 commit，默认取 `HEAD`。工作区有未提交改动也照常执行，因为只导出 commit 的内容，但要提示。
   2. 用 `git archive <commit>` 导出到新目录。不用 git worktree，发布副本和 OneDrive 里的 `.git` 没有任何关联。
-  3. 依赖：`package-lock.json` 与上一个发布版本相同时，从上一版复制 `node_modules`；不同或者没有上一版时，执行 `npm ci --omit=dev`。这样只会安装 lockfile 已有的依赖，不新增依赖。
+  3. 依赖按以下顺序处理（Claude 2026-11-13 统一，属于普通技术选择）：`package-lock.json` 与当前发布版本相同时，从当前发布版本复制 `node_modules`；否则如果与开发目录的相同，从开发目录复制，首次发布走这一条，不用联网；都不同时，执行 `npm ci --omit=dev`。这样只会安装 lockfile 已有的依赖，不新增依赖。
   4. 冒烟检查：用新目录在临时 loopback 端口（如 3299）启动一次只读服务，请求 `/api/districts` 返回 200 后关闭。失败时**不切换**。
   5. 原子更新 `current.txt`。
   6. 重启只读服务的 node 子进程：结束当前 readonly node，guardian 会从新版本重新启动。不重启 guardian，也不动数据库和 Worker。
@@ -114,4 +114,22 @@ SVC-T1 实测发现：挂在“登录时”触发器上的 5 分钟重复不会�
 
 ## 7. 实现记录（Implementation Notes）
 
-（待实现）
+### RS-T1（2026-11-13）
+
+- 新增 `scripts/dev-preview.ps1`，默认 3200、前台运行；从指定 env 文件启动现有 API server，清理继承配置后强制设置 loopback 与端口。缺失配置或端口占用时退出，不回退到 repo `.env`。
+- `scripts/services/readonly-env.ps1` 统一只读环境清理；guardian 保留原有清理行为。环境字典使用 Windows PowerShell 5.1 的 `StringDictionary` 类型。
+- `.claude/launch.json` 提供 `dev-preview` 配置，结构测试追加到既有 service-scripts 测试模块。
+- 临时 JSON env（故意配置 `0.0.0.0:3000`）在 3299 实测：仅监听 `127.0.0.1:3299`，首页 200，响应与开发目录 `web/index.html` 相同；占用端口、缺失 env 的中文提示通过；Ctrl+C 后监听清除。未使用真实 readonly.env，未操作现有服务。
+- `npm.cmd test`：890/890 通过；`git diff --check` 通过。项目没有 lint/build 命令。
+- 未修改 web 文件验证即时更新；真实 DB 数据与 3000 一致性、3000 发布副本隔离仍待后续 review/RS-T3 验证。RS-T1 不代表 RS-AC1/RS-AC2 已全部验收。
+
+### RS-T2（2026-11-13）
+
+- 新增 `scripts/services/release.ps1`：commit 导出到 staging，按当前发布版本 → 开发目录 → `npm ci --omit=dev` 处理依赖，复用 RS-T1 的只读环境清理函数，在 loopback 冒烟后原子切换版本；支持历史回滚、指定已有版本、临时 Base 和跳过重启。发布锁防止并发切换；只清理本次创建且路径校验通过的 `.staging-*`，不删除正式版本。
+- Windows PowerShell 5.1 的 `[IO.File]::Replace` 使用 `[NullString]::Value`，避免 `$null` 被转换为空备份路径。脚本以 UTF-8 BOM 保存，确保 PowerShell 5.1 正确解析中文消息。
+- readonly guardian 每次启动 Node 前校验并读取版本指针；缺失时 guardian 启动记录一次回退提示，无效时每次启动警告。Worker 分支及现有只读环境清理行为保留。重启逻辑仅匹配同用户、同脚本路径、同 Base 的 readonly guardian 直接 Node 子进程，并复核进程创建时间；本任务未执行真实重启。
+- 临时 `.handoff/rs-t2-base/` 实测：HEAD（`55bed67c64`）和 HEAD~1（`7886bc87ab`）均冒烟成功；回滚恢复 HEAD；已有版本重复发布及 `-Version` 切换成功；不存在的版本以非零退出。HEAD~2 配合 `DATA_SOURCE=bogus` 冒烟失败，current 指针保持不变，本次 staging 清理完成。使用同 lockfile 的开发/当前版本依赖复用路径，未触发联网安装；`npm ci` 回退分支未实测。
+- 冒烟子进程由脚本 Kill/WaitForExit 收尾，随后确认 3299 无监听；失败后也确认没有 `.staging-*` 残留。CIM 进程枚举被环境拒绝（Access denied），不能独立枚举核实残留 Node。指针缺失与有效指针的 readonly 选择逻辑在隔离代码块中运行验证，通过；未启动或结束任何现有 guardian。
+- 新增 3 项结构测试；service-scripts 共 9 项通过。`npm.cmd test`：893/893 通过；`git diff --check` 通过；两个 PowerShell 脚本语法解析通过。无 lint/build 配置。未修改前端，因此未做页面交互回归。
+- RS-AC3 / AC5 的真实 3000 切换、重启时长、LAN 连通性，以及 AC4 的真实服务持续可用，均留待 RS-T3 授权后验证。测试发布副本未发现 `.env` / `readonly.env`；git archive 排除未跟踪文件，未写入真实 releases、未打开真实配置或凭据。
+- 临时目录清理命令被自动审批以 `blocked by policy` 拒绝（未提供具体原因），路径校验后的逐项删除也被拒绝；`.handoff/rs-t2-base/` 和两个无凭据临时 env 文件暂留，需后续清理。不代表正式部署完成。

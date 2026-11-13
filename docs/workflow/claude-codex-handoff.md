@@ -71,6 +71,7 @@ spec 不清楚或与现有代码冲突时停止并说明，不要猜测。
 - 修复最多 **2 轮**。两轮后仍未通过，Claude 停止并如实汇报。遇到上面列出的需要 Product Owner 决定的问题时立即停止（`AGENTS.md` 第 7.4 节）。
 - review 问题写明：位置、现象、期望、对应验收标准。
 - UI 功能在 Product Owner 预览确认前不算完成（`AGENTS.md` 第 9 节）。
+- 浏览器检查和预览都用开发预览 `http://127.0.0.1:3200`（`scripts/dev-preview.ps1`），不对局域网正式版 3000 做检查。task brief 中要求浏览器检查时写明 3200。3000 只在 Product Owner 说“发布”后，由 Claude 用 `scripts/services/release.ps1` 更新（`docs/features/release-split.md`，Product Owner 2026-11-13）。
 
 ## 3. 脚本说明：`scripts/codex-handoff.sh`
 

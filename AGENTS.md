@@ -210,7 +210,7 @@ The main dashboard is `server/` + `web/`:
 * Node.js >= 22.9, ES modules, no build step; dependencies in `package.json` (`pg`, `playwright`, `leaflet`, `protomaps-leaflet`)
 * Frontend: HTML / CSS / vanilla JavaScript ES modules in `web/`, served by the API server; Leaflet and protomaps-leaflet are served from `node_modules`, not a CDN
 * Data: runtime JSON (outside the repo) or PostgreSQL, selected by `DATA_SOURCE=json|db`; DMS data is captured by Playwright (`dms:*` scripts)
-* Services: read-only server on 3000 (`npm run server`), Worker on 127.0.0.1:3100 (`npm run worker`); see `docs/deployment.md`
+* Services: LAN read-only server on 3000 runs a release copy (`scripts/services/release.ps1`), dev preview on 127.0.0.1:3200 (`scripts/dev-preview.ps1`), Worker on 127.0.0.1:3100; see `docs/deployment.md` and `docs/features/release-split.md`
 * Automated tests: `npm test`
 
 The legacy static site below is the original prototype, not a constraint on the architecture; reuse its good UI, interaction, and data patterns rather than rewriting them without reason.
@@ -407,7 +407,9 @@ The Product Owner's product judgment takes priority over an AI's opinion of whet
 
 Preview options:
 
-* Local preview (dashboard): `npm run server`, then open `http://127.0.0.1:3000/` (Route Profile) and `http://127.0.0.1:3000/map` (Route Map). Management features (refresh, warehouses) are on the Worker: `npm run worker`, `http://127.0.0.1:3100/`.
+* Local preview (dashboard): run `powershell -File scripts/dev-preview.ps1`, then open `http://127.0.0.1:3200/` (Route Profile) and `http://127.0.0.1:3200/map` (Route Map). This dev preview serves the working tree, read-only, on loopback only. Implementation checks, reviews, browser checks and Product Owner previews use 3200.
+* Do not use the LAN service on 3000 for development checks. It runs a release copy that changes only when the Product Owner asks to release; see `docs/features/release-split.md`.
+* Management features (refresh, warehouses) are on the Worker, `http://127.0.0.1:3100/`.
 * Local preview (legacy site): run any static server from `nc-ops-console-main/` (for example `npx http-server -p 8000`) and open `http://localhost:8000/`.
 * Publishing a preview to any public GitHub Pages site is an outward-facing action and requires Product Owner approval first.
 

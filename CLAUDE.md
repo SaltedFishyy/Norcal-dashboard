@@ -155,7 +155,9 @@ DMS / browser automation → transform / normalization → store → API → fro
 
 - 主要开发环境：Windows + VS Code + PowerShell。
 - Python、Node、Git Bash、Codex CLI 等是否可用，需要时实际检测，不做长期假设。
-- 本地预览（dashboard）：`npm run server`，打开 `http://127.0.0.1:3000/`（线路画像）和 `/map`（线路地图）；仓库管理和刷新在 Worker：`npm run worker`，`http://127.0.0.1:3100/`。详见 `AGENTS.md` 第 9 节。
+- 本地预览（dashboard，开发版）：`powershell -File scripts/dev-preview.ps1`（或 `.claude/launch.json` 的 `dev-preview`），打开 `http://127.0.0.1:3200/`（线路档案）和 `/map`（线路地图）。它只在本机可访问，运行开发目录、只读 reader。Codex 实现、Claude 审查、浏览器检查和 Product Owner 预览都用 3200（Product Owner 2026-11-13，`docs/features/release-split.md`）。
+- **不对 3000 做开发检查。** `http://KENNY:3000` 是给同事用的正式版，运行发布副本（`%LOCALAPPDATA%\nc-ops-console\releases\`），只在 Product Owner 说“发布”时由 Claude 用 `scripts/services/release.ps1` 更新。发布前提：commit 已经 Product Owner 确认并 push；发布脚本会先做冒烟检查，失败不切换，`-Rollback` 可以回滚。发布会重启只读服务的 node，属于第 6 节的“部署 / 服务重启”，每次都要 Product Owner 明确说发布。
+- 仓库管理和刷新在 Worker：`http://127.0.0.1:3100/`，第一版仍运行开发目录（RS-Q1）。详见 `AGENTS.md` 第 9 节。
 - 本地预览（legacy 站点）：在 `nc-ops-console-main/` 下启动静态服务器（如 `npx http-server -p 8000`），打开 `http://localhost:8000/`。`npx http-server` 作为临时预览工具不需要每次单独请求批准，但不能因此修改 `package.json` 或增加永久 dependency。
 - `.sh` 脚本在 PowerShell 中不能直接运行，需要 `bash scripts/<name>.sh`。
 

@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $scriptDir 'native-command.ps1')
+. (Join-Path $scriptDir 'readonly-env.ps1')
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $mutex = New-Object Threading.Mutex($false, "Global\NcOpsConsoleGuardian-$Name-$sid")
 $ownsMutex = $false
@@ -40,6 +41,10 @@ function Test-ServicePort {
 function Quote-Argument([string]$Value) {
     if ($Value.Contains('"') -or $Value.EndsWith('\')) { throw 'Unsupported argument path.' }
     return '"' + $Value + '"'
+}
+$releasePointer = Join-Path $Base 'releases\current.txt'
+if ($Name -eq 'readonly' -and !(Test-Path -LiteralPath $releasePointer)) {
+    Write-ServiceLog 'No release selected; using repo root.'
 }
 $delays = @(5, 15, 60)
 $retry = 0
@@ -75,14 +80,19 @@ while ($true) {
         if ($Name -eq 'worker') {
             $info.Arguments = '--env-file-if-exists=.env server/bin/worker.js'
         } else {
-            $info.Arguments = (Quote-Argument "--env-file=$envPath") + ' server/bin/server.js'
-            # Do not inherit writer/DMS configuration from the interactive parent.
-            foreach ($key in @($info.EnvironmentVariables.Keys)) {
-                if ($key -like 'NC_DB_*' -or $key -like 'NC_TEST_DB_*' -or $key -like 'DMS_*' -or $key -like 'WAREHOUSE_*' -or
-                    $key -in @('DATA_SOURCE', 'LISTEN_HOST', 'PORT', 'RUNTIME_DATA_DIR', 'DB_DUAL_WRITE', 'NODE_OPTIONS')) {
-                    $info.EnvironmentVariables.Remove($key)
+            # Re-read on every launch so a release switch needs only a child restart.
+            if (Test-Path -LiteralPath $releasePointer) {
+                $selected = ''
+                try { $selected = ([IO.File]::ReadAllText($releasePointer)).Trim() } catch { }
+                if ($selected -cmatch '^[0-9a-f]{7,40}$' -and
+                    (Test-Path -LiteralPath (Join-Path $Base "releases\$selected\server\bin\server.js") -PathType Leaf)) {
+                    $info.WorkingDirectory = Join-Path $Base "releases\$selected"
+                } else {
+                    Write-ServiceLog 'Invalid release selection; using repo root.'
                 }
             }
+            $info.Arguments = (Quote-Argument "--env-file=$envPath") + ' server/bin/server.js'
+            Clear-ReadonlyEnvironment -Environment $info.EnvironmentVariables
         }
         $child = New-Object Diagnostics.Process
         $child.StartInfo = $info
