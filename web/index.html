@@ -10,55 +10,46 @@
 </head>
 <body>
   <main class="profile-page">
-    <header>
-      <div class="console-heading">
+    <header class="profile-topbar">
       <p class="console-brand"></p>
-      <div class="console-title"><div class="profile-heading"><h1>美西线路画像</h1><small class="snapshot">West Region Route Profile</small></div></div>
+      <div class="console-title"><h1 class="sr-only">线路档案</h1></div>
       <nav class="page-nav" aria-label="页面"><a href="/" aria-current="page">线路档案</a><a href="/map">线路地图</a></nav>
+      <div class="profile-toolbar">
+        <div><label for="profile-district">片区</label><select id="profile-district" disabled></select></div>
+        <div><label for="profile-station">站点</label><select id="profile-station" disabled></select></div>
+        <div><label for="profile-dsp">DSP</label><select id="profile-dsp" disabled><option value="">全部 DSP</option></select></div>
+        <div id="profile-date-field" hidden><label for="profile-date">日期</label><select id="profile-date" disabled></select></div>
       </div>
-      <div class="profile-data-card">
-        <strong class="profile-snapshot"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5c0-4 18-4 18 0s-18 4-18 0Zm0 0v14c0 4 18 4 18 0V5 M3 12c0 4 18 4 18 0"/></svg>DMS 快照，非实时数据</strong>
-        <div id="profile-data-summary"></div>
-        <div id="map-data-actions"></div>
-      </div>
-      <section id="data-status" class="data-status" aria-label="数据状态"></section>
-      <div class="profile-summary"><dl class="metrics">
-        <div><dt><label for="profile-district">片区</label></dt><dd><select id="profile-district" disabled></select></dd></div>
-        <div><dt><label for="profile-station">站点</label></dt><dd><select id="profile-station" disabled></select></dd></div>
-        <div><dt><label for="profile-dsp">DSP</label></dt><dd><select id="profile-dsp" disabled><option value="">全部 DSP</option></select></dd></div>
-        <div id="profile-date-field" hidden><dt><label for="profile-date">日期</label></dt><dd><select id="profile-date" disabled></select></dd></div>
-        <div class="profile-metric"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l4 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0"/></svg><div><dt>更新时间</dt><dd id="updated">—</dd></div></div>
-        <div class="profile-metric"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m2 7 10-5 10 5-10 5Z M2 12l10 5 10-5 M2 17l10 5 10-5"/></svg><div><dt>线路总数</dt><dd id="total">—</dd></div></div>
-      </dl>
-      <div class="profile-zip-search">
-        <form id="profile-zip-form"><label for="profile-zip">ZIP</label><input id="profile-zip" inputmode="numeric" maxlength="5" autocomplete="off"><button type="submit">搜索</button></form>
-      </div></div>
-      <div id="profile-date-notice" class="view-date-notice" hidden><span id="profile-date-text"></span> · <button id="profile-date-latest" type="button">回到最新</button> · 首票价格为当前报价</div>
-      <div id="profile-zip-result" role="status" aria-live="polite"></div>
+      <div class="profile-toolbar-actions"><span class="snapshot">DMS 快照，非实时 · 数据更新时间 <span id="updated">—</span></span><div id="profile-data-summary" hidden></div><div id="map-data-actions"></div></div>
     </header>
-    <section class="panel" aria-label="线路画像" aria-busy="true" id="profiles">
-      <div class="status" role="status" aria-live="polite">
-        <p id="message">加载中…</p>
-        <button id="retry" type="button" hidden>重试</button>
+    <div class="profile-layout">
+      <aside class="profile-sidebar" aria-label="线路">
+        <h2>线路 <small id="total">—</small></h2>
+        <form id="profile-zip-form"><label for="profile-zip" class="sr-only">搜索线路编号或邮编</label><input id="profile-zip" placeholder="搜索线路编号或邮编" autocomplete="off"><button type="submit">搜索</button></form>
+        <div id="profile-zip-result" role="status" aria-live="polite"></div>
+        <div class="profile-sort" role="group" aria-label="线路排序">
+          <button id="sort-name" type="button" aria-pressed="true">线路名<span aria-hidden="true"></span></button>
+          <button id="sort-pickup_volume" type="button" aria-pressed="false">件量<span aria-hidden="true"></span></button>
+          <button id="sort-pph" type="button" aria-pressed="false">PPH<span aria-hidden="true"></span></button>
+          <button id="sort-price" type="button" aria-pressed="false" title="首票价格 0–1(lb) / Quotation for the First Parcel 0–1(lb)">首票价格<span aria-hidden="true"></span></button>
+          <button id="sort-route_difficulty" type="button" aria-pressed="false">难度<span aria-hidden="true"></span></button>
+        </div>
+        <section id="profiles" aria-label="线路列表" aria-busy="true">
+          <div class="status" role="status" aria-live="polite"><p id="message">加载中…</p><button id="retry" type="button" hidden>重试</button></div>
+          <div id="profile-routes"></div>
+        </section>
+      </aside>
+      <div class="profile-detail-pane">
+        <div class="profile-banners">
+          <section id="data-status" class="data-status" aria-label="数据状态"></section>
+          <div id="profile-date-notice" class="view-date-notice" hidden><span id="profile-date-text"></span> · <button id="profile-date-latest" type="button">回到最新</button> · 首票价格为当前报价</div>
+        </div>
+        <section id="route-detail" aria-labelledby="detail-title">
+          <div class="detail-heading pl-heading"><span id="detail-swatch" aria-hidden="true"></span><h2 id="detail-title">线路详情</h2><span id="detail-difficulty"></span><p id="detail-summary"></p></div>
+          <div id="detail-content" aria-live="polite"></div>
+        </section>
       </div>
-      <div class="table-scroll" id="table-container" hidden tabindex="0" role="region" aria-label="线路画像表">
-        <table>
-          <caption class="sr-only">所选站点最新 DMS 快照中的线路画像</caption>
-          <thead><tr>
-            <th scope="col">线路名称</th><th scope="col">DSP</th>
-            <th scope="col" class="numeric" aria-sort="none"><button id="sort-pickup_volume" type="button" class="sort-button">Pickup Volume<span class="sr-only" aria-hidden="true">↕</span><svg class="sort-arrow" viewBox="0 0 12 20" aria-hidden="true"><path class="sort-up" d="m6 2 5 6H1Z"/><path class="sort-down" d="m6 18 5-6H1Z"/></svg></button></th><th scope="col" class="numeric" aria-sort="none"><button id="sort-pph" type="button" class="sort-button">PPH<span class="sr-only" aria-hidden="true">↕</span><svg class="sort-arrow" viewBox="0 0 12 20" aria-hidden="true"><path class="sort-up" d="m6 2 5 6H1Z"/><path class="sort-down" d="m6 18 5-6H1Z"/></svg></button></th>
-            <th scope="col" class="numeric price-column" aria-sort="none"><button id="sort-price" type="button" class="sort-button" title="首票价格 0–1(lb) / Quotation for the First Parcel 0–1(lb)">首票价格<span class="sr-only" aria-hidden="true">↕</span><svg class="sort-arrow" viewBox="0 0 12 20" aria-hidden="true"><path class="sort-up" d="m6 2 5 6H1Z"/><path class="sort-down" d="m6 18 5-6H1Z"/></svg></button></th>
-            <th scope="col" class="numeric">首公里距离 (mi)</th>
-            <th scope="col">线路难度</th>
-          </tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-    </section>
-    <dialog id="route-detail" aria-labelledby="detail-title">
-      <div class="detail-heading"><h2 id="detail-title">线路详情</h2><button id="detail-close" type="button" aria-label="关闭线路详情">关闭</button></div>
-      <div id="detail-content" aria-live="polite"></div>
-    </dialog>
+    </div>
     <noscript>请启用 JavaScript 以从本地服务器加载线路画像。</noscript>
   </main>
 </body>

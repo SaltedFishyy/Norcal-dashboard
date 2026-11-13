@@ -175,14 +175,10 @@ test('T7 frontend structure and safe rendering use no external resources', async
   const sources = await Promise.all(assets.map(([, filename]) => fs.readFile(path.join(webDir, filename), 'utf8')));
   const [html, css, app] = sources;
   assert.ok(html.includes('<title>美西线路画像</title>'));
-  assert.ok(html.includes('<h1>美西线路画像</h1>'));
-  assert.match(html, /West Region Route Profile/);
+  assert.ok(html.includes('<h1 class="sr-only">线路档案</h1>'));
   assert.match(html, /lang="zh-CN"/);
-  for (const label of ['站点', 'profile-station', 'profile-district', '更新时间', '线路总数', 'DMS 快照，非实时数据',
-    '线路名称', 'DSP', 'Pickup Volume', 'PPH', '首公里距离 (mi)', '线路难度', '首票价格', '重试', '线路地图', '关闭']) {
-    assert.ok(html.includes(label), label);
-  }
-  assert.equal((html.match(/<th scope=/g) || []).length, 7);
+  for (const id of ['profile-station', 'profile-district', 'updated', 'total', 'profile-dsp', 'profile-zip-form', 'profile-zip-result', 'profile-routes', 'route-detail', 'detail-content']) assert.ok(html.includes(`id="${id}"`));
+  assert.doesNotMatch(html, /<table>|<dialog id="route-detail"/);
   assert.match(html, /<script type="module" src="\/app.js"><\/script>/);
   assert.doesNotMatch(html, /style=|<script(?![^>]*src=)/);
   for (const source of sources) assert.doesNotMatch(source, /https?:\/\/|Daily Volume/);
@@ -207,8 +203,9 @@ test('T7 app renders API order and text safely, and handles retries and failures
     setAttribute(name, value) { this.attributes[name] = value; }
     removeAttribute(name) { delete this.attributes[name]; if (name === 'title') delete this.title; }
     addEventListener(name, handler) { this.listeners[name] = handler; }
+    scrollIntoView() {}
   }
-  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district']
+  const elements = Object.fromEntries(['updated', 'total', 'profile-routes', 'route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'message', 'retry', 'profiles', 'profile-station', 'profile-district']
     .map((id) => [id, new Element()]));
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const previousFetch = globalThis.fetch;
@@ -227,6 +224,8 @@ test('T7 app renders API order and text safely, and handles retries and failures
   const pending = new Promise((resolve) => { release = resolve; });
   let requests = 0;
   globalThis.fetch = async (url, options) => {
+    if (url.startsWith('/api/route-history')) return { status: 200, json: async () => ({ available: false }) };
+    if (url.startsWith('/api/route-details')) return { status: 200, json: async () => ({ zips: [] }) };
     if (url !== '/api/districts') requests++;
     if (url === '/api/districts') return { status: 200, json: async () => (districtReply(['MOCKA', 'MOCKB'])) };
     assert.equal(url, `/api/route-profiles?station=${elements['profile-station'].value}`);
@@ -242,63 +241,55 @@ test('T7 app renders API order and text safely, and handles retries and failures
   const iso = '2026-10-01T18:20:35Z';
   const malicious = '<img src=x onerror=alert(1)>';
   reply = { status: 200, json: async () => ({ fetched_at: iso, total: 2, rows: [
-    { route_name: 'Mock Z', dsp_name: malicious, pickup_volume: 12345, pph: 2.345,
-      first_mile_distance: 1.2, route_difficulty: 'S', route_difficulty_manual: null },
-    { route_name: 'Mock A', dsp_name: '', pickup_volume: null, pph: null },
+    { route_id: 1, route_name: 'Mock Z', dsp_name: malicious, pickup_volume: 12345, pph: 2.345,
+      first_mile_distance: 1.2, route_difficulty: 'S级 极难', route_difficulty_manual: null },
+    { route_id: 2, route_name: 'Mock A', dsp_name: '', pickup_volume: null, pph: null },
   ] }) };
   release();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(elements['table-container'].hidden, false);
+  assert.equal(elements.profiles.attributes['aria-busy'], 'false');
   assert.equal(elements.updated.title, iso);
   assert.equal(elements.updated.textContent, formatUpdated(iso));
-  assert.equal(elements.total.textContent, '2');
-  const rendered = elements.rows.children;
+  assert.equal(elements.total.textContent, '2 \u6761');
+  const rendered = elements['profile-routes'].children;
   assert.equal(rendered.length, 2);
-  assert.deepEqual(rendered[0].children.slice(0, 6).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
-    ['Mock Z', malicious, '12,345', '2.35', '—', '1.20']);
-  assert.equal(rendered[0].children[6].children[0].textContent, 'S');
-  assert.equal(rendered[0].children.length, 7);
-  assert.equal(rendered[1].children[0].children[0].textContent, 'Mock A');
-  assert.equal(rendered[1].children[1].textContent, '—');
+  assert.equal(rendered[0].children[1].children[0].textContent, 'Mock Z');
+  assert.ok(rendered[0].children[1].children[1].textContent.startsWith(malicious));
+  assert.deepEqual(rendered[0].children[2].children.map(cell => cell.textContent), ['2.35', '12,345']);
+  assert.equal(rendered[0].children[3].textContent, 'S');
+  assert.equal(rendered[0].children.length, 5);
+  assert.equal(rendered[1].children[1].children[0].textContent, 'Mock A');
   for (const value of [null, undefined, '']) {
     reply = { status: 200, json: async () => ({ total: 1, rows: [{
       route_name: 'SFO02-042', pickup_volume: 1150, pph: 30, first_mile_distance: 3.9,
       route_difficulty: value, route_difficulty_manual: value,
     }] }) };
     await elements.retry.listeners.click();
-    const cells = elements.rows.children[0].children;
-    assert.deepEqual(cells.slice(0, 6).map((cell, i) => i === 0 ? cell.children[0].textContent : cell.textContent),
-      ['SFO02-042', '—', '1,150', '30.00', '—', '3.90']);
-    for (const cell of cells.slice(6)) {
-      assert.equal(cell.textContent, '—');
-      assert.equal(cell.children.length, 0);
-    }
+    const cells = elements['profile-routes'].children[0].children;
+    assert.equal(cells[1].children[0].textContent, 'SFO02-042');
+    assert.deepEqual(cells[2].children.map(cell => cell.textContent), ['30.00', '1,150']);
+    assert.equal(cells[3].textContent, '\u2014');
+    assert.equal(cells[3].children.length, 0);
   }
   reply = { status: 200, json: async () => ({ total: 1, rows: [{
     pickup_volume: null, pph: null, first_mile_distance: null,
     route_difficulty: 'A级 难', route_difficulty_manual: 'B级 中',
   }] }) };
   await elements.retry.listeners.click();
-  const cells = elements.rows.children[0].children;
-  assert.deepEqual(cells.slice(2, 5).map((cell) => cell.textContent), ['—', '—', '—']);
-  for (const [index, expected] of [[6, 'A级 难']]) {
-    assert.equal(cells[index].children.length, 1);
-    assert.equal(cells[index].children[0].className, 'difficulty system-difficulty');
-    if (index === 6) assert.equal(cells[index].children[0].style.backgroundColor, difficultyColor(difficultyLevel(expected)));
-    assert.equal(cells[index].children[0].textContent, expected);
-  }
+  const cells = elements['profile-routes'].children[0].children;
+  assert.deepEqual(cells[2].children.map(cell => cell.textContent), ['\u2014', '\u2014']);
+  assert.equal(cells[3].textContent, 'A');
+  assert.equal(cells[3].style.backgroundColor, difficultyColor('A'));
   for (const [value, tone] of [['D级 极易', 'easy'], ['C级 易', 'easy'], ['B级 中', 'medium'],
     ['A级 难', 'hard'], ['S级 极难', 'hard'], ['unknown', 'unknown']]) {
     reply = { status: 200, json: async () => ({ total: 1, rows: [{
       route_difficulty: value, route_difficulty_manual: value,
     }] }) };
     await elements.retry.listeners.click();
-    for (const [index, cell] of elements.rows.children[0].children.slice(6, 7).entries()) {
-      assert.equal(cell.children.length, 1);
-      assert.equal(cell.children[0].className, index === 1 ? `difficulty tone-${tone}` : 'difficulty system-difficulty');
-      if (index === 0) assert.equal(cell.children[0].style.backgroundColor, difficultyColor(difficultyLevel(value)));
-      assert.equal(cell.children[0].textContent, value);
-    }
+    const cell = elements['profile-routes'].children[0].children[3];
+    assert.equal(cell.children.length, 0);
+    assert.equal(cell.style.backgroundColor, difficultyColor(difficultyLevel(value)));
+    assert.equal(cell.textContent, difficultyLevel(value) || '\u2014');
   }
   for (const failure of [
     { status: 404, json: async () => ({ error: 'snapshot_not_found' }) },
@@ -308,9 +299,9 @@ test('T7 app renders API order and text safely, and handles retries and failures
   ]) {
     reply = failure;
     await elements.retry.listeners.click();
-    assert.equal(elements['table-container'].hidden, true);
+    assert.equal(elements.profiles.attributes['aria-busy'], 'false');
     assert.equal(elements.retry.hidden, false);
-    assert.equal(elements.rows.children.length, 0);
+    assert.equal(elements['profile-routes'].children.length, 0);
     assert.doesNotMatch(elements.message.textContent, /secret|stack|private-path/);
   }
   assert.equal(requests, 15);
@@ -319,8 +310,8 @@ test('T7 app renders API order and text safely, and handles retries and failures
   elements['profile-station'].value = 'MOCKB';
   reply = { status: 200, json: async () => ({ total: 0, rows: [] }) };
   await elements['profile-station'].listeners.change();
-  assert.equal(requestedStations.at(-1), 'MOCKB'); assert.equal(elements.rows.children.length, 0);
-  assert.equal(elements.total.textContent, '0'); assert.equal(elements.retry.hidden, false);
+  assert.equal(requestedStations.at(-1), 'MOCKB'); assert.equal(elements['profile-routes'].children.length, 0);
+  assert.equal(elements.total.textContent, '0 \u6761'); assert.equal(elements.retry.hidden, false);
 });
 
 test('MS-T2 Profile URL priority, first Station fallback and Station-list retry states', async t => {
@@ -339,7 +330,7 @@ test('MS-T2 Profile URL priority, first Station fallback and Station-list retry 
     ['?station=ABSENT', ['MOCKA', 'MOCKB'], false, 'MOCKA'],
     ['', [], false, null], ['', [], true, null],
   ]) {
-    const elements = Object.fromEntries(['updated','total','rows','table-container','message','retry','profiles','profile-station', 'profile-district'].map(id => [id,new Element()]));
+    const elements = Object.fromEntries(['updated','total','profile-routes','route-detail','detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary','message','retry','profiles','profile-station', 'profile-district'].map(id => [id,new Element()]));
     globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
     globalThis.location = { search }; const urls = [];
     globalThis.fetch = async url => { urls.push(url); if (failure) throw new Error('private');
@@ -361,7 +352,7 @@ test('MS-T2b Profile restores shared preference and saves only manual Station ch
     }
   });
   class Element {
-    constructor() { this.children = []; this.listeners = {}; }
+    constructor() { this.children = []; this.listeners = {}; this.style = {}; }
     append(...children) { this.children.push(...children); }
     replaceChildren() { this.children = []; }
     setAttribute() {} removeAttribute() {}
@@ -378,7 +369,7 @@ test('MS-T2b Profile restores shared preference and saves only manual Station ch
   };
   let run = 0;
   for (const [search, expected] of [['', 'SMF01'], ['', 'RNO01'], ['?station=SFO01', 'SFO01']]) {
-    const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
+    const elements = Object.fromEntries(['updated', 'total', 'profile-routes', 'route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
     globalThis.document = { getElementById: id => elements[id], createElement: () => new Element(), createDocumentFragment: () => new Element() };
     globalThis.location = { search };
     await import(`../../web/app.js?station-preference=${run++}`);
@@ -399,8 +390,8 @@ test('DS Profile district changes filter stations, disable missing snapshots and
   const originals = { document: globalThis.document, location: globalThis.location, fetch: globalThis.fetch };
   const savedStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   t.after(() => { for (const [key, value] of Object.entries(originals)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } if (savedStorage) Object.defineProperty(globalThis, 'localStorage', savedStorage); else delete globalThis.localStorage; });
-  class Element { constructor() { this.children = []; this.listeners = {}; } append(...children) { this.children.push(...children); } replaceChildren() { this.children = []; } setAttribute() {} removeAttribute() {} addEventListener(name, handler) { this.listeners[name] = handler; } }
-  const elements = Object.fromEntries(['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
+  class Element { constructor() { this.children = []; this.listeners = {}; this.style = {}; } append(...children) { this.children.push(...children); } replaceChildren() { this.children = []; } setAttribute() {} removeAttribute() {} addEventListener(name, handler) { this.listeners[name] = handler; } }
+  const elements = Object.fromEntries(['updated', 'total', 'profile-routes', 'route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map(id => [id, new Element()]));
   globalThis.document = { getElementById: id => elements[id], createElement: () => new Element() };
   globalThis.location = { search: '' };
   const values = new Map([['nc-ops-console.selection', JSON.stringify({ district: 'one', station: 'SFO01' })], ['nc-ops-console.map-scope', 'district']]), writes = [], requests = [];

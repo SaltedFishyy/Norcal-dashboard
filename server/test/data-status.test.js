@@ -257,7 +257,7 @@ test('RM13b both headers share one brand definition and map timestamp explains t
   page.dispose(); h.page.dispose();
 });
 
-test('RM13c profile freshness summary is in the card and details remain in history', async () => {
+test('RM13c profile freshness summary keeps its compatibility host and details remain in history', async () => {
   const h = fixture({ profilePage: true }); await h.page.start();
   assert.match(h.summary.textContent, /Last Updated/);
   assert.ok(h.summary.textContent.includes(formatUpdated(iso)));

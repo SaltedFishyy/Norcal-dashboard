@@ -137,7 +137,7 @@ test('SC1-11 map selectors extend from real config and restore Northern Californ
 test('SC1-11 Route Profile selectors extend from real config and handle empty snapshots', async t => {
   const previous = Object.fromEntries(['document', 'fetch', 'localStorage'].map(key => [key, globalThis[key]]));
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; } });
-  const ids = ['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district', 'route-detail', 'detail-content', 'detail-close', 'detail-title'];
+  const ids = ['updated', 'total', 'profile-routes', 'route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'message', 'retry', 'profiles', 'profile-station', 'profile-district', 'route-detail', 'detail-content', 'detail-close', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary'];
   const e = Object.fromEntries(ids.map(id => [id, new Element()]));
   globalThis.document = { getElementById: id => e[id], createElement: tag => new Element(tag), createDocumentFragment: () => new Element() };
   globalThis.localStorage = { getItem: () => null, setItem: () => {} };

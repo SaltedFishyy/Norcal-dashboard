@@ -153,7 +153,73 @@ Claude 2026-11-12 决定（ML-Q3，Product Owner 可改）：手机宽度下顶�
 
 T1 → T2 → T3 顺序执行，每步 review 后再进行下一步。
 
+## 11. Phase 2 — 列表字号、悬停领件量、线路编号开关（ML-P2，**Done**，Product Owner 2026-11-12 批准；ML-T4 经 Claude review 通过，Product Owner 2026-11-12 预览签字并批准提交）
+
+Product Owner 2026-11-12 在线路档案改成方案 B 字号后提出三项要求（“线路地图左边也改成和线路档案一样的。然后我希望领件量也可以放在地图上的 hover 上面，然后地图上的线路黑色数字改成可以开关的”）。三项都只改前端，需要的数据已经在 `/api/route-map*` 里，不改 API、数据或依赖，不新增 web 文件。
+
+### P2-A 左侧线路列表字号同步方案 B
+
+与线路档案 PL-G（`docs/features/profile-layout.md`）的列表部分一致：
+
+- 侧栏宽度 370px → 390px。
+- 行：最小高度 72px，内边距 9px 10px，元素间距 10px。
+- 线路名 17px / 700。
+- 第二行 13px。
+- PPH 19px / 700 白色；件量 15px / 600 `#dbe4f0`；单位 12px。
+- 难度徽章 32px、15px、圆角 6px。
+
+实现要求：
+
+- 两页共用同一份列表行字号规则，或用共享类名，不要两份数值。
+- PPH / 件量用明确类名，不用 `:first-child`。
+- 地图浮层的 `right` / `left` 偏移、`.map-banners` 的 `right` 等如果依赖侧栏宽度，一并调整，保证仍然一屏、不遮挡。
+- 解决 PL-Q4。
+
+### P2-B 悬停提示显示 ZIP 日均领件量
+
+- 地图 ZIP 色块的 tooltip（`zipDetails`）在“DSP”和“首票价格”之间（或末尾，以布局自然为准）增加一行：“领件量（日均）”+ 该 ZIP 的 `pickup_volume_daily`，格式与线路档案 ZIP 表一致（整数、千分位），单位“件”。
+- Product Owner 选择**只显示 ZIP 日均**，不显示线路 Pickup Volume。
+- 值为空（ZIP 详情缺失或该 ZIP 不在详情中）时显示 `—`。
+- 文案放 `map-text.js`，复用已有的 `pickupDaily`。
+- 只改 tooltip 内容；tooltip 的触发、定位、样式不变。
+
+### P2-C 线路编号开关
+
+- 在右上角图例面板（按线路模式）加一个开关：“显示线路编号”，默认**开**。
+- 只在“按线路”着色模式下显示。其他模式本来就不显示编号，开关隐藏。
+- 关闭时隐藏全部线路编号标签；打开时恢复现有的显示规则（缩放分级、避让、outside 隐藏等全部不变）。
+- 用一个控制类或复用现有的 `route-label--hidden` 机制，不要销毁 / 重建标签导致性能问题。
+- 选择记在浏览器 `localStorage`（键如 `nc-ops-map-route-labels`，读写都 try/catch，存储不可用时默认开）。这是每个浏览器自己的偏好，不同步给其他人。
+- 开关是真正的 `<input type="checkbox">`（或带 `role="switch"` 的按钮），键盘可用，有可读标签。
+- 切换不触发数据请求，不改变选择状态。
+
+### P2-D 验收标准
+
+- **ML-P2-AC1** `/map` 列表行的计算样式与线路档案一致（线路名 17/700、PPH 19/700、件量 15、徽章 32、侧栏 390）。1920×1080、1440×900、1366×768 仍一屏、无横向滚动；浮层不与侧栏重叠。
+- **ML-P2-AC2** 悬停任一 ZIP，tooltip 有“领件量（日均）”一行，数值等于该 ZIP 的 `pickup_volume_daily`，空值显示 `—`；其他行不变。
+- **ML-P2-AC3** 按线路模式下有“显示线路编号”开关，默认开；关闭后所有编号消失，缩放、平移、选中线路后仍保持关闭；再打开恢复原规则；刷新页面后保持上次选择；其他着色模式不显示开关。
+- **ML-P2-AC4** 现有地图行为（选择、过滤、着色、搜索、仓库、日期、图例内容）不变；`npm test` 全部通过；`git diff --check` 通过。
+- **ML-P2-AC5** Chromium 截图：北加片区 SFO01 按线路（开 / 关编号）、tooltip 含领件量、按 DSP 模式（无开关），console / pageerror 为 0，浏览器按 handoff 第 8 节关闭并检查无残留。
+- **ML-P2-AC6** Claude 检查，Product Owner 预览签字。
+
+### P2-E 任务
+
+| 任务 | 内容 | 授权 |
+|---|---|---|
+| ML-T4 | P2-A + P2-B + P2-C | Product Owner 2026-11-12（“线路地图左边也改成和线路档案一样的……能理解吗” → “只显示 ZIP 日均”） |
+
 ## 10. 实现记录（Implementation Notes）
+
+### ML-T4（2026-11-12）
+
+- 接续 PL-T1～T5 未提交工作，仅实现 ML-P2-A/B/C。两页列表共用行尺寸、线路名、第二行、PPH、件量、单位与徽章规则；地图侧栏改为 390px，指标增加 `map-route-pph` / `map-route-pickup` 类，原 aria-label 不变。档案列表的计算样式保持不变。
+- ZIP tooltip 在 DSP 后、首票价格前增加日均领件量，复用 `formatNumber`、`pickupDaily` 和 `pieceUnit`；整数千分位加“件”，缺失值只显示 `—`。未增加线路领件量。
+- 图例在线路模式增加带包裹 label 的原生 checkbox，支持键盘。偏好由 map-view.js 集中读取和保存到 `nc-ops-map-route-labels`，存储读写均捕获异常，读取失败默认开。通过 pane 的 `route-labels--disabled` 控制可见性，不销毁或重建标签；重新打开沿用原分级、避让、outside 规则。其他模式移除开关；切换不请求数据、不改变选择。
+- 浮层位于 `.map-canvas` 内，其偏移相对地图而非整页，故保留现有横幅 right、覆盖率 left 和详情卡 max-width。Playwright 实测 1920×1080、1440×900、1366×768 的 scrollWidth / scrollHeight 分别等于视口；侧栏 390px，线路名 17/700、PPH 19/700 白色、件量 15/600、第二行 13px、徽章 32px。选中线路并展开覆盖率后，侧栏、模式、图例、详情卡、覆盖率、署名、缩放及横幅矩形两两相交为空。
+- 浏览器验证编号默认开、键盘关闭、关闭时切换零请求、缩放及选中后保持关闭、刷新后保持、重新打开、ZIP tooltip 和 DSP 模式无开关；console / pageerror 为 0。复用 PL-T5 浏览器脚本检查档案与地图六组视口，原方案 B 计算样式断言全部通过。测试脚本均有 try/finally 和 55 秒硬超时，结束后 Get-Process 检查无 chrome-headless 残留，未停止其他浏览器或服务。
+- 新增单元测试覆盖共享规则、ZIP 数值/零/缺失、存储读写与异常、标签身份保留、缩放/平移/换站点、其他模式隐藏及零请求。原 tooltip 四行断言改为五行，图例状态断言限定原三行并单独验证开关；未删除原行为断言。截图 `.handoff/ML-T4-labels-on.png`、`ML-T4-labels-off.png`、`ML-T4-tooltip.png`、`ML-T4-dsp.png` 和三个桌面尺寸截图；矩形与样式报告 `.handoff/ML-T4-browser.json`。
+- 检查：`npm.cmd test` 884/884 通过，0 failed、0 skipped；`git diff --check` 通过，仅 LF/CRLF 提醒。无 lint 配置或 build 命令。ML-P2-AC1～AC5 的实现和自动化检查满足；Claude review 与 Product Owner 预览签字（AC6）待进行。
+- 无 API、数据、DB、抓取或依赖变更，无新增 web 文件；未读取 `.env` 或 runtime 配置（测试命令沿用既有环境加载机制），未写入凭据，未重启服务、commit、push 或部署。
 
 ### ML-T1（2026-11-12）
 

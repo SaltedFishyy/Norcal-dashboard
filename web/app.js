@@ -1,14 +1,13 @@
 import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNavLinks } from './date-view.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
-import { formatValue, formatNumber, formatUpdated, formatPriceRange, pageState, difficultyTone, sortRows, dspOptions } from './format.js';
-import { openPriceDetail } from './price-detail.js';
-import { openRouteDetail } from './route-detail.js';
+import { formatValue, formatNumber, formatUpdated, formatPriceRange, pageState, profileText, sortRows, dspOptions } from './format.js';
+import { routeColor } from './route-colors.js';
+import { openRouteDetail, clearRouteDetail } from './route-detail.js';
 import { chooseSelection, readSelection, saveSelection, populateDistricts, populateStations } from './station-preference.js';
 
 const updated = document.getElementById('updated');
 const total = document.getElementById('total');
-const rows = document.getElementById('rows');
-const table = document.getElementById('table-container');
+const rows = document.getElementById('profile-routes');
 const message = document.getElementById('message');
 const retry = document.getElementById('retry');
 const profiles = document.getElementById('profiles');
@@ -55,8 +54,8 @@ async function loadDays() {
   }
 }
 async function changeDate(date) {
-  setViewDate(date); invalidateZip();
-  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
+  setViewDate(date); invalidateZip(); localFilter = ''; if (zipInput) zipInput.value = '';
+  clearRouteDetail();
   if (dateSelect) dateSelect.value = date || '';
   return load();
 }
@@ -66,48 +65,77 @@ updateDateView();
 let dsp = null;
 let districts = [], selected = {}, stationsLoaded = false, sequence = 0;
 let renderedData, pendingLoad, renderedRows = new Map(), zipSequence = 0;
+let selectedRoute = null, localFilter = '', highlightedRoute = null;
+let detailZip = null, detailNeedsRefresh = false;
 const zipForm = document.getElementById('profile-zip-form');
 const zipInput = document.getElementById('profile-zip');
 const zipResult = document.getElementById('profile-zip-result');
 const zipButton = zipForm?.querySelector('button');
 let sort = { key: null, dir: 'desc' };
-const sortControls = ['pickup_volume', 'pph', 'price'].map(key => ({ key, button: document.getElementById('sort-' + key) }));
+const sortControls = [null, 'pickup_volume', 'pph', 'price', 'route_difficulty'].map(key => ({ key, button: document.getElementById('sort-' + (key || 'name')) }));
 function updateSortHeaders() {
   for (const { key, button } of sortControls) {
     if (!button) continue;
     const active = sort.key === key;
-    button.parentNode.setAttribute('aria-sort', active ? (sort.dir === 'desc' ? 'descending' : 'ascending') : 'none');
+    button.setAttribute('aria-pressed', String(active));
     button.className = active ? 'sort-button active' : 'sort-button';
-    button.querySelector('span').textContent = active ? (sort.dir === 'desc' ? '↓' : '↑') : '↕';
+    button.querySelector('span').textContent = active && key ? (sort.dir === 'desc' ? '↓' : '↑') : '';
   }
 }
 for (const { key, button } of sortControls) button?.addEventListener('click', () => {
   sort = sort.key !== key ? { key, dir: 'desc' } : sort.dir === 'desc' ? { key, dir: 'asc' } : { key: null, dir: 'desc' };
   updateSortHeaders();
   if (renderedData) {
-    const highlighted = [...renderedRows].find(([, target]) => target.tr.className === 'zip-target-row')?.[0];
     render(pageState({ status: 200, data: renderedData }), renderedData);
-    if (highlighted) renderedRows.get(highlighted).tr.className = 'zip-target-row';
   }
 });
 updateSortHeaders();
-const columns = [
-  ['route_name'], ['dsp_name'], ['pickup_volume', 'numeric', 0], ['pph', 'numeric', 2],
-  ['price'], ['first_mile_distance', 'numeric', 2], ['route_difficulty', 'difficulty'],
-];
+function node(tag, text, className) {
+  const el = document.createElement(tag);
+  if (text !== undefined) el.textContent = text;
+  if (className) el.className = className;
+  return el;
+}
+function syncSelection() {
+  for (const [id, { button }] of renderedRows) button.setAttribute('aria-pressed', String(id === selectedRoute));
+}
+function selectRoute(id, options = {}) {
+  const target = renderedRows.get(String(id));
+  if (!target) return;
+  const changed = selectedRoute !== String(id);
+  selectedRoute = String(id); syncSelection();
+  if (globalThis.matchMedia?.('(max-width: 750px)').matches) {
+    // Keep automatic selections inside the list without moving the page.
+    const listRect = rows.getBoundingClientRect(), rowRect = target.button.getBoundingClientRect();
+    if (rowRect.top < listRect.top) rows.scrollTop += rowRect.top - listRect.top;
+    else if (rowRect.bottom > listRect.bottom) rows.scrollTop += rowRect.bottom - listRect.bottom;
+  } else target.button.scrollIntoView({ block: 'nearest' });
+  if (changed || detailNeedsRefresh || options.highlightZip) {
+    detailNeedsRefresh = false; detailZip = options.highlightZip || null;
+    return openRouteDetail(target.row, target.button, renderedData.fetched_at, { date: viewDate, ...options });
+  }
+}
+zipInput?.addEventListener('input', () => {
+  localFilter = zipInput.value.trim().toLowerCase();
+  invalidateZip(); clearZipHighlight();
+  if (renderedData) render(pageState({ status: 200, data: renderedData }), renderedData);
+});
 
 function render(result, data) {
   if (dspSelect) dspSelect.disabled = true;
   message.textContent = viewDate && data?.empty === true ? '该日无数据' : result.message;
   profiles.setAttribute('aria-busy', String(result.state === 'loading'));
   retry.hidden = result.state !== 'error' && result.state !== 'empty';
-  table.hidden = result.state !== 'success';
   rows.replaceChildren();
   renderedData = undefined; renderedRows = new Map();
   updated.textContent = '—';
   updated.removeAttribute('title');
   total.textContent = '—';
-  if (result.state !== 'success' && !(result.state === 'empty' && data?.rows)) return;
+  if (result.state !== 'success') {
+    selectedRoute = null; highlightedRoute = null;
+    clearRouteDetail(message.textContent);
+    if (!(result.state === 'empty' && data?.rows)) return;
+  }
   updated.textContent = formatUpdated(data.fetched_at);
   if (updated.textContent !== '—') updated.title = data.fetched_at;
   const options = dspOptions(data.rows);
@@ -121,54 +149,52 @@ function render(result, data) {
     }
     dspSelect.value = dsp || ''; dspSelect.disabled = false;
   }
-  const visibleRows = data.rows.filter(row => dsp === null || (typeof row.dsp_name === 'string' && row.dsp_name.trim() === dsp));
-  total.textContent = dsp === null ? formatNumber(data.total) : `${formatNumber(visibleRows.length)} / ${formatNumber(data.total)}`;
+  const dspRows = data.rows.filter(row => dsp === null || (typeof row.dsp_name === 'string' && row.dsp_name.trim() === dsp));
+  const visibleRows = dspRows.filter(row => !localFilter || String(row.route_name || '').toLowerCase().includes(localFilter)
+    || row.postal_codes?.some(zip => String(zip).startsWith(localFilter)));
+  total.textContent = (dsp === null ? formatNumber(data.total) : `${formatNumber(dspRows.length)} / ${formatNumber(data.total)}`) + ' 条';
   renderedData = data;
   if (result.state !== 'success') return;
   const fragment = document.createDocumentFragment();
+  const maxVolume = Math.max(0, ...visibleRows.map(row => Number.isFinite(row.pickup_volume) ? row.pickup_volume : 0));
   for (const row of sortRows(visibleRows, sort)) {
-    const tr = document.createElement('tr');
-    tr.setAttribute('data-route-id', String(row.route_id));
-    renderedRows.set(String(row.route_id), { row, tr });
-    for (const [field, style, digits] of columns) {
-      if (field === 'price') {
-        const price = document.createElement('td'); price.className = 'numeric price-column';
-        price.textContent = '—';
-        if (row.quoted_zip_count > 0) {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'route-link price-link';
-          button.textContent = formatPriceRange(row.current_first_0_1lb_price_min, row.current_first_0_1lb_price_max);
-          button.addEventListener('click', () => openPriceDetail(row, button));
-          price.textContent = ''; price.append(button);
-        }
-        tr.append(price);
-        continue;
-      }
-      const td = document.createElement('td');
-      const value = row?.[field];
-      if (style === 'numeric') td.className = 'numeric';
-      const hasDifficulty = style === 'difficulty' && value !== null && value !== undefined && value !== '';
-      const isRoute = field === 'route_name';
-      const content = isRoute ? document.createElement('button') : hasDifficulty ? document.createElement('span') : td;
-      if (isRoute) {
-        content.type = 'button'; content.className = 'route-link';
-        renderedRows.get(String(row.route_id)).button = content;
-        content.addEventListener('click', () => openRouteDetail(row, content, data.fetched_at, { date: viewDate })); td.append(content);
-      }
-      if (hasDifficulty) {
-        content.className = field === 'route_difficulty_manual' ? `difficulty tone-${difficultyTone(value)}` : 'difficulty system-difficulty';
-        if (field === 'route_difficulty') {
-          const level = difficultyLevel(value);
-          content.style.backgroundColor = difficultyColor(level);
-          content.style.color = ['B', 'D', null].includes(level) ? '#0f172a' : '#ffffff';
-        }
-        td.append(content);
-      }
-      content.textContent = style === 'numeric' ? formatNumber(value, digits, digits) : formatValue(value);
-      tr.append(td);
+    const id = String(row.route_id), color = routeColor(row.route_id);
+    const button = node('button', undefined, 'profile-route'); button.type = 'button';
+    button.setAttribute('data-route-id', id);
+    const swatch = node('span', undefined, 'profile-route-swatch'); swatch.style.backgroundColor = color;
+    const info = node('span', undefined, 'profile-route-info');
+    const owner = [formatValue(row.dsp_name), `${formatNumber(Array.isArray(row.postal_codes) ? row.postal_codes.length : null)} ZIP`];
+    if (row.quoted_zip_count > 0) owner.push(formatPriceRange(row.current_first_0_1lb_price_min, row.current_first_0_1lb_price_max));
+    info.append(node('strong', formatValue(row.route_name), 'profile-route-title'), node('small', owner.join(' · '), 'profile-route-owner'));
+    const values = node('span', undefined, 'profile-route-values');
+    for (const [value, label, className] of [[formatNumber(row.pph, 2, 2), 'PPH', 'profile-route-pph'], [formatNumber(row.pickup_volume, 0, 0), '件', 'profile-route-pickup']]) {
+      const metric = node('span', value, className); metric.append(node('small', label)); values.append(metric);
     }
-    fragment.append(tr);
+    const level = difficultyLevel(row.route_difficulty), badge = node('span', level || '—', 'profile-route-difficulty');
+    badge.style.backgroundColor = difficultyColor(level); badge.style.color = ['B', 'D', null].includes(level) ? '#0f172a' : '#ffffff';
+    badge.title = formatValue(row.route_difficulty);
+    const bar = node('span', undefined, 'profile-route-volume'); bar.setAttribute('aria-hidden', 'true');
+    bar.style.width = `${maxVolume > 0 && Number.isFinite(row.pickup_volume) ? Math.max(0, row.pickup_volume) / maxVolume * 100 : 0}%`;
+    bar.style.backgroundColor = color;
+    button.append(swatch, info, values, badge, bar);
+    if (id === highlightedRoute) button.className += ' zip-target-row';
+    renderedRows.set(id, { row, button });
+    button.addEventListener('click', () => {
+      invalidateZip(); clearZipHighlight();
+      const detail = selectRoute(id);
+      if (globalThis.matchMedia?.('(max-width: 750px)').matches) {
+        document.querySelector('.profile-detail-pane').scrollIntoView({
+          block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+        });
+      }
+      return detail;
+    });
+    fragment.append(button);
   }
   rows.append(fragment);
+  if (renderedRows.size) selectRoute(renderedRows.has(selectedRoute) ? selectedRoute : renderedRows.keys().next().value);
+  else rows.append(node('p', profileText.noMatchingRoutes));
+
 }
 
 function load() {
@@ -218,17 +244,19 @@ async function start() {
   } catch { if (current === sequence) render(pageState({ failed: true })); }
 }
 async function switchTo({ district, station }) {
+  localFilter = ''; if (zipInput) zipInput.value = '';
   selected = station === undefined
     ? chooseSelection({ districts, urlDistrict: district, saved: selected })
     : { district, station };
   districtSelect.value = selected.district;
   populateStations(document, stationSelect, districts.find(item => item.id === selected.district)); stationSelect.value = selected.station || '';
   saveSelection(undefined, selected);
-  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
+  clearRouteDetail();
   return loadStation();
 }
 function invalidateZip() {
   zipSequence++;
+  if (detailZip) { detailNeedsRefresh = true; detailZip = null; }
   if (zipButton) zipButton.disabled = false;
   if (zipResult) { zipResult.replaceChildren(); zipResult.className = ''; }
 }
@@ -245,7 +273,6 @@ dspSelect?.addEventListener('change', () => {
   dsp = dspSelect.value || null;
   invalidateZip();
   clearZipHighlight();
-  const dialog = document.getElementById('route-detail'); if (dialog?.open) dialog.close();
   if (renderedData) render(pageState({ status: 200, data: renderedData }), renderedData);
 });
 
@@ -254,7 +281,8 @@ function zipFeedback(text, error = false) {
   zipResult.className = error ? 'zip-error' : '';
 }
 function clearZipHighlight() {
-  for (const { tr } of renderedRows.values()) tr.className = '';
+  highlightedRoute = null;
+  for (const { button } of renderedRows.values()) button.className = 'profile-route';
 }
 async function locateZip(owner, data, zip, current) {
   if (current !== zipSequence) return;
@@ -266,6 +294,8 @@ async function locateZip(owner, data, zip, current) {
   if (current !== zipSequence) return;
   const row = renderedData?.rows.find(row => String(row.route_id) === String(owner.route_id));
   if (!row) { zipFeedback(viewDate ? '该日数据中找不到该线路' : '当前快照中找不到该线路'); return; }
+  localFilter = ''; zipInput.value = '';
+  render(pageState({ status: 200, data: renderedData }), renderedData);
   const parts = [`ZIP ${zip}`];
   for (const [label, value] of [['站点', owner.station], ['线路', owner.route_name], ['DSP', data.route?.dsp_name || data.dsp_name]]) {
     if (value !== null && value !== undefined && value !== '') parts.push(`${label} ${value}`);
@@ -290,10 +320,10 @@ async function highlightZipRoute(routeId, parts, zip, current) {
   const target = renderedRows.get(String(routeId));
   if (!target) { zipFeedback(viewDate ? '该日数据中找不到该线路' : '当前快照中找不到该线路'); return; }
   clearZipHighlight();
-  target.tr.className = 'zip-target-row';
-  target.tr.scrollIntoView({ block: 'center' });
+  highlightedRoute = String(routeId);
+  target.button.className = 'profile-route zip-target-row';
   zipFeedback(parts.join(' · '));
-  const detail = await openRouteDetail(target.row, target.button, renderedData.fetched_at, {
+  const detail = await selectRoute(routeId, {
     date: viewDate, highlightZip: zip, isCurrent: () => current === zipSequence,
   });
   if (current === zipSequence && detail?.highlightFound === false) {
@@ -304,8 +334,6 @@ zipForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const current = ++zipSequence, zip = zipInput.value.trim();
   clearZipHighlight();
-  const dialog = document.getElementById('route-detail');
-  if (dialog?.open) dialog.close();
   zipButton.disabled = false;
   if (!/^\d{5}$/.test(zip)) { zipFeedback('请输入 5 位 ZIP', true); return; }
   zipButton.disabled = true; zipFeedback('查询中…');

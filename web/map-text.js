@@ -4,6 +4,7 @@ import { formatUpdated } from './format.js';
 export const mapText = {
   coverageToggle: '地图覆盖率 · 缺少边界的邮编',
   coverageToggleValue: value => `覆盖率 ${value} · 缺少边界的邮编`,
+  showRouteLabels: '显示线路编号',
   pieceUnit: '件', routePickupVolume: '领件量',
   routeCount: count => `${count} 条线路`,
   firstPrice: '首票价格', priceDetail: '价格详情',

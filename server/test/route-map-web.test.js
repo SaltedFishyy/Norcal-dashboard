@@ -3,7 +3,7 @@ import { namedFlavor } from '@protomaps/basemaps';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { polygonStyle, selectRoute, POLYGON_STYLE, hoverStyle, uncoveredZipStyle } from '../../web/map-state.js';
-import { MAP_RENDER, basemaps, createMapView, ROUTE_LABEL, BASEMAP_FLAVOR, SERVICE_BOUNDS, serviceTile } from '../../web/map-view.js';
+import { MAP_RENDER, basemaps, createMapView, zipDetails, ROUTE_LABEL, BASEMAP_FLAVOR, SERVICE_BOUNDS, serviceTile } from '../../web/map-view.js';
 import { routeColor, palette } from '../../web/route-colors.js';
 import { buildRouteMap, lookupZip } from '../src/route-map/route-map.js';
 import { profiles, boundaries } from './route-map-fixtures.js';
@@ -652,7 +652,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.deepEqual(legend.children.slice(1).map(row => row.children[1].textContent), ['S 极难', 'A 难', 'B 中', 'C 易', 'D 极易', '无数据']);
   assert.deepEqual(legend.children.slice(1).map(row => row.children[0].style.backgroundColor), ['S', 'A', 'B', 'C', 'D', null].map(difficultyColor));
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('B'));
-  assert.equal(groups[0].layers[0].tooltip.children.length, 4);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 5);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[3].textContent), ['B', 'D']);
   assert.deepEqual(e['map-routes'].children.map(row => row.children[0].style.backgroundColor), [difficultyColor('B'), difficultyColor('D')]);
   assert.equal(map.fits.length, fits); assert.equal(requests.length, calls); assert.equal(groups.length, count);
@@ -661,7 +661,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   assert.equal(legend.children[0].textContent, '颜色：Mock-A 的 ZIP 难度');
   assert.equal(groups[0].layers[0].styles.at(-1).fillColor, difficultyColor('A'));
   assert.equal(groups[0].layers[1].styles.at(-1).fillColor, difficultyColor(null));
-  assert.equal(groups[0].layers[1].tooltip.children.length, 4);
+  assert.equal(groups[0].layers[1].tooltip.children.length, 5);
   assert.match(allText(e['map-summary']), /已有 1 个 ZIP/); // Cache row count, not profile ZIP count.
   assert.match(allText(e['map-selection']), /ZIP 难度 A级 难/);
   const highlight = groups.filter(group => !group.options.pane).at(-1).layers[0];
@@ -669,7 +669,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   mode.children[0].listeners.click();
   assert.equal(legend.hidden, false);
   assert.equal(highlight.styles.at(-1).fillColor, polygonStyle({route_id: 1}, selectRoute(1)).fillColor);
-  assert.equal(highlight.tooltip.children.length, 4);
+  assert.equal(highlight.tooltip.children.length, 5);
   mode.children[3].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
@@ -691,7 +691,7 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.match(allText(e['map-summary']), /暂无 ZIP 难度数据/);
   assert.doesNotMatch(allText(e['map-summary']), /npm run/);
   assert.ok(groups[0].layers.every(layer => layer.styles.at(-1).fillColor === '#9ca3af'));
-  assert.equal(groups[0].layers[0].tooltip.children.length, 4);
+  assert.equal(groups[0].layers[0].tooltip.children.length, 5);
   const { details } = await import('./route-map-fixtures.js');
   const cache = details(); cache.routes['1'].zips[0].postal_code_difficulty = null;
   const updated = buildRouteMap({ profiles: profiles(), boundaries: boundaries(), station: 'MOCKA', details: cache });
@@ -699,7 +699,7 @@ test('RM5 missing, null, absent ZIP and invalid-cache messages do not inherit ro
   assert.doesNotMatch(e['map-message'].textContent, /文件无效/);
   const current = groups.at(-1).layers;
   current[0].listeners.click({});
-  assert.equal(current[0].tooltip.children.length, 4);
+  assert.equal(current[0].tooltip.children.length, 5);
   assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
   current[1].listeners.click({});
   assert.equal(e['map-selection'].children[1].children[3].children[1].textContent, '—');
@@ -808,7 +808,7 @@ test('RM6 compact ZIP fields, badges, safe four-row tooltips and shared clear bu
   for (const mode of [0, 1, 2, 3]) {
     controls[1].children[mode].listeners.click();
     const tooltip = groups[0].layers[0].tooltip;
-    assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>'], ['首票价格', '—']]);
+    assert.deepEqual(tooltip.children.map(row => row.children.map(n => n.textContent)), [['ZIP', '00002'], ['线路', 'Mock-A'], ['DSP', '<Mock DSP>'], ['领件量（日均）', '1,234 件'], ['首票价格', '—']]);
   }
   groups[0].layers[0].listeners.click({});
   assert.equal(e['map-clear'].parentNode, e['map-zip-heading']);
@@ -1333,9 +1333,9 @@ test('MVR-T3 route legend counts mapped routes by station and DSP, deduplicates 
     assert.equal(legend.hidden, false);
     assert.equal(legend.children[0].textContent, t.byRoute);
     assert.equal(legend.children[1].textContent, t.legendRouteCount(count));
-    assert.deepEqual(legend.children.slice(2).map(row => row.children[1].textContent), t.legendRouteStates);
+    assert.deepEqual(legend.children.slice(2, 5).map(row => row.children[1].textContent), t.legendRouteStates);
     const states = ['selectedRoute', 'focused', count === 2 ? 'dimmed' : 'outside'];
-    legend.children.slice(2).forEach((row, index) => {
+    legend.children.slice(2, 5).forEach((row, index) => {
       assert.equal(row.children[0].children[0].style.backgroundColor, `rgba(${palette[0].slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE[states[index]].fillOpacity})`);
       assert.equal(row.children[0].className, 'map-legend-sample');
       assert.equal(row.children[0].children[0].style.border, `${POLYGON_STYLE[states[index]].weight}px solid rgba(${POLYGON_STYLE[states[index]].color.slice(1).match(/../g).map(value => parseInt(value, 16)).join(', ')}, ${POLYGON_STYLE[states[index]].opacity})`);
@@ -1847,4 +1847,45 @@ test('ML-T3 floating panels use compact typography without changing difficulty b
   assert.match(css, /\.map-page #map-coverage-panel #map-coverage \{ font-size: 22px;/);
   assert.match(css, /\.map-page \.map-detail-card \.map-zip-number \{ font-size: 22px;/);
   assert.match(css, /\.map-page \.map-detail-card \.map-summary-metrics dd:not\(\.difficulty\), \.map-page \.map-detail-card \.map-zip-metrics dd:not\(\.difficulty\) \{ font-size: 16px;/);
+});
+
+
+test('ML-T4 ZIP daily pickup formats integers, zero and missing values', () => {
+  const doc = { createElement: tag => new Element(tag) };
+  for (const [value, expected] of [[1234.4, '1,234'], [0, '0'], [null, null], [undefined, null], [NaN, null]]) {
+    const rows = zipDetails(doc, { pickup_volume_daily: value }).children;
+    assert.equal(rows.length, 5);
+    assert.equal(rows[3].children[1].textContent, expected === null ? '\u2014' : expected + ' \u4ef6');
+  }
+});
+
+test('ML-T4 label preference persists without requests, marker rebuilds or selection changes', async () => {
+  for (const initial of [null, 'false', 'true', 'broken', 'throws']) {
+    const f = await labelFixture(), writes = [];
+    let readKey;
+    const storage = { getItem(key) { readKey = key; if (initial === 'throws') throw Error('blocked'); return initial; },
+      setItem(key, value) { writes.push([key, value]); if (initial === 'throws') throw Error('blocked'); } };
+    let requests = 0, selections = 0;
+    const view = createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => storage,
+      fetch() { requests++; }, onZip() { selections++; }, onClear() { selections++; } });
+    view.render(f.data, { fitToStation: false });
+    const legend = f.controls.at(-1), toggle = legend.children.at(-1), input = toggle.children[0];
+    assert.equal(readKey, 'nc-ops-map-route-labels');
+    assert.equal(input.type, 'checkbox'); assert.equal(input.checked, initial !== 'false');
+    const pane = f.map.panes['route-labels'], markers = [...f.routeMarkers];
+    input.checked = false; input.listeners.change();
+    assert.equal(pane.classList.contains('route-labels--disabled'), true);
+    f.map.listeners.zoomend(); f.map.listeners.moveend();
+    view.applySelection(selectRoute(f.data.features.features[0].properties));
+    assert.equal(pane.classList.contains('route-labels--disabled'), true);
+    assert.deepEqual(f.routeMarkers, markers);
+    for (const mode of ['dsp', 'station', 'difficulty']) { view.setColorMode(mode); assert.ok(!legend.children.includes(toggle)); }
+    view.setColorMode('route'); assert.ok(legend.children.includes(toggle));
+    view.render(f.data, { fitToStation: false, focusStation: 'B' });
+    assert.equal(pane.classList.contains('route-labels--disabled'), true);
+    input.checked = true; input.listeners.change();
+    assert.equal(pane.classList.contains('route-labels--disabled'), false);
+    assert.deepEqual(writes, [['nc-ops-map-route-labels', 'false'], ['nc-ops-map-route-labels', 'true']]);
+    assert.equal(requests, 0); assert.equal(selections, 0);
+  }
 });

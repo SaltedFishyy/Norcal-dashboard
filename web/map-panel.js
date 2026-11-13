@@ -84,8 +84,8 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
       info.append(text('span', name, 'map-route-title'), text('span', owner + ' · ' + route.zip_count + ' ZIP', 'map-route-owner'));
       const metrics = text('span', '', 'map-route-values');
       const pphLine = text('span', '', 'map-route-metric'), volumeLine = text('span', '', 'map-route-metric');
-      pphLine.append(text('span', pph), text('small', t.pph));
-      volumeLine.append(text('span', volume), text('small', t.pieceUnit));
+      pphLine.append(text('span', pph, 'map-route-pph'), text('small', t.pph));
+      volumeLine.append(text('span', volume, 'map-route-pickup'), text('small', t.pieceUnit));
       metrics.append(pphLine, volumeLine);
       const level = difficultyLevel(route.route_difficulty);
       const badge = text('span', level || '—', 'map-route-difficulty');

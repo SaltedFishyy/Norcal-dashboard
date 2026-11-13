@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { formatPrice, formatPriceRange, sortRows } from '../../web/format.js';
 import { openPriceDetail } from '../../web/price-detail.js';
+import { openRouteDetail } from '../../web/route-detail.js';
 import { zipDetails } from '../../web/map-view.js';
 import { createMapPanel } from '../../web/map-panel.js';
 import { isStaticPath } from '../src/api/static-files.js';
@@ -103,19 +104,38 @@ test('RQ-T3 dialog empty/error/network/retry states and stale requests', async t
   release(reply(200, data())); await closed; assert.match(allText(doc.body), /加载中/);
 });
 
-test('RQ-T3 profile price column after PPH renders single/range/missing and requests quotations only for quoted rows', async t => {
+test('RQ-T3 profile list renders single/range prices as text, omits missing and does not request quotations', async t => {
   const { doc, add, nodes } = fixture(t);
-  for (const id of ['updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district']) add(id);
+  for (const id of ['updated', 'total', 'profile-routes', 'route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'message', 'retry', 'profiles', 'profile-station', 'profile-district']) add(id);
   const rows = [[1.75, 1.75, 1], [1.75, 1.95, 2], [null, null, 0], [null, null, null]].map(([min, max, count], i) => ({ ...route, route_id: i + 1, quoted_zip_count: count, current_first_0_1lb_price_min: min, current_first_0_1lb_price_max: max }));
   const urls = [];
   globalThis.fetch = async url => { urls.push(url); return reply(200, url === '/api/districts' ? { districts: [{ id: 'mock', stations: [{ code: 'MOCKA', has_snapshot: true }] }] } : url.includes('route-profiles') ? { rows, total: 4 } : data()); };
   await import('../../web/app.js?rq-t3'); await new Promise(resolve => setImmediate(resolve));
-  for (const row of nodes.rows.children) assert.equal(row.children.length, 7);
-  const cells = nodes.rows.children.map(row => row.children[4]);
-  assert.equal(cells[0].children[0].textContent, '$1.75'); assert.equal(cells[1].children[0].textContent, '$1.75–$1.95');
-  for (const cell of cells.slice(2)) { assert.equal(cell.textContent, '—'); assert.equal(cell.children.length, 0); }
-  await cells[0].children[0].listeners.click(); assert.ok(urls.includes('/api/route-quotations?route_id=1'));
-  assert.equal(doc.body.children[0].open, true);
+  const owners = nodes['profile-routes'].children.map(row => row.children[1].children[1].textContent);
+  assert.match(owners[0], /\$1\.75$/); assert.match(owners[1], /\$1\.75–\$1\.95$/);
+  for (const text of owners.slice(2)) assert.doesNotMatch(text, /\$/);
+  assert.ok(nodes['profile-routes'].children.every(row => walk(row).filter(n => n.tag === 'button').length === 1));
+  assert.ok(!urls.some(url => url.includes('route-quotations')));
+
+});
+
+test('PL metric price opens shared quotation dialog and date view labels current quotes', async t => {
+  const { doc, add, nodes } = fixture(t);
+  for (const id of ['route-detail', 'detail-content', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary']) add(id);
+  const urls = [];
+  globalThis.fetch = async url => { urls.push(url); return reply(200, url.includes('route-history') ? { available: false } : url.includes('route-details') ? { zips: [] } : data()); };
+  await openRouteDetail({ ...route, quoted_zip_count: 2, current_first_0_1lb_price_min: 1.75, current_first_0_1lb_price_max: 1.95 }, undefined, undefined, { date: '2026-11-08' });
+  const cards = nodes['detail-content'].children[0];
+  assert.equal(cards.children.length, 5);
+  const price = cards.children[3], button = price.children[1].children[0];
+  assert.equal(button.textContent, '$1.75–$1.95'); assert.equal(price.children[2].textContent, '当前报价');
+  await button.listeners.click();
+  assert.ok(urls.includes('/api/route-quotations?route_id=123'));
+  assert.equal(doc.body.children.at(-1).open, true); assert.match(allText(doc.body), /MOCK-001 · 价格详情/);
+  doc.body.children.at(-1).close(); assert.equal(button.focused, true);
+  await openRouteDetail({ ...route, quoted_zip_count: 0 });
+  const missing = nodes['detail-content'].children[0].children[3].children[1];
+  assert.equal(missing.textContent, '—'); assert.equal(missing.children.length, 0);
 });
 
 test('RQ-T3 map tooltip and route/ZIP panels use their own prices and share highlighted details', async t => {
@@ -143,9 +163,7 @@ test('RQ-T3 assets are allowlisted and frontend contains no HTML injection or ex
     assert.doesNotMatch(source.replaceAll('http://www.w3.org/2000/svg', ''), /innerHTML|insertAdjacentHTML|https?:\/\//);
   }
   const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
-  const head = html.match(/<thead>([\s\S]*?)<\/thead>/)[1];
-  const labels = [...head.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)].map(([, content]) => content.replace(/<span[\s\S]*?<\/span>|<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]*>/g, '').trim());
-  assert.deepEqual(labels, ['线路名称', 'DSP', 'Pickup Volume', 'PPH', '首票价格', '首公里距离 (mi)', '线路难度']);
-  assert.doesNotMatch(head, /人工难度/);
+  assert.doesNotMatch(html, /<thead>|id="rows"|id="table-container"/);
+  for (const key of ['name', 'pickup_volume', 'pph', 'price', 'route_difficulty']) assert.ok(html.includes(`id="sort-${key}"`));
   assert.match(html, /title="首票价格 0–1\(lb\) \/ Quotation for the First Parcel 0–1\(lb\)"/);
 });

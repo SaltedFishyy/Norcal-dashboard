@@ -1,6 +1,6 @@
 import { palette } from './route-colors.js';
 import { difficultyColor } from './difficulty.js';
-import { formatPrice } from './format.js';
+import { formatPrice, formatNumber } from './format.js';
 import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
 
@@ -197,7 +197,8 @@ export function zipDetails(doc, properties, selection = clearSelection(), colorM
   const swatch = doc.createElement('span'); swatch.className = 'map-swatch map-tooltip-swatch';
   swatch.style.backgroundColor = color ?? modeColor(properties, colorMode, undefined, undefined, selection);
   swatch.setAttribute('aria-hidden', 'true');
-  for (const [label, value] of [[t.zipLabel, properties.postal_code], [t.route, properties.route_name], [t.dsp, properties.dsp_name], [t.firstPrice, formatPrice(properties.current_first_0_1lb_price)]]) {
+  const pickup = formatNumber(properties.pickup_volume_daily, 0);
+  for (const [label, value] of [[t.zipLabel, properties.postal_code], [t.route, properties.route_name], [t.dsp, properties.dsp_name], [t.pickupDaily, pickup === '—' ? pickup : `${pickup} ${t.pieceUnit}`], [t.firstPrice, formatPrice(properties.current_first_0_1lb_price)]]) {
     const entry = doc.createElement('div'), dt = doc.createElement('dt'), dd = doc.createElement('dd');
     dt.textContent = label; dd.textContent = value ?? '—';
     if (!node.children.length) dt.append(swatch);
@@ -207,7 +208,7 @@ export function zipDetails(doc, properties, selection = clearSelection(), colorM
 }
 
 export function createMapView({ leaflet: L, protomaps, document: doc, fetch: request,
-  onZip, onClear, onBasemapError, onColorMode, onDsp }) {
+  onZip, onClear, onBasemapError, onColorMode, onDsp, storage = () => doc.defaultView?.localStorage }) {
   const map = L.map(doc.getElementById('route-map'), { attributionControl: true, zoomControl: false, minZoom: 3, maxZoom: 16 });
   // Header wrapping can resize the canvas without a window resize event.
   const canvas = doc.getElementById('route-map').parentElement;
@@ -226,6 +227,24 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   labelPane.style.zIndex = '610';
   labelPane.style.pointerEvents = 'none';
   const routeLabels = [];
+  const labelsKey = 'nc-ops-map-route-labels';
+  let labelsEnabled = true;
+  try { labelsEnabled = storage()?.getItem(labelsKey) !== 'false'; } catch { /* Storage unavailable: default on. */ }
+  const labelToggle = doc.createElement('label'), labelCheckbox = doc.createElement('input'), labelCaption = doc.createElement('span');
+  labelToggle.className = 'map-route-label-toggle';
+  labelCheckbox.type = 'checkbox'; labelCheckbox.checked = labelsEnabled;
+  labelCaption.textContent = t.showRouteLabels;
+  labelToggle.append(labelCheckbox, labelCaption);
+  const syncLabelVisibility = () => {
+    labelPane.classList[labelsEnabled ? 'remove' : 'add']('route-labels--disabled');
+  };
+  syncLabelVisibility();
+  labelCheckbox.addEventListener('change', () => {
+    labelsEnabled = labelCheckbox.checked;
+    try { storage()?.setItem(labelsKey, String(labelsEnabled)); } catch { /* Keep the in-memory preference. */ }
+    syncLabelVisibility();
+    if (labelsEnabled) layoutRouteLabels();
+  });
   let zooming = false, dragging = false, labelTier = null;
   const renderer = L.svg({ padding: MAP_RENDER.svgPadding });
   const outlineRenderer = L.svg({ pane: 'selection-outline', padding: MAP_RENDER.svgPadding });
@@ -351,6 +370,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       sample.append(swatch);
       label.textContent = t.legendRouteStates[index]; row.append(sample, label); legend.append(row);
     });
+    legend.append(labelToggle);
   }
   const tooltip = properties => zipDetails(doc, properties, selection, colorMode, routeDetails.get(properties.route_id), modeColor(properties, colorMode, routeColors, groupColors, selection));
   function labelPriority(label) {

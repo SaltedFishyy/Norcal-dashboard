@@ -18,7 +18,7 @@ import { parseMaxRouteDetailRequests } from '../src/config.js';
 import { createRequestHandler } from '../src/api/app.js';
 import { startApiServer } from '../src/api/server.js';
 import { formatPercent, difficultyTone, formatUpdated } from '../../web/format.js';
-import { openRouteDetail } from '../../web/route-detail.js';
+import { openRouteDetail, clearRouteDetail } from '../../web/route-detail.js';
 
 // All fixtures and page doubles use synthetic data, never local session or runtime files.
 const contentBody = JSON.parse(await fs.readFile(new URL('./fixtures/route-detail-content.json', import.meta.url), 'utf8'));
@@ -996,11 +996,12 @@ class Element {
   showModal() { this.open = true; }
   close() { this.open = false; this.listeners.close?.(); }
   focus() { this.focused = true; }
+  scrollIntoView() {}
   getBoundingClientRect() { return { left: 10, top: 10, right: 100, bottom: 100 }; }
 }
 function documentDouble(t) {
   const previousDocument = globalThis.document, previousFetch = globalThis.fetch;
-  const elements = Object.fromEntries(['route-detail', 'detail-content', 'detail-close', 'detail-title', 'updated', 'total', 'rows', 'table-container', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map((id) => [id, new Element()]));
+  const elements = Object.fromEntries(['route-detail', 'detail-content', 'detail-close', 'detail-title', 'detail-swatch', 'detail-difficulty', 'detail-summary', 'updated', 'total', 'profile-routes', 'message', 'retry', 'profiles', 'profile-station', 'profile-district'].map((id) => [id, new Element()]));
   globalThis.document = { getElementById: (id) => elements[id], createElement: (tag) => new Element(tag), createDocumentFragment: () => Object.assign(new Element(), { fragment: true }) };
   t.after(() => {
     if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
@@ -1009,44 +1010,37 @@ function documentDouble(t) {
   return elements;
 }
 const descendants = (node) => [node, ...node.children.flatMap(descendants)];
-test('RD2 basic info keeps profile fields and snapshot time, with detail and fallback ZIP counts', async (t) => {
-  const elements = documentDouble(t), source = new Element('button');
-  const snapshotTime = '2026-09-30T18:20:00Z', detailTime = '2026-10-01T20:10:00Z';
-  const row = Object.freeze({ route_id: 900101, route_name: 'MOCK-001', station: 'MOCKA',
-    dsp_name: 'Mock DSP', pickup_volume: 12345, pph: 30, first_mile_distance: 3.9,
-    route_difficulty: 'A级 难', route_difficulty_manual: null, postal_codes: Object.freeze(['00123', '00987']) });
-  let reply;
-  globalThis.fetch = async () => reply;
-  const values = () => Object.fromEntries(elements['detail-content'].children[0].children
-    .map(item => [item.children[0].textContent, item.children[1]]));
-  for (const [profile, expected] of [[row, '2'], [{ ...row, postal_codes: [] }, '0'],
-    [{ ...row, postal_codes: undefined }, '—']]) {
-    reply = { status: 404, json: async () => ({ error: 'route_detail_not_found' }) };
-    await openRouteDetail(profile, source, snapshotTime);
-    assert.equal(values()['ZIP 数'].textContent, expected);
-    assert.equal(values()['线路数据更新时间'].title, snapshotTime);
-    assert.equal(values()['ZIP 详情更新时间'].textContent, '—');
-    assert.equal(elements['detail-content'].children[1].textContent, '该线路暂无详细数据');
+const zipBody = elements => elements['detail-content'].children[1].children[1].children[1];
+const metricValues = elements => Object.fromEntries(elements['detail-content'].children[0].children.map(item => [item.children[0].textContent, item.children[1]]));
+test('PL heading, five metrics and footer retain profile values and detail ZIP count', async t => {
+  const e = documentDouble(t), time = '2026-09-30T18:20:00Z', detailTime = '2026-10-01T20:10:00Z';
+  const row = Object.freeze({ route_id: 900101, route_name: 'MOCK-001', station: 'MOCKA', dsp_name: 'Mock DSP',
+    pickup_volume: 12345, pph: 30, first_mile_distance: 3.9, route_difficulty: 'A级 难', postal_codes: ['00123', '00987'] });
+  for (const [postal_codes, count] of [[row.postal_codes, '2'], [[], '0'], [undefined, '—']]) {
+    globalThis.fetch = async () => ({ status: 404, json: async () => ({ error: 'route_detail_not_found' }) });
+    await openRouteDetail({ ...row, postal_codes }, undefined, time);
+    assert.ok(e['detail-summary'].textContent.endsWith(count + ' 个 ZIP'));
+    assert.equal(zipBody(e).children[0].textContent, '该线路暂无详细数据');
   }
   for (const count of [0, 7]) {
-    reply = { status: 200, json: async () => ({ route_name: 'OTHER', station: 'OTHER',
-      route_difficulty: 'C级 易', zip_count: count, fetched_at: detailTime, zips: [] }) };
-    await openRouteDetail(row, source, snapshotTime);
-    const info = values();
-    assert.equal(info['ZIP 数'].textContent, String(count));
-    assert.equal(info['线路名称'].textContent, row.route_name);
-    assert.equal(info['站点'].textContent, row.station);
-    assert.equal(info['线路难度'].children[0].textContent, row.route_difficulty);
-    assert.equal(info['线路数据更新时间'].title, snapshotTime);
-    assert.equal(info['ZIP 详情更新时间'].title, detailTime);
-    assert.equal(info['Pickup Volume'].textContent, '12,345');
-    assert.equal(info.PPH.textContent, '30.00');
-    assert.equal(info['首公里距离 (mi)'].textContent, '3.90');
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({ zip_count: count, fetched_at: detailTime, zips: [] }) });
+    await openRouteDetail(row, undefined, time, { date: '2026-11-08' });
+    assert.equal(e['detail-title'].textContent, row.route_name);
+    assert.equal(e['detail-summary'].textContent, 'MOCKA · Mock DSP · Route ID 900101 · ' + count + ' 个 ZIP · 11/08 的数据');
+    assert.equal(e['detail-difficulty'].children[0].textContent, row.route_difficulty);
+    const info = metricValues(e);
+    assert.deepEqual(Object.keys(info), ['Pickup Volume', 'PPH', '首公里距离 (mi)', '首票价格', '人工难度']);
+    assert.equal(info['Pickup Volume'].textContent, '12,345'); assert.equal(info.PPH.textContent, '30.00');
+    assert.equal(info['首公里距离 (mi)'].textContent, '3.90'); assert.equal(info['首票价格'].textContent, '—');
     assert.equal(info['人工难度'].children[0].textContent, '—');
-    assert.equal(info['人工难度'].children[0].className, undefined);
+    const footer = e['detail-content'].children[2];
+    assert.equal(footer.children[0].title, time); assert.equal(footer.children[1].title, detailTime);
+    assert.equal(footer.children[0].textContent, '线路数据更新时间：' + formatUpdated(time));
+    assert.equal(footer.children[1].textContent, 'ZIP 详情更新时间：' + formatUpdated(detailTime));
   }
 });
-test('RD1 main table route button opens modal, safely renders ZIP fields and restores focus', async (t) => {
+
+test('RD1 route list automatically renders persistent detail and safely renders ZIP fields', async (t) => {
   const elements = documentDouble(t), requests = [], malicious = '<img src=x onerror=alert(1)>';
   const route = { route_id: 900101, route_name: 'MOCK-001', station: 'MOCKA', dsp_name: malicious,
     pickup_volume: 12345, pph: 30, first_mile_distance: 3.9,
@@ -1061,44 +1055,58 @@ test('RD1 main table route button opens modal, safely renders ZIP fields and res
     return { status: 200, json: async () => url.includes('route-profiles') ? { fetched_at: metadata.fetchedAt, total: 1, rows: [route] } : detail };
   };
   await import('../../web/app.js?rd1'); await new Promise((resolve) => setImmediate(resolve));
-  const button = elements.rows.children[0].children[0].children[0];
-  assert.equal(button.tag, 'button'); assert.equal(button.type, 'button'); assert.equal(button.textContent, 'MOCK-001');
-  assert.equal(elements.rows.children[0].children[6].children[0].className, 'difficulty system-difficulty');
-  const pending = button.listeners.click();
-  assert.equal(elements['route-detail'].open, true);
-  assert.equal(elements['detail-content'].children[1].textContent, '加载中…');
-  await pending;
-  assert.deepEqual(requests, ['/api/districts', '/api/route-profiles?station=MOCKA', '/api/route-details?route_id=900101']);
+  const button = elements['profile-routes'].children[0];
+  assert.equal(button.tag, 'button'); assert.equal(button.type, 'button');
+  assert.equal(button.children[1].children[0].textContent, 'MOCK-001');
+  assert.equal(button.children[3].textContent, 'A');
+  await button.listeners.click();
+  assert.equal(elements['route-detail'].open, false);
+  assert.deepEqual(requests, ['/api/districts', '/api/route-profiles?station=MOCKA', '/api/route-history?route_id=900101&days=30', '/api/route-details?route_id=900101']);
   const nodes = descendants(elements['detail-content']);
   const metrics = elements['detail-content'].children[0];
   const values = Object.fromEntries(metrics.children.map(item => [item.children[0].textContent, item.children[1]]));
-  assert.deepEqual(Object.keys(values), ['线路名称', 'Route ID', '站点', 'DSP', 'Pickup Volume', 'PPH',
-    '首公里距离 (mi)', '线路难度', '人工难度', 'ZIP 数', '线路数据更新时间', 'ZIP 详情更新时间']);
-  for (const [label, expected] of Object.entries({ '线路名称': 'MOCK-001', 'Route ID': '900101',
-    '站点': 'MOCKA', DSP: malicious, 'Pickup Volume': '12,345', PPH: '30.00',
-    '首公里距离 (mi)': '3.90', 'ZIP 数': '3', '线路数据更新时间': formatUpdated(metadata.fetchedAt),
-    'ZIP 详情更新时间': formatUpdated(metadata.fetchedAt) })) assert.equal(values[label].textContent, expected, label);
-  assert.equal(values['线路数据更新时间'].title, metadata.fetchedAt);
-  assert.equal(values['线路难度'].children[0].className, 'difficulty system-difficulty');
-  assert.ok(Object.hasOwn(values, '人工难度'), '线路详情保留人工难度');
+  assert.deepEqual(Object.keys(values), ['Pickup Volume', 'PPH', '首公里距离 (mi)', '首票价格', '人工难度']);
+  assert.equal(elements['detail-title'].textContent, 'MOCK-001');
+  assert.ok(elements['detail-summary'].textContent.includes(malicious));
+  assert.equal(elements['detail-difficulty'].children[0].className, 'difficulty system-difficulty');
+  assert.equal(values['Pickup Volume'].textContent, '12,345'); assert.equal(values.PPH.textContent, '30.00');
+  assert.equal(values['首公里距离 (mi)'].textContent, '3.90');
   assert.equal(values['人工难度'].children[0].textContent, '—');
-  assert.equal(values['人工难度'].children[0].className, undefined);
   assert.deepEqual(nodes.filter(node => node.tag === 'th').map(node => node.textContent),
-    ['ZIP', '领件量（日均）', '熟手 PPH', 'ZIP 难度', '首公里距离 (mi)']);
-  assert.equal(nodes.filter((node) => node.tag === 'th').length, 5);
-  assert.ok(nodes.some((node) => node.textContent === malicious)); assert.ok(nodes.every((node) => node.tag !== 'img'));
-  for (const text of ['12.34', '23.45', '00123', formatUpdated(metadata.fetchedAt)]) assert.ok(nodes.some((node) => node.textContent === text), text);
+    ['ZIP', '领件量（日均）', '熟手 PPH', 'ZIP 难度']);
+  assert.equal(nodes.filter((node) => node.tag === 'th').length, 4);
+  assert.ok(elements['detail-summary'].textContent.includes(malicious)); assert.ok(nodes.every((node) => node.tag !== 'img'));
+  for (const text of ['23.45', '00123']) assert.ok(nodes.some((node) => node.textContent === text), text);
   const rows = nodes.filter((node) => node.tag === 'tbody')[0].children;
-  assert.deepEqual(rows.map(row => row.children[1].textContent), ['1,200', '—', '12.35']);
+  assert.deepEqual(rows.map(row => row.children[1].children.at(-1)?.textContent ?? row.children[1].textContent), ['1,200', '12.35', '—']);
   assert.ok(nodes.every(node => !['派送异常率', 'DNR 率', '安全等级'].includes(node.textContent)));
-  assert.equal(rows[2].children[3].textContent, '—'); assert.equal(rows[2].children[3].children.length, 0);
+  assert.equal(rows[1].children[3].textContent, '—'); assert.equal(rows[1].children[3].children.length, 0);
   assert.equal(rows[0].children[3].children[0].className, 'difficulty system-difficulty');
   assert.ok(!nodes.some((node) => node.textContent === 'postal_code_tag'));
-  elements['detail-close'].listeners.click(); assert.equal(elements['route-detail'].open, false); assert.equal(button.focused, true);
-  assert.equal(requests.length, 3);
+  assert.equal(button.attributes['aria-pressed'], 'true');
+  assert.equal(requests.length, 4);
 });
 
-test('RD1b modal stably sorts ZIP strings, puts invalid values last and preserves frozen input', async (t) => {
+test('PL ZIP table sorts by volume then ZIP, scales bars, highlights and preserves frozen input', async t => {
+  const e = documentDouble(t);
+  const zips = Object.freeze([
+    { postal_code: '00987', pickup_volume_daily: 20 }, { postal_code: '00123', pickup_volume_daily: 20 },
+    { postal_code: '00001', pickup_volume_daily: null }, { postal_code: '00002', pickup_volume_daily: 10 },
+    { postal_code: '00003', pickup_volume_daily: 0 },
+  ].map(Object.freeze));
+  globalThis.fetch = async url => ({ status: 200, json: async () => url.includes('route-history') ? { available: false } : { zip_count: 5, zips } });
+  const result = await openRouteDetail({ route_id: 1 }, undefined, undefined, { highlightZip: '00002' });
+  assert.deepEqual(result, { highlightFound: true });
+  const rows = descendants(e['detail-content']).find(n => n.tag === 'tbody').children;
+  assert.deepEqual(rows.map(row => row.children[0].textContent), ['00123', '00987', '00002', '00003', '00001']);
+  assert.deepEqual(rows.slice(0,4).map(row => row.children[1].children[0].children[0].style.width), ['100%', '100%', '50%', '0%']);
+  assert.equal(rows.at(-1).children[1].children.length, 0);
+  assert.equal(rows[2].className, 'zip-target'); assert.ok(rows.every(row => row.children.length === 4));
+  assert.equal(zips[0].postal_code, '00987');
+  assert.deepEqual(await openRouteDetail({ route_id: 1 }, undefined, undefined, { highlightZip: '99999' }), { highlightFound: false });
+});
+
+test('RD1b ZIP sorting puts invalid values last and preserves frozen input when volumes tie', async (t) => {
   const elements = documentDouble(t);
   const zips = Object.freeze(['94005', null, '00987', '', '00123', undefined, '94005', 123, false, '10', '2']
     .map((postal_code, index) => Object.freeze({ postal_code, experienced_pph: index })));
@@ -1115,45 +1123,43 @@ test('RD1b modal stably sorts ZIP strings, puts invalid values last and preserve
     [4, 2, 9, 10, 0, 6, 1, 3, 5, 7, 8].map((index) => index.toFixed(2)));
   assert.deepEqual(detail, original);
   assert.equal(detail.zips, zips);
-  assert.equal(nodes.find((node) => node.tag === 'caption').textContent, '按 ZIP 升序显示的 ZIP 画像');
+  assert.equal(nodes.find((node) => node.tag === 'caption').textContent, '按日均领件量降序、同值 ZIP 升序显示的 ZIP 画像');
 });
 
-test('RD1 modal handles missing detail, sanitized errors, backdrop, Esc and stale responses', async (t) => {
+test('RD1 panel handles missing detail, sanitized errors, clearing and stale responses', async (t) => {
   const elements = documentDouble(t), source = new Element('button'), row = { route_id: 900101, route_name: 'MOCK-001', dsp_name: 'Mock Fleet' };
   let reply = { status: 404, json: async () => ({ error: 'route_detail_not_found' }) };
   globalThis.fetch = async () => { if (reply instanceof Error) throw reply; return reply; };
   await openRouteDetail(row, source);
-  assert.equal(elements['detail-content'].children[1].textContent, '该线路暂无详细数据');
-  assert.equal(elements['detail-content'].children[2].textContent, '可运行 npm run dms:scrape-route-details -- --station SFO01 获取。');
-  assert.equal(elements['detail-content'].children[0].children[0].children[1].textContent, 'MOCK-001');
+  assert.equal(zipBody(elements).children[0].textContent, '该线路暂无详细数据');
+  assert.equal(zipBody(elements).children[1].textContent, '可运行 npm run dms:scrape-route-details -- --station SFO01 获取。');
+  assert.equal(elements['detail-title'].textContent, 'MOCK-001');
   const dialog = elements['route-detail'];
-  dialog.listeners.click({ target: dialog, clientX: 20, clientY: 20 }); assert.equal(dialog.open, true);
-  dialog.listeners.click({ target: dialog, clientX: 0, clientY: 0 }); assert.equal(dialog.open, false); assert.equal(source.focused, true);
+  assert.equal(dialog.open, false); assert.equal(source.focused, false);
   for (const failure of [{ status: 500, json: async () => ({ error: 'route_detail_invalid' }) }, { status: 500, json: async () => ({ error: 'secret/path stack' }) }, new Error('secret/path'), { status: 200, json: async () => { throw new Error('private'); } }]) {
     reply = failure; await openRouteDetail(row, source);
-    assert.doesNotMatch(elements['detail-content'].children[1].textContent, /secret|stack|private/);
-    assert.match(elements['detail-content'].children[1].textContent, /无法.*(route_detail_invalid|internal_error|server_unreachable)/);
+    assert.doesNotMatch(zipBody(elements).children[0].textContent, /secret|stack|private/);
+    assert.match(zipBody(elements).children[0].textContent, /无法.*(route_detail_invalid|internal_error|server_unreachable)/);
   }
   let release;
   reply = { status: 200, json: async () => new Promise((resolve) => { release = resolve; }) };
   const pending = openRouteDetail(row, source); await new Promise((resolve) => setImmediate(resolve));
-  let prevented = false; dialog.listeners.cancel({ preventDefault: () => { prevented = true; } });
-  assert.equal(prevented, true); assert.equal(dialog.open, false);
+  clearRouteDetail(); assert.equal(dialog.open, false);
   reply = { status: 404, json: async () => ({ error: 'route_detail_not_found' }) };
   await openRouteDetail({ ...row, route_name: 'MOCK-002' }, source);
   release(transform().route); await pending;
-  assert.equal(elements['detail-content'].children[0].children[0].children[1].textContent, 'MOCK-002');
-  assert.equal(elements['detail-content'].children[1].textContent, '该线路暂无详细数据');
+  assert.equal(elements['detail-title'].textContent, 'MOCK-002');
+  assert.equal(zipBody(elements).children[0].textContent, '该线路暂无详细数据');
 });
 
-test('RD1 frontend contains no HTML injection or external resources; modal scroll is bounded', async () => {
+test('RD1 frontend contains no HTML injection or external resources; detail scroll stays inside pane', async () => {
   for (const name of await fs.readdir(new URL('../../web/', import.meta.url))) {
     const source = await fs.readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8');
     assert.doesNotMatch(source.replaceAll('http://www.w3.org/2000/svg', ''), /innerHTML|https?:\/\//, name);
   }
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /max-height: 85vh/); assert.match(css, /\.detail-table-scroll \{ overflow: auto/);
-  assert.match(css, /max-width: calc\(100% - 24px\)/); assert.match(css, /position: sticky/);
+  assert.match(css, /\.profile-page \.profile-detail-pane \{[^}]*overflow-y: auto/); assert.match(css, /\.detail-table-scroll \{ overflow: auto/);
+  assert.match(css, /\.profile-page #route-detail \{[^}]*max-width: none/); assert.match(css, /position: sticky/);
 });
 
 test('RM5 modal uses shared five colors for system route and ZIP difficulties and preserves manual tones', async t => {
@@ -1165,8 +1171,8 @@ test('RM5 modal uses shared five colors for system route and ZIP difficulties an
     globalThis.fetch = async () => ({ status: 200, json: async () => data });
     await openRouteDetail(row, new Element('button'), time);
     const info = Object.fromEntries(e['detail-content'].children[0].children.map(item => [item.children[0].textContent, item.children[1]]));
-    assert.equal(info['线路难度'].children[0].textContent, word);
-    assert.equal(info['线路难度'].children[0].style.backgroundColor, difficultyColor(difficultyLevel(word)));
+    assert.equal(e['detail-difficulty'].children[0].textContent, word);
+    assert.equal(e['detail-difficulty'].children[0].style.backgroundColor, difficultyColor(difficultyLevel(word)));
     assert.equal(info['人工难度'].children[0].className, 'difficulty tone-easy');
     assert.deepEqual(info['人工难度'].children[0].style, {});
     const rows = descendants(e['detail-content']).find(node => node.tag === 'tbody').children;

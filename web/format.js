@@ -2,30 +2,31 @@ import { difficultyLevel } from './difficulty.js';
 
 // Preserve API order for ties and missing values without changing source rows.
 export function sortRows(rows, sort) {
-  if (!['pickup_volume', 'pph', 'price'].includes(sort.key)) return [...rows];
+  if (!['pickup_volume', 'pph', 'price', 'route_difficulty'].includes(sort.key)) return [...rows];
   const field = sort.key === 'price' ? 'current_first_0_1lb_price_min' : sort.key;
+  const valueOf = row => sort.key === 'route_difficulty'
+    ? ({ S: 5, A: 4, B: 3, C: 2, D: 1 }[difficultyLevel(row.route_difficulty)] ?? null) : row[field];
   const valid = value => typeof value === 'number' && Number.isFinite(value);
   return rows.map((row, index) => ({ row, index })).sort((a, b) => {
-    const av = a.row[field], bv = b.row[field];
+    const av = valueOf(a.row), bv = valueOf(b.row);
     if (valid(av) !== valid(bv)) return valid(av) ? -1 : 1;
     if (!valid(av) || av === bv) return a.index - b.index;
     return (av < bv ? -1 : 1) * (sort.dir === 'asc' ? 1 : -1);
   }).map(item => item.row);
 }
 
-// Lightweight user-facing text shared by the profile page and detail modal.
+// Lightweight user-facing text shared by the profile page and detail panel.
 export const profileText = {
   loading: '加载中…', networkError: '无法连接本地服务器。',
   empty: '所选站点 暂无数据。请运行 npm run dms:scrape 创建快照。',
+  noMatchingRoutes: '没有匹配的线路',
   loadError: code => `无法加载线路画像 (${code})。`,
-  routeName: '线路名称', routeId: 'Route ID', station: '站点', dsp: 'DSP',
   volume: 'Pickup Volume', pph: 'PPH', firstMile: '首公里距离 (mi)',
-  difficulty: '线路难度', manualDifficulty: '人工难度', zipCount: 'ZIP 数',
+  manualDifficulty: '人工难度',
   profileUpdated: '线路数据更新时间', detailUpdated: 'ZIP 详情更新时间',
   zipDifficulty: 'ZIP 难度', experiencedPph: '熟手 PPH', pickupDaily: '领件量（日均）',
-  zipTable: 'ZIP 画像表',
-  zipCaption: '按 ZIP 升序显示的 ZIP 画像',
-  firstMileNote: '首公里距离为线路级数值，在每个 ZIP 行重复显示。',
+  zipTable: 'ZIP 画像表', firstPrice: '首票价格', currentQuote: '当前报价', recentTrend: '近 30 天趋势',
+  zipCaption: '按日均领件量降序、同值 ZIP 升序显示的 ZIP 画像',
   noDetail: '该线路暂无详细数据',
   scrapeHint: station => `可运行 npm run dms:scrape-route-details -- --station ${station || 'SFO01'} 获取。`,
   detailError: code => `无法加载线路详情 (${code})。`,
