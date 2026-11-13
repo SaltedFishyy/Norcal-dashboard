@@ -10,6 +10,12 @@
 - [x] 旧仓库 → public historical reference，不再往里放新的内部数据（2026-09-30）。
 - [ ] 本仓库是否要开启 GitHub Pages？（现阶段不开 public Pages，2026-09-30）应用在 `nc-ops-console-main/` 子目录，而 GitHub Pages “Deploy from a branch” 只支持仓库根目录或 `/docs`。若要部署，需要决定：接受 `/nc-ops-console-main/` 子路径，还是调整目录结构，还是用 GitHub Actions 部署子目录。
 - [ ] 旧仓库 `cassielu0/nc-ops-console` 的 GitHub Pages 站点是否仍对外使用？是否需要与本仓库同步，还是冻结为历史版本？
+- [ ] SVC-Q1 局域网访问地址固定（SVC 后续任务，Product Owner 2026-11-13 确认记录）。服务电脑的 Wi-Fi（GOFO_office 2）用 DHCP 自动分配地址：2026-11-13 从 `10.9.22.182` 变成了 `10.9.23.170`，同事按旧地址访问 `:3000` 时连接超时，但服务本身正常。可选方案：
+  1. （推荐）请网络管理员在路由器 / DHCP 上给这台电脑的 Wi-Fi 网卡做地址保留，电脑本身不改设置。
+  2. 在电脑上手动设置静态 IPv4。这属于修改系统网络设置，需要 Product Owner 自己操作，并先向网管确认可用地址，避免冲突。
+  3. 不固定 IP，改用主机名访问（需要确认办公网是否能解析本机名）。
+
+  待决定：选哪种方案、由谁联系网管。地址固定后，在 `docs/deployment.md` 的“局域网访问”部分写明正式访问地址。（2026-11-13）
 - [ ] `AGENTS.md.bak-20260928`（旧版规则，已被 git 跟踪）是否保留在仓库中？它的角色描述（“Codex 是唯一开发 agent”）与当前 `AGENTS.md` 冲突，建议删除（git 历史里仍可找回）。
 
 ## Claude → Codex 自动交接
