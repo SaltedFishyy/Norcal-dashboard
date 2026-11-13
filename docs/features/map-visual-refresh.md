@@ -453,3 +453,34 @@ MVR-T7 为深色底调整的数值**全部恢复**到 MVR-T7 之前的值（即 
 - 五个场景截图：.handoff/MVR-T7-r1-overview.png、.handoff/MVR-T7-r1-SFO01-route.png、.handoff/MVR-T7-r1-SFO01-zip.png、.handoff/MVR-T7-r1-difficulty.png、.handoff/MVR-T7-r1-dsp.png。查看总览、ZIP、难易度及 DSP 截图：浅蓝水面、浅绿植被、浅色陆地，色块和编号可见，选中描边可见，总览仓库图标可见。ZIP 面板正常显示；检测到 7 个仓库 marker。页面既有自动更新部分失败提示仍显示，本轮未改动。
 - console error 0、pageerror 0；计算背景 rgb(170,218,255)，tile-pane filter none。launch 后所有步骤使用 try/finally 关闭浏览器，120 秒硬超时。浏览器脚本退出码 0。tasklist 被环境拒绝（Access denied）；随后 Get-Process -Name '*chrome-headless*' 以及 chrome 进程中 ms-playwright 路径检查均无残留。
 - 最终检查：npm.cmd test 865/865 通过，0 失败 / 跳过；git diff --check 通过（仅 LF/CRLF 提示）。无 lint / build 命令。P4-AC1..AC5 本轮实现及验证完成；P4-AC6 Claude 视觉复核与 Product Owner 预览签字待完成。未 commit / push / 部署。
+
+## 12. 拖动性能：松手后再绘制底图（MVR-P5，Approved，Product Owner 2026-11-13）
+
+Product Owner 2026-11-13 反馈：拖动地图时一卡一卡的。
+
+**Claude 排查**（3200，Playwright headless，1440×900，DPR 1.2，5 次拖动 + 1 次缩放）：
+
+- 正常 CPU：中位帧 17ms，超过 50ms 的帧有 4 个。
+- CPU 降速 4 倍：中位帧 133ms，超过 50ms 的帧有 568 个。
+- 时间几乎全部花在 `protomaps-leaflet` 在主线程绘制矢量底图瓦片（canvas `lineTo` / `fill`）。`map-view.js` 只占约 0.1%。
+- 临时替换参数对比（不改代码）：
+  - `devicePixelRatio: 1`：超过 50ms 的帧 591 个，没有改善；
+  - 去掉底图标注：616 个，没有改善；
+  - **`updateWhenIdle: true`：51 个，中位帧 17ms**。
+
+**决策**：底图图层（service 和 regional 两层）设置 `updateWhenIdle: true`。拖动过程中不请求、不绘制新瓦片，松手后再补齐。
+
+- 代价：拖到新区域时，边缘先显示底色，松手后约 0.5–1 秒补齐。
+- ZIP 色块、线路编号、悬停提示不受影响。
+- 预渲染栅格底图（方案 2）暂不做。先请同事在真实电脑上试用，不够再考虑精简底图内容，最后才考虑方案 2。
+
+**验收**：
+
+- **MVR-P5-AC1** 两个底图图层的 options 包含 `updateWhenIdle: true`，其余底图选项不变。
+- **MVR-P5-AC2** 用同样的测量方法，在 CPU 降速 4 倍时，超过 50ms 的帧比现状减少 80% 以上。
+- **MVR-P5-AC3** 现有地图行为不变：覆盖率提示、底图失败提示、色块、选择、编号开关都正常。`npm test`、`git diff --check` 通过。
+- **MVR-P5-AC4** Product Owner 在 3200 预览签字后，再提交和发布。
+
+| 任务 | 内容 | 授权 |
+|---|---|---|
+| MVR-T8 | 两个底图图层加 `updateWhenIdle: true`，选项集中成常量，更新测试 | Product Owner 2026-11-13（“好，先做方案 1”） |
