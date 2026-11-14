@@ -570,3 +570,55 @@ Product Owner 2026-11-13 反馈：“有时候我按了一个站点，整个画�
 - 新增 `response-compression.test.js` 并在测试入口导入，使用临时 loopback 随机端口与合成数据验证片区 JSON 压缩 / 原文一致、无 gzip / q=0 / 非完整 token、严格字节阈值及中文、静态安全头、PMTiles 200 / 206 / 416、已有编码 / Vary、HEAD、原 sendJson 和实际 Worker API / 静态响应不压缩。首轮全量测试发现 204 空响应兼容问题，已修复并补充回归测试。
 - 最终检查：定向测试 7/7 通过；`npm.cmd test` 903/903 通过，0 失败 / 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目没有 lint / build 命令。MVR-P6-AC6 自动化验证通过，3200 的真实南加州数据响应待 Claude 重启后验证；AC7 自动化检查通过，本轮按任务限制未在 3200 实测浏览器 console / pageerror，Product Owner 预览签字仍待完成。
 - 保留已有 MVR-T8 / T9 及其他工作区改动；无依赖、schema、数据集或运营数据变化，未读取环境文件、写入凭据、启停任何既有服务、commit / push / 部署。
+
+## 14. 底图细节：补道路层级、公路编号、地名和地标（MVR-P7，Draft，Product Owner 2026-11-13）
+
+Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`）的地图细节比现在多。方向选择“离线底图加细节”，不改回 OSM 在线瓦片（W1 和第 10 节的隐私、CSP、OSM 使用政策理由仍然成立）。
+
+### 对比结论（Claude，Sacramento，z10 / z12 / z14 / z16 截图）
+
+| 项目 | 旧版（OSM Carto 在线瓦片） | 现在（Protomaps 离线 + protomaps-leaflet 5.1.0） |
+|---|---|---|
+| 道路层级 | 高速橙色、干道黄色，z10 就很醒目 | 干道白色、高速浅黄，线条细；z10 几乎看不到 |
+| 公路编号 | 有 I 80、CA 99、US 50 盾牌和出口号 | 没有 |
+| 地名 | 社区名（Midtown、East Sacramento、Land Park）、县名 | 只有城市和少量旧地名（Brighton、Perkins），还有 `Sa:ma:` 这类少见名称 |
+| 地标 | 机场、大学、Cal Expo、公园和水体名称 | 没有 |
+| 街道、建筑（z14+） | 有 | 有，差别不大 |
+
+**原因**：不是数据不够，而是没画出来。
+
+- 现有 `service.pmtiles`（Protomaps basemap 4.15.2）已经包含 `pois`、`roads.shield_text` / `network`、`places`（含 `neighbourhood`）、`water.name` 等字段。
+- `protomaps-leaflet` 5.1.0 内置的 `paintRules` / `labelRules` 只画 `earth`、`landcover`、`landuse`、`water`、`roads`、`buildings`、`boundaries`、`places`，不画 `pois`，也不画公路盾牌。
+- 这个库导出了 `ShieldSymbolizer`、`CenteredTextSymbolizer`、`OffsetTextSymbolizer`、`CircleSymbolizer`、`LineLabelSymbolizer` 等，可以在现有规则基础上追加自定义规则。
+
+### 方案
+
+**阶段 A（本次，只改前端，不换底图文件）**
+
+1. **道路层级更明显**：在 P4-1 的谷歌白天配色框架内，加深 `major` / `highway` 的边线（casing），并适当加宽低 zoom 下的高速和干道线宽，让 z8–z11 能看清主路网。具体颜色和线宽由 Claude 在浏览器里对照后定，写回本节。
+2. **公路编号盾牌**：用 `roads.shield_text` + `network` 画盾牌（Interstate / US / State 三种样式，不用图片，用矩形底色 + 文字）。按 zoom 控制密度，避免重复。
+3. **社区名、水体名、公园名**：`places` 的 `neighbourhood` / `macrohood` 在 z12+ 显示；`water`、公园的名称在合适 zoom 显示。过滤 `population_rank` 很低、只是历史地名的点（例如 `Sa:ma:`），过滤规则需可配置。
+4. **地标（POI）**：只显示与派送相关、较大的一类：机场、大学/学校、医院、大型公园、商场、体育场。文字 + 小圆点，不引入图标图片。按 `pois.min_zoom` 控制出现时机。
+5. 所有新增规则集中放在一个独立模块（例如 `web/basemap-rules.js`），`map-view.js` 只负责组合。不修改 `node_modules`，不新增依赖。
+
+**阶段 B（暂不做，另行授权）**：服务区底图数据从 z14 提到 z15。z15 才有部分小型 POI 和门牌号；预计会让 `service.pmtiles` 增加约 2–3 GB（实际大小需用 `pmtiles extract --dry-run` 确认）。见 MVR-Q7。
+
+### 风险
+
+- **拖动性能**：标注越多，主线程绘制越慢（MVR-P5 刚优化过）。阶段 A 必须用 MVR-P5 同样的方法复测，不能明显退步。
+- **标注遮挡**：ZIP 色块（fillOpacity 0.34–0.9）盖在底图上面，选中线路时下面的地名会看不清。本次不改色块透明度；如果 Product Owner 觉得被色块挡住，再单独讨论。
+
+### 验收标准
+
+- **MVR-P7-AC1** z9–z11 截图中，州际公路和主要干道能明显看出（Claude 与旧版截图对照，Product Owner 预览确认）。
+- **MVR-P7-AC2** z10+ 显示公路盾牌（Interstate / US / State 能区分），同一条公路在屏幕上不会密集重复。
+- **MVR-P7-AC3** z12+ 显示社区名；水体和大型公园有名称；`Sa:ma:` 这类低等级旧地名不再显示（过滤阈值是常量，可调）。
+- **MVR-P7-AC4** z13+ 显示方案第 4 条白名单类别的 POI 名称，其余类别不显示。
+- **MVR-P7-AC5** 性能：用 MVR-P5 的测量方法（CPU 降速 4 倍），超过 50ms 的帧数不超过 MVR-T8 之后基线的 1.5 倍；切换站点的最长 long task 不明显变长。
+- **MVR-P7-AC6** 现有行为不变：P4-1 配色、色块、选择、线路编号标签、悬停提示、底图失败提示、服务区 / 区域底图回退。`npm test`、`git diff --check` 通过；新增规则有单元测试（规则过滤、盾牌分类、POI 类别白名单）。
+- **MVR-P7-AC7** Claude 在 3200 对照截图检查，Product Owner 预览签字后再提交、发布。
+
+| 任务 | 内容 | 授权 |
+|---|---|---|
+| MVR-T11 | 阶段 A：新增底图规则模块（道路层级、盾牌、社区/水体/公园名、POI 白名单），接入两层底图，测试 | 待 Product Owner 授权 |
+| MVR-T12 | 阶段 B：service 底图提到 z15 | 另行授权（MVR-Q7） |
