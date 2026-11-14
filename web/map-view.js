@@ -1,3 +1,4 @@
+import { buildPaintRules, buildLabelRules } from './basemap-rules.js';
 import { palette } from './route-colors.js';
 import { difficultyColor } from './difficulty.js';
 import { formatPrice, formatNumber } from './format.js';
@@ -565,7 +566,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
             onBasemapError(); return undefined;
           }
         };
-        const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: protomaps.paintRules(BASEMAP_FLAVOR), labelRules: protomaps.labelRules(BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, ...MAP_RENDER.basemapGrid });
+        const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: buildPaintRules(protomaps, BASEMAP_FLAVOR), labelRules: buildLabelRules(protomaps, BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, ...MAP_RENDER.basemapGrid });
         // GridLayer bounds only understands one rectangle. Refine admission to the union
         // and give each display tile exactly one owner; regional overzoom fills the rest.
         const validTile = layer._isValidTile?.bind(layer) ?? (() => true);

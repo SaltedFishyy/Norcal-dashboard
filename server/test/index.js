@@ -82,3 +82,4 @@ import './service-scripts.test.js';
 import './date-view-db.test.js';
 import './date-view-api.test.js';
 import './date-view-web.test.js';
+import './basemap-rules.test.js';

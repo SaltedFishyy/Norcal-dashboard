@@ -18,7 +18,7 @@ const files = new Map([
   ['/route-colors.js', ['route-colors.js', 'text/javascript']],
   ['/vendor/leaflet/leaflet.js', ['leaflet.js', 'text/javascript', 'leaflet']],
   ['/vendor/protomaps-leaflet/protomaps-leaflet.js', ['protomaps-leaflet.js', 'text/javascript', 'protomaps']],
-  ...['map-view', 'map-panel', 'map-state', 'map-text', 'warehouse-layer', 'warehouse-panel'].map(name => [`/${name}.js`, [`${name}.js`, 'text/javascript']]),
+  ...['basemap-rules', 'map-view', 'map-panel', 'map-state', 'map-text', 'warehouse-layer', 'warehouse-panel'].map(name => [`/${name}.js`, [`${name}.js`, 'text/javascript']]),
   ['/vendor/leaflet/leaflet.css', ['leaflet.css', 'text/css', 'leaflet']],
 ]);
 

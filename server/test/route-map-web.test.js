@@ -229,6 +229,7 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
   };
   const page = createMapPage({ document: doc, leaflet, search, storage,
     loadWarehouseModules: () => Promise.resolve(warehouseModules), ...warehouseOptions, protomaps: {
+    LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
     paintRules: flavor => [{ flavor }], labelRules: (flavor, lang) => [{ flavor, lang }],
     PmtilesSource: class { constructor(url) { this.p = { url, getZxy: (...args) => basemapTile(url, ...args) }; } },
     leafletLayer(options) {
@@ -519,7 +520,11 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   assert.deepEqual(map.zoomTitles, { zoomInTitle: '放大', zoomOutTitle: '缩小' });
   assert.equal(e['map-missing-title'].textContent, '缺少边界的邮编 (2)');
   assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 10, 10, 10, 10, 14, 14]);
-  assert.ok(baselayers.every(layer => !('flavor' in layer.options) && layer.options.paintRules[0].flavor === BASEMAP_FLAVOR && layer.options.labelRules[0].lang === 'en'));
+  assert.ok(baselayers.every(layer => !('flavor' in layer.options) && layer.options.paintRules.some(rule => rule.flavor === BASEMAP_FLAVOR) && layer.options.labelRules.some(rule => rule.lang === 'en')));
+  for (const layer of baselayers) {
+    assert.ok(layer.options.paintRules.some(rule => rule.dataLayer === 'water' && rule.filter(9, { geomType: 2, props: { kind: 'river' } })));
+    assert.ok(layer.options.labelRules.some(rule => rule.dataLayer === 'pois' && rule.filter(12, { geomType: 1, props: { kind: 'peak', name: 'Mount Diablo' } })));
+  }
   assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/socal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/pnw.pmtiles', '/basemap/az.pmtiles', '/basemap/hawaii.pmtiles', '/basemap/ops.pmtiles', '/basemap/service.pmtiles']);
   assert.deepEqual(basemaps.find(layer => layer.name === 'us').bounds, [[24.0, -125.0], [49.5, -66.5]]);
   assert.deepEqual(baselayers[0].options.bounds, [[24.0, -125.0], [49.5, -66.5]]);
