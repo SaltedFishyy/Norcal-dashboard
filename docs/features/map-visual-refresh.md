@@ -571,54 +571,61 @@ Product Owner 2026-11-13 反馈：“有时候我按了一个站点，整个画�
 - 最终检查：定向测试 7/7 通过；`npm.cmd test` 903/903 通过，0 失败 / 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目没有 lint / build 命令。MVR-P6-AC6 自动化验证通过，3200 的真实南加州数据响应待 Claude 重启后验证；AC7 自动化检查通过，本轮按任务限制未在 3200 实测浏览器 console / pageerror，Product Owner 预览签字仍待完成。
 - 保留已有 MVR-T8 / T9 及其他工作区改动；无依赖、schema、数据集或运营数据变化，未读取环境文件、写入凭据、启停任何既有服务、commit / push / 部署。
 
-## 14. 底图细节：补道路层级、公路编号、地名和地标（MVR-P7，Draft，Product Owner 2026-11-13）
+## 14. 底图自然地物：湖、海、山（MVR-P7，Draft，Product Owner 2026-11-13）
 
-Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`）的地图细节比现在多。方向选择“离线底图加细节”，不改回 OSM 在线瓦片（W1 和第 10 节的隐私、CSP、OSM 使用政策理由仍然成立）。
+Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`，OSM 在线瓦片）地图细节多。方向是“离线底图加细节”（不改回 OSM 在线瓦片，W1 和第 10 节的理由仍成立），并明确**主要想看湖、海、山，其他没必要**（道路盾牌、社区名、商场等 POI 不做）。
 
-### 对比结论（Claude，Sacramento，z10 / z12 / z14 / z16 截图）
+### 现状（Claude 检查截图和本机底图数据）
 
-| 项目 | 旧版（OSM Carto 在线瓦片） | 现在（Protomaps 离线 + protomaps-leaflet 5.1.0） |
+| 内容 | 底图数据里有没有 | 现在有没有画出来 |
 |---|---|---|
-| 道路层级 | 高速橙色、干道黄色，z10 就很醒目 | 干道白色、高速浅黄，线条细；z10 几乎看不到 |
-| 公路编号 | 有 I 80、CA 99、US 50 盾牌和出口号 | 没有 |
-| 地名 | 社区名（Midtown、East Sacramento、Land Park）、县名 | 只有城市和少量旧地名（Brighton、Perkins），还有 `Sa:ma:` 这类少见名称 |
-| 地标 | 机场、大学、Cal Expo、公园和水体名称 | 没有 |
-| 街道、建筑（z14+） | 有 | 有，差别不大 |
+| 海、海湾名（Pacific Ocean、San Francisco Bay） | 有（`water` 点，kind `ocean` / `bay`） | 有，但字小、颜色淡 |
+| 湖名（Lake Tahoe、Folsom Lake） | 有（`water` 点，kind `lake` / `water`，min_zoom 约 10） | 有，但和海湾名同一种淡色小字 |
+| 河流线 | 有（`water` 线，kind `river` / `stream`） | 河流线 **z14 才画**；z14 以下只能看到宽河的水面 |
+| 河流名 | 有（`water` 线的 `name`） | 没有 |
+| 山峰名和海拔（Mount Diablo 1173 m） | 有（`pois` 点，kind `peak` / `volcano`，带 `elevation`，min_zoom 多为 12–14） | 没有 |
+| 国家森林、荒野区、国家/州立公园名（Eldorado National Forest、Desolation Wilderness、Yosemite National Park） | 有（`pois` 点，kind `forest` / `nature_reserve` / `national_park` / `park` / `protected_area`，min_zoom 8–10） | 没有（只有绿色面） |
+| 山的起伏（地形阴影） | **没有**。现有矢量底图不含高程数据 | 没有 |
 
-**原因**：不是数据不够，而是没画出来。
-
-- 现有 `service.pmtiles`（Protomaps basemap 4.15.2）已经包含 `pois`、`roads.shield_text` / `network`、`places`（含 `neighbourhood`）、`water.name` 等字段。
-- `protomaps-leaflet` 5.1.0 内置的 `paintRules` / `labelRules` 只画 `earth`、`landcover`、`landuse`、`water`、`roads`、`buildings`、`boundaries`、`places`，不画 `pois`，也不画公路盾牌。
-- 这个库导出了 `ShieldSymbolizer`、`CenteredTextSymbolizer`、`OffsetTextSymbolizer`、`CircleSymbolizer`、`LineLabelSymbolizer` 等，可以在现有规则基础上追加自定义规则。
+说明：`protomaps-leaflet` 5.1.0 内置规则不画 `pois` 层，河流线只在 z14+ 画。它导出了 `CenteredTextSymbolizer`、`OffsetTextSymbolizer`、`LineLabelSymbolizer`、`CircleSymbolizer`、`GroupSymbolizer` 等，可以在内置规则后面追加自定义规则。
 
 ### 方案
 
-**阶段 A（本次，只改前端，不换底图文件）**
+**阶段 A（MVR-T11，只改前端，不换底图文件）**：
 
-1. **道路层级更明显**：在 P4-1 的谷歌白天配色框架内，加深 `major` / `highway` 的边线（casing），并适当加宽低 zoom 下的高速和干道线宽，让 z8–z11 能看清主路网。具体颜色和线宽由 Claude 在浏览器里对照后定，写回本节。
-2. **公路编号盾牌**：用 `roads.shield_text` + `network` 画盾牌（Interstate / US / State 三种样式，不用图片，用矩形底色 + 文字）。按 zoom 控制密度，避免重复。
-3. **社区名、水体名、公园名**：`places` 的 `neighbourhood` / `macrohood` 在 z12+ 显示；`water`、公园的名称在合适 zoom 显示。过滤 `population_rank` 很低、只是历史地名的点（例如 `Sa:ma:`），过滤规则需可配置。
-4. **地标（POI）**：只显示与派送相关、较大的一类：机场、大学/学校、医院、大型公园、商场、体育场。文字 + 小圆点，不引入图标图片。按 `pois.min_zoom` 控制出现时机。
-5. 所有新增规则集中放在一个独立模块（例如 `web/basemap-rules.js`），`map-view.js` 只负责组合。不修改 `node_modules`，不新增依赖。
+1. **水体**
+   - 海、海湾名：比现在更大、更清楚（蓝色斜体，加白色描边）。
+   - 湖名：z9 起显示（受数据 min_zoom 限制），蓝色斜体。
+   - 河流线：主要河流（kind `river`）从 z9 开始画，线宽随 zoom 变化；`stream` 仍只在 z14+。
+   - 河流名：z11+ 沿线显示（`LineLabelSymbolizer`），只给 `river`。
+2. **山**
+   - 山峰：▲ 小三角 + 名称 + 海拔（米，数据原值），z11+ 显示（数据里大部分山峰 z12+ 才有）。
+   - 国家森林、荒野区、国家/州立公园：深绿色斜体名称，z8+ 显示，用于认出山区和自然区。
+3. **不做**：道路盾牌、社区名、商场 / 学校 / 医院等 POI、道路配色调整。
+4. 新规则集中在一个独立模块（例如 `web/basemap-rules.js`），对 service 和区域两层底图都生效；`map-view.js` 只负责组合。不修改 `node_modules`，不新增依赖。字号、颜色、zoom 阈值都做成常量，Claude 在浏览器对照后可以微调并写回本节。
 
-**阶段 B（暂不做，另行授权）**：服务区底图数据从 z14 提到 z15。z15 才有部分小型 POI 和门牌号；预计会让 `service.pmtiles` 增加约 2–3 GB（实际大小需用 `pmtiles extract --dry-run` 确认）。见 MVR-Q7。
+**阶段 B（MVR-T12，另行授权）：地形阴影（hillshade）**
+
+- 只有加地形阴影，地图上才能看到山的起伏，而不只是山名。这是旧版 OSM 也没有、谷歌“地形”图层才有的效果。
+- 需要新增离线高程数据（例如 Protomaps / Mapterhorn 的 terrarium 高程 PMTiles，按片区截取，到 z10–z12），由前端把高程算成阴影，叠在底图下层、色块之下，半透明。
+- 需要先确认：数据来源与许可署名、各片区截取后的文件大小、对拖动性能的影响。见 MVR-Q7。
 
 ### 风险
 
-- **拖动性能**：标注越多，主线程绘制越慢（MVR-P5 刚优化过）。阶段 A 必须用 MVR-P5 同样的方法复测，不能明显退步。
-- **标注遮挡**：ZIP 色块（fillOpacity 0.34–0.9）盖在底图上面，选中线路时下面的地名会看不清。本次不改色块透明度；如果 Product Owner 觉得被色块挡住，再单独讨论。
+- **拖动性能**：标注越多，主线程绘制越慢。阶段 A 规则数量少（只加水体和自然区标注），但仍要用 MVR-P5 的方法复测。
+- **被色块遮住**：ZIP 色块在底图上面，色块内部的湖名、山名会被盖淡。服务区的山和湖大多在色块外或边缘，本次不改色块透明度；Product Owner 预览后觉得有问题再讨论。
 
 ### 验收标准
 
-- **MVR-P7-AC1** z9–z11 截图中，州际公路和主要干道能明显看出（Claude 与旧版截图对照，Product Owner 预览确认）。
-- **MVR-P7-AC2** z10+ 显示公路盾牌（Interstate / US / State 能区分），同一条公路在屏幕上不会密集重复。
-- **MVR-P7-AC3** z12+ 显示社区名；水体和大型公园有名称；`Sa:ma:` 这类低等级旧地名不再显示（过滤阈值是常量，可调）。
-- **MVR-P7-AC4** z13+ 显示方案第 4 条白名单类别的 POI 名称，其余类别不显示。
+- **MVR-P7-AC1** 海 / 海湾 / 湖名称比现在明显清楚：SF Bay 一带 z9、Lake Tahoe z10 截图可读。
+- **MVR-P7-AC2** 主要河流从 z9 起有线；z11+ 显示河流名；`stream` 在 z14 以下不画。
+- **MVR-P7-AC3** z11+ 显示山峰 ▲ 名称 + 海拔（例如 Mount Diablo z12）；z8+ 显示国家森林 / 荒野区 / 国家与州立公园名称；其他 `pois` 类别不显示。
+- **MVR-P7-AC4** 不出现道路盾牌、社区名、商业 POI；P4-1 配色、色块、选择、线路编号标签、悬停提示、底图失败提示、服务区 / 区域底图回退都不变。
 - **MVR-P7-AC5** 性能：用 MVR-P5 的测量方法（CPU 降速 4 倍），超过 50ms 的帧数不超过 MVR-T8 之后基线的 1.5 倍；切换站点的最长 long task 不明显变长。
-- **MVR-P7-AC6** 现有行为不变：P4-1 配色、色块、选择、线路编号标签、悬停提示、底图失败提示、服务区 / 区域底图回退。`npm test`、`git diff --check` 通过；新增规则有单元测试（规则过滤、盾牌分类、POI 类别白名单）。
-- **MVR-P7-AC7** Claude 在 3200 对照截图检查，Product Owner 预览签字后再提交、发布。
+- **MVR-P7-AC6** `npm test`、`git diff --check` 通过；新增规则有单元测试（类别过滤、zoom 阈值、海拔格式）。
+- **MVR-P7-AC7** Claude 在 3200 对照截图检查（SF Bay、Lake Tahoe、Mount Diablo、Sierra 山区），Product Owner 预览签字后再提交、发布。
 
 | 任务 | 内容 | 授权 |
 |---|---|---|
-| MVR-T11 | 阶段 A：新增底图规则模块（道路层级、盾牌、社区/水体/公园名、POI 白名单），接入两层底图，测试 | 待 Product Owner 授权 |
-| MVR-T12 | 阶段 B：service 底图提到 z15 | 另行授权（MVR-Q7） |
+| MVR-T11 | 阶段 A：水体（海 / 湖 / 河）与山（山峰、森林 / 公园）标注规则模块，接入两层底图，测试 | 待 Product Owner 授权 |
+| MVR-T12 | 阶段 B：离线高程数据 + 地形阴影 | 另行授权（MVR-Q7） |
