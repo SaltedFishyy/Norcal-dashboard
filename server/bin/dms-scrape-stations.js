@@ -39,6 +39,69 @@ export function validateStationList(body, station, { pageNumber, total } = {}) {
   selectBatchRoutes(body, station);
 }
 
+export function buildProgressValue({ state, plan, started, now, phase, current, options, routeIndex, skipped, finished, exitCode, stopReason }) {
+  const statuses = Object.entries(state?.stations || {});
+  return { run_id: state?.run_id ?? null, scope: plan?.scope ?? null,
+    started_at: started.toISOString(), updated_at: now().toISOString(), phase,
+    station: current?.station ?? null, district: plan?.stations.find(s => s.code === current?.station)?.district ?? null,
+    station_index: current ? options.stations.indexOf(current.station) + 1 : 0, station_total: options.stations.length,
+    route_index: routeIndex, route_total: current?.route_total ?? null,
+    completed: statuses.filter(([, s]) => s.status === 'completed').map(([code]) => code),
+    skipped: skipped(), failed: statuses.filter(([, s]) => s.status === 'stopped').map(([code]) => code),
+    finished_at: finished ? now().toISOString() : null, status: finished ? (exitCode ? 'stopped' : 'completed') : 'running',
+    stop_reason: stopReason };
+}
+
+export function newStationRecord(station, { stationBase, startTime }) {
+  return { station, status: 'in_progress', route_total: null, success_count: 0, skipped_cached_count: 0, failed_count: 0,
+    zero_routes: false, request_count: 0, list_request_count: 0, detail_request_count: 0, station_request_cap: stationBase,
+    start_time: startTime, end_time: null, duration_ms: 0, locate_method: { L1: 0, L2: 0, L3: 0, L5: 0 },
+    integrity: { passed: false, checks: {}, warnings: [] }, boundary_coverage: { with_polygon: 0, no_zcta: 0, not_checked: 0 },
+    stop_reason: null, missing_routes: [] };
+}
+
+export function guardRouteNameQuery({ queryName, pageNumber, station, body, total, assertStation, context }) {
+  return async (...params) => {
+    if (pageNumber !== 1) throw new SelectorError('L5 不可用于第 2 页以后');
+    const result = await queryName(...params);
+    await assertStation(context, station);
+    if (!params[1]) {
+      validateStationList(result, station, { pageNumber: 1, total });
+      if (JSON.stringify(result.data.records) !== JSON.stringify(body.data.records)) throw new CaptureError();
+    } else if (!(result.success === true || result.code === 200)
+      || result.data.records.some(row => row.transitStationName !== station)) throw new StationMismatchError();
+    return result;
+  };
+}
+
+export function markStationStopped(current, { phase, error, loadedRoutes, completedRoutes, currentRoute, routeWritten, automaticListSeen, summaries }) {
+  if (phase === 'switch') current.automatic_list_seen = automaticListSeen === true;
+  if (current.end_time) { if (summaries.at(-1) === current) summaries.pop(); current.end_time = null; }
+  current.status = 'stopped'; current.stop_reason = `${phase}:${safeType(error)}`;
+  current.missing_routes = loadedRoutes.filter(id => !completedRoutes.has(id));
+  current.unloaded_route_count = current.route_total === null ? null : Math.max(0, current.route_total - loadedRoutes.length);
+  if (currentRoute && !routeWritten && ['capture', 'transform', 'store'].includes(phase)) current.failed_count++;
+}
+
+export function buildRunRecord({ options, state, summaries, resumed, runtimeSkipped, snapshots, counts, batchCap, started, ended, original, originalKind, restored, stopReason, exitCode, skipped, plan }) {
+  const completed = options.stations.filter(code => state.stations[code].status === 'completed');
+  const record = { station_total: options.stations.length, completed_count: completed.length, completed_stations: completed,
+    limited_stations: options.stations.filter(code => state.stations[code].status === 'limited'), skipped_stations: resumed,
+    unprocessed_stations: options.stations.filter(code => ['pending', 'in_progress', 'stopped'].includes(state.stations[code].status) && !runtimeSkipped.some(s => s.code === code)),
+    route_total: summaries.reduce((sum, item) => sum + (item.route_total || 0), 0)
+      + resumed.reduce((sum, station) => sum + (snapshots[station]?.total || 0), 0),
+    success_count: summaries.reduce((sum, item) => sum + item.success_count, 0),
+    skipped_cached_count: summaries.reduce((sum, item) => sum + item.skipped_cached_count, 0), request_count: counts.prodApiRequestCount,
+    batch_request_cap: batchCap, duration_ms: ended - started, start_time: started.toISOString(), end_time: ended.toISOString(),
+    locate_method: Object.fromEntries(['L1', 'L2', 'L3', 'L5'].map(method => [method, summaries.reduce((sum, item) => sum + item.locate_method[method], 0)])),
+    missing_stations: options.stations.filter(code => state.stations[code].status !== 'completed' && !runtimeSkipped.some(s => s.code === code)),
+    missing_routes: summaries.flatMap(item => item.missing_routes.map(route_id => ({ station: item.station, route_id }))),
+    original_station: original, original_kind: originalKind, original_station_restored: restored, stop_reason: stopReason, status: exitCode ? 'stopped' : 'completed' };
+  record.skipped = skipped();
+  if (plan) record.skipped_by_config = plan.skipped;
+  return record;
+}
+
 export async function runStationsBatch({ args = process.argv.slice(2), env = process.env, log = console.log,
   errorLog = console.error, sessionExists = fs.access, session = withPortraitPage, capture = captureRouteDetailOnPage,
   closeModals = closeRouteDetailModals, readDetails = readRouteDetailsForBatch, readProfiles = readRouteProfiles,
@@ -60,16 +123,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
   const skipped = () => [...(plan?.skipped ?? []), ...runtimeSkipped];
   const progress = async (finished = false) => {
     if (!options?.progressFile || !releaseLock) return;
-    const statuses = Object.entries(state?.stations || {});
-    const value = { run_id: state?.run_id ?? null, scope: plan?.scope ?? null,
-      started_at: started.toISOString(), updated_at: now().toISOString(), phase,
-      station: current?.station ?? null, district: plan?.stations.find(s => s.code === current?.station)?.district ?? null,
-      station_index: current ? options.stations.indexOf(current.station) + 1 : 0, station_total: options.stations.length,
-      route_index: routeIndex, route_total: current?.route_total ?? null,
-      completed: statuses.filter(([, s]) => s.status === 'completed').map(([code]) => code),
-      skipped: skipped(), failed: statuses.filter(([, s]) => s.status === 'stopped').map(([code]) => code),
-      finished_at: finished ? now().toISOString() : null, status: finished ? (exitCode ? 'stopped' : 'completed') : 'running',
-      stop_reason: stopReason };
+    const value = buildProgressValue({ state, plan, started, now, phase, current, options, routeIndex, skipped, finished, exitCode, stopReason });
     try { await progressWriter(options.progressFile, JSON.stringify(value)); }
     catch { errorLog('进度文件写入失败。'); }
   };
@@ -151,11 +205,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
           currentRoute = null; routeIndex = 0;
           currentBaseline = context.counts();
           loadedRoutes = []; completedRoutes = new Set();
-          current = { station, status: 'in_progress', route_total: null, success_count: 0, skipped_cached_count: 0, failed_count: 0,
-            zero_routes: false, request_count: 0, list_request_count: 0, detail_request_count: 0, station_request_cap: config.stationBase,
-            start_time: now().toISOString(), end_time: null, duration_ms: 0, locate_method: { L1: 0, L2: 0, L3: 0, L5: 0 },
-            integrity: { passed: false, checks: {}, warnings: [] }, boundary_coverage: { with_polygon: 0, no_zcta: 0, not_checked: 0 },
-            stop_reason: null, missing_routes: [] };
+          current = newStationRecord(station, { stationBase: config.stationBase, startTime: now().toISOString() });
           state.stations[station].status = 'pending'; await persistState();
           context.beginStation(config.stationBase);
           phase = 'switch'; await progress();
@@ -198,17 +248,7 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
             listContext.body = body;
             listContext.forbidNameFilter = pageNumber > 1;
             const queryName = listContext.queryRouteName;
-            listContext.queryRouteName = async (...params) => {
-              if (pageNumber !== 1) throw new SelectorError('L5 不可用于第 2 页以后');
-              const result = await queryName(...params);
-              await assertStation(context, station);
-              if (!params[1]) {
-                validateStationList(result, station, { pageNumber: 1, total });
-                if (JSON.stringify(result.data.records) !== JSON.stringify(body.data.records)) throw new CaptureError();
-              } else if (!(result.success === true || result.code === 200)
-                || result.data.records.some(row => row.transitStationName !== station)) throw new StationMismatchError();
-              return result;
-            };
+            listContext.queryRouteName = guardRouteNameQuery({ queryName, pageNumber, station, body, total, assertStation, context });
             for (const row of rows) {
               currentRoute = row; routeIndex++; await progress();
               if (!options.refresh && completeRouteDetail(details[String(row.route_id)], row)) {
@@ -271,12 +311,8 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
         }
       } catch (error) {
         if (current) {
-          if (phase === 'switch') current.automatic_list_seen = context.automaticListSeen === true;
-          if (current.end_time) { if (summaries.at(-1) === current) summaries.pop(); current.end_time = null; }
-          current.status = 'stopped'; current.stop_reason = `${phase}:${safeType(error)}`;
-          current.missing_routes = loadedRoutes.filter(id => !completedRoutes.has(id));
-          current.unloaded_route_count = current.route_total === null ? null : Math.max(0, current.route_total - loadedRoutes.length);
-          if (currentRoute && !routeWritten && ['capture', 'transform', 'store'].includes(phase)) current.failed_count++;
+          markStationStopped(current, { phase, error, loadedRoutes, completedRoutes, currentRoute, routeWritten,
+            automaticListSeen: phase === 'switch' ? context.automaticListSeen : undefined, summaries });
           try { await finishStation(); }
           catch { state.stations[current.station].status = 'stopped'; errorLog('Station 运行记录写入失败。'); }
         }
@@ -304,21 +340,9 @@ export async function runStationsBatch({ args = process.argv.slice(2), env = pro
     try {
       if (runtimeDir && state) {
         if (!exitCode && options.stations.every(code => state.stations[code].status === 'completed' || runtimeSkipped.some(s => s.code === code))) state.finished_at = now().toISOString();
-        const ended = now(), completed = options.stations.filter(code => state.stations[code].status === 'completed');
-        const record = { station_total: options.stations.length, completed_count: completed.length, completed_stations: completed,
-          limited_stations: options.stations.filter(code => state.stations[code].status === 'limited'), skipped_stations: resumed,
-          unprocessed_stations: options.stations.filter(code => ['pending', 'in_progress', 'stopped'].includes(state.stations[code].status) && !runtimeSkipped.some(s => s.code === code)),
-          route_total: summaries.reduce((sum, item) => sum + (item.route_total || 0), 0)
-            + resumed.reduce((sum, station) => sum + (snapshots[station]?.total || 0), 0),
-          success_count: summaries.reduce((sum, item) => sum + item.success_count, 0),
-          skipped_cached_count: summaries.reduce((sum, item) => sum + item.skipped_cached_count, 0), request_count: counts.prodApiRequestCount,
-          batch_request_cap: batchCap, duration_ms: ended - started, start_time: started.toISOString(), end_time: ended.toISOString(),
-          locate_method: Object.fromEntries(['L1', 'L2', 'L3', 'L5'].map(method => [method, summaries.reduce((sum, item) => sum + item.locate_method[method], 0)])),
-          missing_stations: options.stations.filter(code => state.stations[code].status !== 'completed' && !runtimeSkipped.some(s => s.code === code)),
-          missing_routes: summaries.flatMap(item => item.missing_routes.map(route_id => ({ station: item.station, route_id }))),
-          original_station: original, original_kind: originalKind, original_station_restored: restored, stop_reason: stopReason, status: exitCode ? 'stopped' : 'completed' };
-        record.skipped = skipped();
-        if (plan) record.skipped_by_config = plan.skipped;
+        const ended = now();
+        const record = buildRunRecord({ options, state, summaries, resumed, runtimeSkipped, snapshots, counts, batchCap,
+          started, ended, original, originalKind, restored, stopReason, exitCode, skipped, plan });
         try { await sink.finishRun({ state, record }); }
         catch (error) {
           exitCode ||= 1;

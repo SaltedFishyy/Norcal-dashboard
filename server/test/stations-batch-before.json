@@ -1,0 +1,632 @@
+{
+  "code": 0,
+  "writes": [
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "in_progress",
+            "summary_file": null,
+            "completed_at": null
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "in_progress",
+            "summary_file": null,
+            "completed_at": null
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      },
+      "station": "SFO01",
+      "record": {
+        "station": "SFO01",
+        "status": "completed",
+        "route_total": 1,
+        "success_count": 1,
+        "skipped_cached_count": 0,
+        "failed_count": 0,
+        "zero_routes": false,
+        "request_count": 2,
+        "list_request_count": 1,
+        "detail_request_count": 1,
+        "station_request_cap": 102,
+        "start_time": "2026-11-16T12:00:00.000Z",
+        "end_time": "2026-11-16T12:00:00.000Z",
+        "duration_ms": 0,
+        "locate_method": {
+          "L1": 1,
+          "L2": 0,
+          "L3": 0,
+          "L5": 0
+        },
+        "integrity": {
+          "passed": true,
+          "checks": {
+            "route_total": true,
+            "station_identity": true,
+            "unique_routes": true,
+            "counts": true,
+            "details": true
+          },
+          "warnings": []
+        },
+        "boundary_coverage": {
+          "with_polygon": 0,
+          "no_zcta": 0,
+          "not_checked": 0
+        },
+        "stop_reason": null,
+        "missing_routes": [],
+        "automatic_list_seen": false
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "pending",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "in_progress",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "in_progress",
+            "summary_file": null,
+            "completed_at": null
+          }
+        },
+        "skipped": []
+      },
+      "station": "MFR01",
+      "record": {
+        "station": "MFR01",
+        "status": "completed",
+        "route_total": 1,
+        "success_count": 1,
+        "skipped_cached_count": 0,
+        "failed_count": 0,
+        "zero_routes": false,
+        "request_count": 4,
+        "list_request_count": 2,
+        "detail_request_count": 1,
+        "station_request_cap": 102,
+        "start_time": "2026-11-16T12:00:00.000Z",
+        "end_time": "2026-11-16T12:00:00.000Z",
+        "duration_ms": 0,
+        "locate_method": {
+          "L1": 1,
+          "L2": 0,
+          "L3": 0,
+          "L5": 0
+        },
+        "integrity": {
+          "passed": true,
+          "checks": {
+            "route_total": true,
+            "station_identity": true,
+            "unique_routes": true,
+            "counts": true,
+            "details": true
+          },
+          "warnings": []
+        },
+        "boundary_coverage": {
+          "with_polygon": 0,
+          "no_zcta": 0,
+          "not_checked": 0
+        },
+        "stop_reason": null,
+        "missing_routes": [],
+        "automatic_list_seen": true
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": null,
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": "2026-11-16T12:00:00.000Z",
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          }
+        },
+        "skipped": []
+      }
+    },
+    {
+      "runtimeDir": "<runtime-dir>",
+      "state": {
+        "run_id": "<run-id>",
+        "started_at": "2026-11-16T12:00:00.000Z",
+        "finished_at": "2026-11-16T12:00:00.000Z",
+        "station_order": [
+          "SFO01",
+          "MFR01"
+        ],
+        "stations": {
+          "SFO01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          },
+          "MFR01": {
+            "status": "completed",
+            "summary_file": "synthetic.json",
+            "completed_at": "2026-11-16T12:00:00.000Z"
+          }
+        },
+        "skipped": []
+      },
+      "record": {
+        "station_total": 2,
+        "completed_count": 2,
+        "completed_stations": [
+          "SFO01",
+          "MFR01"
+        ],
+        "limited_stations": [],
+        "skipped_stations": [],
+        "unprocessed_stations": [],
+        "route_total": 2,
+        "success_count": 2,
+        "skipped_cached_count": 0,
+        "request_count": 8,
+        "batch_request_cap": 204,
+        "duration_ms": 0,
+        "start_time": "2026-11-16T12:00:00.000Z",
+        "end_time": "2026-11-16T12:00:00.000Z",
+        "locate_method": {
+          "L1": 2,
+          "L2": 0,
+          "L3": 0,
+          "L5": 0
+        },
+        "missing_stations": [],
+        "missing_routes": [],
+        "original_station": "SFO01",
+        "original_kind": "station",
+        "original_station_restored": true,
+        "stop_reason": null,
+        "status": "completed",
+        "skipped": []
+      }
+    }
+  ],
+  "progress": [
+    {
+      "run_id": null,
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "config",
+      "station": null,
+      "district": null,
+      "station_index": 0,
+      "station_total": 2,
+      "route_index": 0,
+      "route_total": null,
+      "completed": [],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "store",
+      "station": null,
+      "district": null,
+      "station_index": 0,
+      "station_total": 2,
+      "route_index": 0,
+      "route_total": null,
+      "completed": [],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "switch",
+      "station": "SFO01",
+      "district": null,
+      "station_index": 1,
+      "station_total": 2,
+      "route_index": 0,
+      "route_total": null,
+      "completed": [],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "list",
+      "station": "SFO01",
+      "district": null,
+      "station_index": 1,
+      "station_total": 2,
+      "route_index": 1,
+      "route_total": 1,
+      "completed": [],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "store",
+      "station": "SFO01",
+      "district": null,
+      "station_index": 1,
+      "station_total": 2,
+      "route_index": 1,
+      "route_total": 1,
+      "completed": [
+        "SFO01"
+      ],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "switch",
+      "station": "MFR01",
+      "district": null,
+      "station_index": 2,
+      "station_total": 2,
+      "route_index": 0,
+      "route_total": null,
+      "completed": [
+        "SFO01"
+      ],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "list",
+      "station": "MFR01",
+      "district": null,
+      "station_index": 2,
+      "station_total": 2,
+      "route_index": 1,
+      "route_total": 1,
+      "completed": [
+        "SFO01"
+      ],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "store",
+      "station": "MFR01",
+      "district": null,
+      "station_index": 2,
+      "station_total": 2,
+      "route_index": 1,
+      "route_total": 1,
+      "completed": [
+        "SFO01",
+        "MFR01"
+      ],
+      "skipped": [],
+      "failed": [],
+      "finished_at": null,
+      "status": "running",
+      "stop_reason": null
+    },
+    {
+      "run_id": "<run-id>",
+      "scope": null,
+      "started_at": "2026-11-16T12:00:00.000Z",
+      "updated_at": "2026-11-16T12:00:00.000Z",
+      "phase": "store",
+      "station": "MFR01",
+      "district": null,
+      "station_index": 2,
+      "station_total": 2,
+      "route_index": 1,
+      "route_total": 1,
+      "completed": [
+        "SFO01",
+        "MFR01"
+      ],
+      "skipped": [],
+      "failed": [],
+      "finished_at": "2026-11-16T12:00:00.000Z",
+      "status": "completed",
+      "stop_reason": null
+    }
+  ],
+  "logs": [
+    "请勿同时运行其他抓取命令。Station 与 Route 均串行处理。",
+    "阶段：open",
+    "阶段：展开",
+    "阶段：每页条数",
+    "阶段：查询",
+    "阶段：列表请求；计数：1",
+    "阶段：详情请求；计数：1",
+    "Station SFO01: completed; routes 1; success 1; cached 0; failed 0; requests 2",
+    "等待：station；15000 ms；开始 2026-11-16T12:00:00.000Z",
+    "阶段：列表请求；计数：2",
+    "阶段：展开",
+    "阶段：每页条数",
+    "阶段：查询",
+    "阶段：列表请求；计数：3",
+    "阶段：详情请求；计数：1",
+    "Station MFR01: completed; routes 1; success 1; cached 0; failed 0; requests 4",
+    "阶段：列表请求；计数：4",
+    "批次汇总：Station 2; completed 2; skipped 无; routes 2; success 2; cached 0; requests 8; restored true; stop 无"
+  ],
+  "events": [
+    "goto",
+    "click:expand",
+    "click:.vxe-pager--sizes",
+    "click:.vxe-select-option:visible",
+    "click:query",
+    "capture:1",
+    "save:1",
+    "close",
+    "snapshot:SFO01",
+    "delay:15000",
+    "click:header .dbu-web-main-dropdown-trigger",
+    "click:li.dbu-web-main-dropdown-menu-item",
+    "locator-scroll:MFR01",
+    "switch:MFR01",
+    "load:networkidle:30000",
+    "click:expand",
+    "click:.vxe-pager--sizes",
+    "click:.vxe-select-option:visible",
+    "click:query",
+    "capture:2",
+    "save:2",
+    "close",
+    "snapshot:MFR01",
+    "click:header .dbu-web-main-dropdown-trigger",
+    "click:li.dbu-web-main-dropdown-menu-item",
+    "locator-scroll:SFO01",
+    "switch:SFO01",
+    "load:networkidle:30000"
+  ]
+}
