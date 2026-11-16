@@ -34,8 +34,9 @@ function stopReasonName(reason) {
   if (['process:Exited', 'worker:Restarted'].includes(reason)) return '进程中断';
   return '未知错误';
 }
-const pacificTime = value => value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'America/Los_Angeles',
-  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)) : '—';
+let pacificFormatter;
+const pacificTime = value => value ? (pacificFormatter ??= new Intl.DateTimeFormat('zh-CN', { timeZone: 'America/Los_Angeles',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })).format(new Date(value)) : '—';
 
 export function createDataStatus({ document: doc = globalThis.document, fetch: request = globalThis.fetch,
   setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,

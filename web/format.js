@@ -55,19 +55,31 @@ export function difficultyTone(text) {
   return { D: 'easy', C: 'easy', B: 'medium', A: 'hard', S: 'hard' }[difficultyLevel(text)] ?? 'unknown';
 }
 
+const numberFormatters = new Map();
+let updatedFormatter;
+
 export function formatNumber(value, maximumFractionDigits = 2, minimumFractionDigits = 0) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits, minimumFractionDigits }).format(value);
+  // Non-numeric options retain Intl's coercion and validation on every call.
+  const cacheable = typeof maximumFractionDigits === 'number' && typeof minimumFractionDigits === 'number';
+  const key = cacheable ? `${maximumFractionDigits}:${minimumFractionDigits}` : undefined;
+  let formatter = cacheable ? numberFormatters.get(key) : undefined;
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('en-US', { maximumFractionDigits, minimumFractionDigits });
+    if (cacheable) numberFormatters.set(key, formatter);
+  }
+  return formatter.format(value);
 }
 
 export function formatUpdated(value) {
   if (typeof value !== 'string' || value === '') return '—';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return '—';
-  const parts = new Intl.DateTimeFormat('en-US', {
+  updatedFormatter ??= new Intl.DateTimeFormat('en-US', {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     hourCycle: 'h23', timeZoneName: 'short',
-  }).formatToParts(date);
+  });
+  const parts = updatedFormatter.formatToParts(date);
   const fields = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
   return `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute} ${fields.timeZoneName}`;
 }
