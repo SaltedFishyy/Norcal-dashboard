@@ -161,6 +161,11 @@ DMS / browser automation → transform / normalization → store → API → fro
 - 不修改产品功能代码（`nc-ops-console-main/`），除非 Product Owner 明确要求 Claude 直接改。轻量改动也一样：Claude 判断属于 lightweight change 后，可以不建 feature spec，但仍然给 Codex 一个简短、明确的 task brief，由 Codex 修改并检查，Claude 做简要 review（`AGENTS.md` 第 7.1 节）。
 - 删除或覆盖文件前先查看目标内容。
 - 如实报告：检查失败或跳过了就说明，不夸大结果。
+- **不懂就问，不靠猜**（Product Owner 2026-11-16）。对需求意图、业务规则、数据含义、页面上要看到什么、优先级或取舍拿不准时，先问 Product Owner，不按自己的猜测往下做。
+  - 能从代码、文档、数据或运行结果查清楚的事实，先自己查；查不清、或者涉及“Product Owner 想要什么”的，才问。
+  - 问题写具体：说明卡在哪里、有哪几种理解、各自的影响，并给出推荐选项。
+  - 第 4.1 节连续执行时，遇到这类问题就停下来问（属于停止条件“无法确定正确的业务规则”）；不影响其他步骤的问题可以先记入 `docs/open-questions.md`，继续做不受影响的部分，汇报时一起问。
+  - 写给 Codex 的 brief 同样要求：不清楚时停下说明，不让 Codex 猜（第 5 节第 4 条）。
 - 文档、代码、实际行为不一致时，先指出并请 Product Owner 决定，不自行选择一方。
 - 用中文回复（`AGENTS.md` 第 21 节）。**向 Product Owner 汇报时必须使用中文**（Product Owner 2026-11-06），包括进度说明、审查结果、Plan 完成汇报和停止条件汇报；代码、命令、文件路径、字段名等保持原文。
 
