@@ -661,3 +661,31 @@ Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`，O
   - 改动前超过 50ms 的帧 59 / 65；改动后 5 次为 104 / 58 / 65 / 70 / 85，中位数 70，约为基线的 1.1–1.2 倍，在 1.5 倍以内。
   - 切换站点（56 个站点）最长 long task 54ms，没有变长。
 - **结论**：AC1–AC6 通过（按上面的解释），AC7 待 Product Owner 在 3200 预览签字。
+
+## 15. 快速点击线路后地图卡死（MVR-BF1，Approved，Product Owner 2026-11-16，“交给 Codex 修”）
+
+### 现象
+
+首次打开线路地图、快速连续点击线路后，页面彻底卡住，哪里都点不了。
+
+### 原因（Claude 2026-11-16 排查）
+
+- `protomaps-leaflet` 5.1.0 的标注模块每个缩放级别只保留 16 个数据瓦片的标注（`maxLabeledTiles`，在 `src/frontends/leaflet.ts` 第 112 行写死为 16）。超过时 `pruneOrNoop` 删除最远瓦片的标注；标注跨瓦片边界时又通过 `onTilesInvalidated` 让相邻瓦片重画。
+- service 底图 `levelDiff: 0`，一屏有二三十个数据瓦片，超过 16 个。快速切换位置时，瓦片互相删除标注、互相触发重画，形成停不下来的 Promise 循环，主线程被一直占用。
+- 复现：CPU 降速 4 倍、网络 20 Mbps、全新浏览器、连续快速点击线路。7 轮里 6 轮卡死（约第 13 次点击开始，90 秒无响应，进程内存从 0.5 GB 涨到 1.5 GB）；卡死时调试器暂停 4 次，都停在 `labelCollides` / `layout` / `pruneKey` / `rerenderTile`。
+- 对照：挡掉底图不卡；每次间隔 4 秒不卡；把每个底图层的 `labelers.maxLabeledTiles` 改成 128 后 3 轮都不卡。
+
+### 修复要求
+
+- **MVR-BF1-AC1**：每个底图层创建后，把标注瓦片上限设为常量 `LABEL_TILE_CAP = 128`（放在 `web/basemap-layers.js`），不修改 `node_modules`，不升级依赖。
+- **MVR-BF1-AC2**：上限设置不依赖某一层；9 层底图都生效。库没有 `labelers` 属性时（未来升级）不报错，静默跳过。
+- **MVR-BF1-AC3**：单元测试覆盖 AC1 / AC2；现有测试全部通过。
+- **MVR-BF1-AC4**：Claude 在 3200 用同一复现脚本验证不再卡死，并复测地图性能（不明显变差）。
+- 注意：`maxLabeledTiles` 是库内部属性。以后升级 `protomaps-leaflet` 时必须重新确认该属性仍存在且有效。
+
+### 实现记录
+
+- MVR-BF1：`web/basemap-layers.js` 导出 `LABEL_TILE_CAP = 128`，在共用图层创建路径中、加入地图前设置数字型 `labelers.maxLabeledTiles`；属性缺失或非数字时静默跳过。注释注明默认 16 导致的标注删除 / 重画循环与升级库时的内部属性复核要求。校验、getZxy、瓦片准入和 refreshCoverage 未改。
+- `server/test/route-map-web.test.js` 新增 1 项测试，验证常量导出、9 层在 addTo 前均为 128，以及 labelers 缺失、上限缺失或非数字时仍加入地图且不调用 onBasemapError；原有断言未改。
+- 检查：`npm.cmd test` 919/919 通过，0 失败 / 跳过；`git diff --check` 通过（仅既有 LF/CRLF 提示）。项目无 lint / build 命令。无数据、schema、依赖或底图文件改动；保留任务开始前已有工作区改动，未启停服务、commit、push 或部署。
+- MVR-BF1-AC1–AC3 满足；按 brief 未做浏览器实测，AC4 留给 Claude 在 3200 使用原复现脚本与性能测量验证。

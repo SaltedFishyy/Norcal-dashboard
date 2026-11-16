@@ -1298,7 +1298,7 @@ test('MVR filter is scoped to the basemap tile pane, with an unfiltered ocean ba
 
   const grid = await fs.readFile(new URL('../../node_modules/leaflet/src/layer/tile/GridLayer.js', import.meta.url), 'utf8');
   assert.match(grid, /pane: 'tilePane'/);
-  const view = await fs.readFile(new URL('../../web/map-view.js', import.meta.url), 'utf8');
+  const view = await fs.readFile(new URL('../../web/basemap-layers.js', import.meta.url), 'utf8');
   const options = view.match(/protomaps.leafletLayer\(\{([^}]+)\}/)[1];
   assert.ok(!options.includes('pane:')); // Protomaps inherits GridLayer's tilePane.
   const { map, groups, view: instance, data, routeMarkers } = await labelFixture();
@@ -1944,4 +1944,79 @@ test('MVR-T9 latest cache expires, historical cache persists and failures invali
       }
     }
   } finally { Date.now = originalNow; }
+});
+
+
+test('MVR-BF1 caps labels on all nine layers before adding them and tolerates unavailable internals', async () => {
+  const { loadBasemapLayers, LABEL_TILE_CAP } = await import('../../web/basemap-layers.js');
+  assert.equal(LABEL_TILE_CAP, 128);
+  for (const labelers of [{ maxLabeledTiles: 16 }, undefined, {}, { maxLabeledTiles: '16' }]) {
+    const layers = [], map = {};
+    let errors = 0;
+    const protomaps = {
+      LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
+      paintRules: () => [], labelRules: () => [],
+      PmtilesSource: class { constructor() { this.p = { getZxy: async () => undefined }; } },
+      leafletLayer() {
+        return {
+          ...(labelers === undefined ? {} : { labelers: { ...labelers } }),
+          on() {},
+          addTo(target) {
+            assert.equal(target, map);
+            assert.deepEqual(this.labelers, typeof labelers?.maxLabeledTiles === 'number'
+              ? { maxLabeledTiles: 128 } : labelers);
+            layers.push(this);
+          },
+        };
+      },
+    };
+    await assert.doesNotReject(() => loadBasemapLayers({
+      protomaps, map, onBasemapError: () => { errors++; },
+      request: async () => ({ status: 206, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer }),
+    }));
+    assert.equal(layers.length, 9);
+    assert.equal(errors, 0);
+  }
+});
+
+test('CH-T2 direct and map-view basemap loaders preserve layers, requests and coverage refresh', async () => {
+  const { loadBasemapLayers } = await import('../../web/basemap-layers.js');
+  const { createStaticReader, isStaticPath } = await import('../src/api/static-files.js');
+  assert.equal(isStaticPath('/basemap-layers.js'), true);
+  const { fileURLToPath } = await import('node:url');
+  const readStatic = createStaticReader(fileURLToPath(new URL('../../web/', import.meta.url)));
+  const asset = await readStatic('/basemap-layers.js');
+  assert.equal(asset.contentType, 'text/javascript; charset=utf-8');
+  assert.equal(asset.body.toString(), await fs.readFile(new URL('../../web/basemap-layers.js', import.meta.url), 'utf8'));
+  const f = await fixture();
+  const run = async direct => {
+    const requests = [], layers = [], events = [];
+    let errors = 0;
+    const onBasemapError = () => { errors++; };
+    const protomaps = {
+      LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
+      paintRules: () => [], labelRules: () => [],
+      PmtilesSource: class { constructor(url) { this.p = { url, getZxy: async () => undefined }; } },
+      leafletLayer(options) {
+        const layer = { options,
+          on(name, callback) { assert.equal(callback, onBasemapError); events.push(['on', name]); },
+          addTo(map) { assert.equal(map, f.map); events.push(['add', options.url.url]); },
+          redraw() { events.push(['redraw', options.url.url]); } };
+        layers.push(layer); return layer;
+      },
+    };
+    const request = async (url, options) => {
+      requests.push({ url, options });
+      return { status: 206, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+    };
+    if (direct) await loadBasemapLayers({ protomaps, map: f.map, request, onBasemapError, grid: MAP_RENDER.basemapGrid });
+    else await createMapView({ leaflet: f.leaflet, document: f.doc, protomaps, fetch: request, onBasemapError }).loadBasemaps();
+    assert.equal(layers.length, basemaps.length);
+    assert.equal(events.filter(([event]) => event === 'add').length, basemaps.length);
+    assert.equal(errors, 0);
+    assert.deepEqual(requests.map(({ url }) => url), basemaps.filter(({ name }) => name !== 'service').map(({ name }) => '/basemap/' + name + '.pmtiles'));
+    for (const { options } of requests) assert.deepEqual(options, { headers: { Range: 'bytes=0-7' } });
+    return { requests, events, options: layers.map(({ options: { url, paintRules, labelRules, ...rest } }) => ({ url: url.url, ...rest })) };
+  };
+  assert.deepEqual(await run(true), await run(false));
 });
