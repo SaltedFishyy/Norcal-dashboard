@@ -22,13 +22,16 @@ const files = new Map([
   ['/vendor/leaflet/leaflet.css', ['leaflet.css', 'text/css', 'leaflet']],
 ]);
 
+const webAssetPath = /^\/[a-z0-9][a-z0-9-]*\.(js|css)$/;
+
 export function isStaticPath(pathname) {
-  return files.has(pathname);
+  return files.has(pathname) || webAssetPath.test(pathname);
 }
 
 export function createStaticReader(webDir, leafletDir, protomapsDir) {
   return async (pathname) => {
-    const entry = files.get(pathname);
+    const entry = files.get(pathname) ?? (webAssetPath.test(pathname)
+      ? [pathname.slice(1), pathname.endsWith('.js') ? 'text/javascript' : 'text/css'] : undefined);
     if (!entry) throw new Error('Unknown static asset');
     const [filename, type, source = 'web'] = entry;
     return { body: await readFile(path.join(source === 'leaflet' ? leafletDir : source === 'protomaps' ? protomapsDir : webDir, filename)), contentType: `${type}; charset=utf-8` };

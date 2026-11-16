@@ -154,7 +154,7 @@ export function createRequestHandler({ getSnapshotDays, today = () => pacificTod
       try { await handler({ url, rawPath, req, res, respond }); await pendingResponse; }
       catch (error) {
         if (res.headersSent) { res.destroy(); return; }
-        const [status, code] = isStatic ? [500, 'internal_error']
+        const [status, code] = isStatic ? (error?.code === 'ENOENT' ? [404, 'not_found'] : [500, 'internal_error'])
           : (error?.name === 'InvalidDateError' ? [400, 'invalid_date']
             : error?.name === 'HistoryUnavailableError' ? [400, 'history_unavailable']
               : errorMappings.get(url.pathname)?.get(error?.name))

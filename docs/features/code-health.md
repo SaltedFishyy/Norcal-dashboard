@@ -36,7 +36,34 @@
 
 - CH-T3 涉及 DMS 爬虫主流程，必须纯重构。不做真实 DMS 抓取验证（不在授权内），只靠现有测试和 fixture；Claude review 时逐段对照原代码。
 
+## 4A. CH-T4 新增前端文件不用重启（Approved，Product Owner 2026-11-16，“先把新增文件不用重启修掉”）
+
+- 现象：3000 / 3100 / 3200 进程启动时把可访问的前端文件清单（`server/src/api/static-files.js` 的 `files` Map）固定在内存里。之后新增的 `web/*.js` 一律 404，ES module 加载失败，页面打不开。2026-11-16 3100 因 `basemap-layers.js` 出现过一次；2026-11-12 3000 黑屏也是同一原因。
+- 修法：`web/` 根目录下、文件名只含小写字母 / 数字 / 连字符的 `.js`、`.css` 按名称规则放行，从 `web/` 读取；文件不存在返回 404（不是 500）。HTML 页面（`/`、`/map`）和 vendor 文件仍用显式清单。
+- 安全边界：不允许子目录、`..`、编码字符、大写、点开头或其他扩展名；`web/` 根目录只放公开前端文件（2026-11-16 Claude 确认当前全部是页面脚本 / 样式 / HTML）。
+- **CH-T4-AC1**：运行中的服务在 `web/` 新增 `x-y.js` 后无需重启即可 200 访问，响应头（Content-Type、Cache-Control、CSP、nosniff、压缩）与现有静态文件一致。
+- **CH-T4-AC2**：不存在的 `/nope.js` 返回 404 `not_found`；`/../x.js`、`/%2e%2e/x.js`、`/a/b.js`、`/X.js`、`/.x.js`、`/x.json` 等不放行。
+- **CH-T4-AC3**：现有静态文件路径、HTML、vendor、basemap 行为不变；现有测试通过。
+- 生效说明：本修复本身需要各服务重启一次才生效（3200 由 Claude 重启；3000 随发布重启；3100 需等抓取空闲时重启）。
+
 ## 5. 实现记录
+
+### CH-T4 第 1 轮（2026-11-16，待解决旧断言冲突）
+
+- 修改 `server/src/api/static-files.js`，保留显式清单，新增严格的根目录小写 JS / CSS 文件名规则，按请求读取文件；`server/src/api/app.js` 将静态读取的 ENOENT 映射为 404 `not_found`，其他错误仍为 500。未修改 basemap、API、CSP、缓存头或压缩逻辑。
+- 修改 `server/test/t7.test.js`，新增 2 项测试，覆盖同一 handler 下新增 JS / CSS、响应头、gzip、缺失文件及非法原始路径不调用读取器。第 1 轮按明确授权，仅修改 `T7 webDir override and missing asset errors are sanitized` 的状态、错误码和日志预期；保留测试名、请求路径及其他断言，普通 Error 的 500 测试未改。
+- `npm.cmd test` 共 931 项，930 通过、1 失败、0 跳过；新增 2 项通过。唯一失败为 `server/test/route-map-api.test.js:215`：缺失 `/vendor/leaflet/leaflet.js` 的旧断言要求 500 `internal_error`，实际按 CH-T4-AC2 返回 404 `not_found`。此断言不在本轮授权范围内，保持原样并停止继续修复，等待确认。
+- `git diff --check` 通过，仅有 CRLF 转换提示。项目没有 lint / build 命令；未做浏览器或现有服务验证，未启停服务、部署、提交或推送。无数据或依赖改动，保留其他既有工作区改动。CH-T4-AC1、AC2 已由新增测试覆盖；AC3 因上述冲突尚未满足。
+
+### CH-T4 第 2 轮（2026-11-16）
+
+- 按明确授权，仅将 `server/test/route-map-api.test.js:215` 缺失 vendor 文件的预期改为 404 `not_found`，未改源代码或其他断言；`npm.cmd test` 最终共 931 项，930 通过、1 失败、0 跳过，指定 Leaflet 测试通过，唯一失败为范围外的 `server/test/freshness.test.js:44`（`auto_refresh` 为 null，读取 `district_count` 抛 TypeError），停止继续修复；`git diff --check` 通过（仅有 CRLF 转换提示），CH-T4-AC3 的全量测试通过要求尚未满足。
+
+### CH-T4 Claude 验收（2026-11-16）
+
+- `freshness.test.js:44` 的失败与 CH-T4 无关：测试里模拟的 schedule run 用 `new Date()` 作为 `started_at`，而 handler 先取 `now` 再调用模拟函数，时间晚 1 ms 时被 `started_at <= now` 过滤掉，属于既有的偶发失败。Claude 重跑 `npm test` 931/931 通过。
+- 3200 重启后：`/basemap-layers.js`、`/styles.css`、`/` 均 200；`/nope.js`、`/X.js` 404；`/map` 线路与底图正常，无其他控制台错误。CH-T4-AC1–AC3 满足。
+- 未修复：上述 freshness 测试的时间竞态（建议以后让模拟数据用固定时间，单独小任务处理）。
 
 ### CH-T1（2026-11-16）
 

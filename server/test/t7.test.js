@@ -8,6 +8,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startApiServer } from '../src/api/server.js';
 import { createRequestHandler } from '../src/api/app.js';
+import { createStaticReader, isStaticPath } from '../src/api/static-files.js';
+import { gunzipSync } from 'node:zlib';
 import { formatValue, formatNumber, formatUpdated, pageState, difficultyTone } from '../../web/format.js';
 
 const webDir = fileURLToPath(new URL('../../web/', import.meta.url));
@@ -83,12 +85,74 @@ test('T7 webDir override and missing asset errors are sanitized', async (t) => {
   const { url, logs } = await fixture(t, { webDir: alternate });
   assert.equal(await (await fetch(url + '/')).text(), '<p>Mock web root</p>');
   const response = await fetch(url + '/styles.css?secret=private');
-  assert.equal(response.status, 500);
-  assert.deepEqual(await response.json(), { error: 'internal_error' });
-  assert.deepEqual(logs, ['HTTP 200', 'HTTP 500']);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'not_found' });
+  assert.deepEqual(logs, ['HTTP 200', 'HTTP 404']);
   const health = await fetch(url + '/api/health');
   assert.equal(health.headers.get('content-security-policy'), null);
   assert.deepEqual(await health.json(), { ok: true });
+});
+
+test('CH-T4 new root JS and CSS files load without recreating the handler', async t => {
+  const alternate = await fs.mkdtemp(path.join(os.tmpdir(), 'nc-ch-t4-'));
+  t.after(() => fs.rm(alternate, { recursive: true, force: true }));
+  const read = createStaticReader(alternate);
+  const server = http.createServer(createRequestHandler({ getStaticFile: read }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const body = '/* public fixture */\n'.repeat(100);
+  await fs.writeFile(path.join(alternate, 'app.js'), body);
+  const baseline = await rawRequest(server, '/app.js');
+  for (const [filename, type] of [['new-module.js', 'text/javascript'], ['new-style.css', 'text/css']]) {
+    assert.equal(isStaticPath(`/${filename}`), true);
+    assert.equal((await rawRequest(server, `/${filename}`)).status, 404);
+    await fs.writeFile(path.join(alternate, filename), body);
+    const response = await rawRequest(server, `/${filename}?secret=private`);
+    assert.equal(response.status, 200);
+    assert.equal(response.text, body);
+    assert.equal(response.headers['content-type'], `${type}; charset=utf-8`);
+    for (const [header, expected] of [['cache-control', 'no-store'],
+      ['content-security-policy', "default-src 'self'; frame-ancestors 'none'"],
+      ['x-content-type-options', 'nosniff']]) {
+      assert.equal(response.headers[header], expected);
+      assert.equal(response.headers[header], baseline.headers[header]);
+    }
+    const compressed = await new Promise((resolve, reject) => {
+      const request = http.get({ host: '127.0.0.1', port: server.address().port,
+        path: `/${filename}`, headers: { 'Accept-Encoding': 'gzip' } }, res => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+        res.on('error', reject);
+      });
+      request.on('error', reject);
+    });
+    assert.equal(compressed.status, 200);
+    assert.equal(compressed.headers['content-encoding'], 'gzip');
+    assert.equal(compressed.headers.vary, 'Accept-Encoding');
+    assert.equal(gunzipSync(compressed.body).toString(), body);
+  }
+  const missing = await rawRequest(server, '/nope.js');
+  assert.equal(missing.status, 404);
+  assert.deepEqual(JSON.parse(missing.text), { error: 'not_found' });
+});
+
+test('CH-T4 invalid raw asset paths never call the static reader', async t => {
+  const calls = [];
+  const server = http.createServer(createRequestHandler({ getStaticFile: async pathname => {
+    calls.push(pathname);
+    throw new Error('Must not read invalid paths');
+  } }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  for (const pathname of ['/../x.js', '/%2e%2e/x.js', '/a/b.js', '/X.js', '/.x.js',
+    '/x.json', '/x.js.map', '/x.mjs', '/%78.js', '/x.js/']) {
+    assert.equal(isStaticPath(pathname), false, pathname);
+    const response = await rawRequest(server, pathname);
+    assert.equal(response.status, 404, pathname);
+    assert.deepEqual(JSON.parse(response.text), { error: 'not_found' });
+  }
+  assert.deepEqual(calls, []);
 });
 
 test('T7 handler uses injected asset reader and only logs status', async (t) => {

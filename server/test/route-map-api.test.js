@@ -212,7 +212,7 @@ test('Leaflet source directory can be injected independently of web root', async
   await fs.writeFile(path.join(alternate, 'leaflet.css'), '/* mock local Leaflet */');
   const { url } = await fixture(t, { leafletDir: alternate });
   assert.equal(await (await fetch(url + '/vendor/leaflet/leaflet.css')).text(), '/* mock local Leaflet */');
-  await json(url, '/vendor/leaflet/leaflet.js', 500, { error: 'internal_error' });
+  await json(url, '/vendor/leaflet/leaflet.js', 404, { error: 'not_found' });
 });
 
 
