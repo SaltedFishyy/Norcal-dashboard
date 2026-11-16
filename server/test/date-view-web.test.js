@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNavLinks } from '../../web/date-view.js';
+import { readViewDate, withViewDate, apiUrl, dateOptions, formatViewDate, syncNavLinks, pacificToday } from '../../web/date-view.js';
 import { createStaticReader, isStaticPath } from '../src/api/static-files.js';
 import { fileURLToPath } from 'node:url';
 
@@ -22,4 +22,23 @@ test('DV shared dates validate calendar days and preserve URL context', async ()
   const asset = await createStaticReader(fileURLToPath(new URL('../../web', import.meta.url)))('/date-view.js');
   assert.match(asset.contentType, /javascript/);
   assert.match(asset.body.toString(), /export function readViewDate/);
+});
+
+
+test('CH-T1 shared web Pacific today preserves day and year boundaries', t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-01-01T05:00:00Z') });
+  for (const [iso, expected] of [
+    ['2027-01-01T05:00:00Z', '2026-12-31'],
+    ['2027-01-01T08:00:00Z', '2027-01-01'],
+    ['2026-11-16T07:30:00Z', '2026-11-15'],
+    ['2026-07-01T06:30:00Z', '2026-06-30'],
+    ['2026-07-01T07:00:00Z', '2026-07-01'],
+  ]) {
+    t.mock.timers.setTime(new Date(iso).getTime());
+    assert.match(pacificToday(), /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(pacificToday(), expected);
+    const year = expected.slice(0, 4);
+    assert.equal(dateOptions([{ day: `${year}-01-01` }])[1].label, '01/01');
+    assert.equal(dateOptions([{ day: `${Number(year) - 1}-01-01` }])[1].label, `${Number(year) - 1}/01/01`);
+  }
 });

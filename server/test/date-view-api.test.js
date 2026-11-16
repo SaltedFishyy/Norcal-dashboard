@@ -102,3 +102,25 @@ test('DV-AC5 snapshot calendar has continuous descending days, filtered stations
   assert.deepEqual(await failed('/api/snapshot-days?station=AAA01'), { status: 503,
     body: { error: 'data_source_unavailable' } });
 });
+
+
+test('CH-T1 Pacific day accepts dates, timestamps and ISO strings without changing today', async () => {
+  const { pacificDay, pacificToday } = await import('../src/api/date-view.js');
+  for (const [iso, expected] of [
+    ['2026-11-16T07:30:00Z', '2026-11-15'],
+    ['2026-11-16T08:00:00Z', '2026-11-16'],
+    ['2026-07-01T06:30:00Z', '2026-06-30'],
+    ['2026-07-01T07:00:00Z', '2026-07-01'],
+    ['2027-01-01T05:00:00Z', '2026-12-31'],
+    ['2027-01-01T08:00:00Z', '2027-01-01'],
+  ]) {
+    for (const value of [iso, new Date(iso), Date.parse(iso)]) assert.equal(pacificDay(value), expected);
+    assert.equal(pacificToday(() => new Date(iso)), expected);
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso));
+    const part = type => parts.find(value => value.type === type).value;
+    assert.equal(pacificDay(iso), `${part('year')}-${part('month')}-${part('day')}`);
+    assert.equal(pacificDay(iso), new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso)));
+  }
+});

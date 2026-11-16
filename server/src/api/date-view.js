@@ -1,8 +1,12 @@
-export function pacificToday(now) {
+export function pacificDay(value) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles',
-    year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now());
+    year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value));
   const part = type => parts.find(value => value.type === type).value;
   return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export function pacificToday(now) {
+  return pacificDay(now());
 }
 
 export function requestDay(url, today) {

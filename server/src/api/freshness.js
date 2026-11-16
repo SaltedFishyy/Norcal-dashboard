@@ -1,3 +1,4 @@
+import { pacificDay } from './date-view.js';
 import { readDistrictConfig } from '../store/districts-file.js';
 import { SnapshotNotFoundError } from '../store/route-profiles-file.js';
 
@@ -23,12 +24,10 @@ export function summarizeAutoRefresh(runs, { now = new Date() } = {}) {
   const cutoff = Number(now) - 48 * 3_600_000;
   const recent = runs.filter(r => Date.parse(r.started_at) >= cutoff && Date.parse(r.started_at) <= Number(now))
     .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || String(b.id).localeCompare(String(a.id)));
-  const dayOf = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles',
-    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
   const scheduled = recent.filter(r => r.trigger === 'schedule' && r.scope?.type === 'district');
   if (!scheduled.length) return null;
-  const day = dayOf(scheduled[0].started_at), latest = new Map();
-  for (const r of scheduled) if (dayOf(r.started_at) === day && !latest.has(r.scope.district)) latest.set(r.scope.district, r);
+  const day = pacificDay(scheduled[0].started_at), latest = new Map();
+  for (const r of scheduled) if (pacificDay(r.started_at) === day && !latest.has(r.scope.district)) latest.set(r.scope.district, r);
   const failed = []; let completed_count = 0;
   for (const [district, run] of latest) {
     const recovered = recent.some(r => r.status === 'completed' && Date.parse(r.started_at) > Date.parse(run.started_at)

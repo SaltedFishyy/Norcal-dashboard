@@ -1,4 +1,4 @@
-import { apiUrl, formatViewDate } from './date-view.js';
+import { apiUrl, formatViewDate, pacificToday } from './date-view.js';
 import { routeColor } from './route-colors.js';
 import { openPriceDetail } from './price-detail.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
@@ -198,11 +198,6 @@ export function summarizeMetric(points, key) {
 }
 const shortDay = day => day ? `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}` : '—';
 const dayNumber = day => Date.parse(`${day}T00:00:00Z`) / 86400000;
-function pacificToday() {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return `${fields.year}-${fields.month}-${fields.day}`;
-}
 function sparkline(points, key, days, end, changes, label) {
   const container = element('div', undefined, 'pl-chart-container');
   const tooltip = element('div', '', 'pl-chart-tooltip');

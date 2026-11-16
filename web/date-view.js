@@ -19,8 +19,14 @@ export function apiUrl(path, params, date) {
   return path + (search.size ? `?${search}` : '');
 }
 export const formatViewDate = day => day.slice(5).replace('-', '/');
+export function pacificToday() {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+export const pacificYear = () => pacificToday().slice(0, 4);
 export function dateOptions(days) {
-  const year = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric' }).format(new Date());
+  const year = pacificYear();
   return [{ value: '', label: '最新' }, ...days.map(({ day, has_data }) => ({ value: day,
     label: (day.slice(0, 4) === year ? formatViewDate(day) : day.replaceAll('-', '/')) + (has_data === false ? '（空）' : '') }))];
 }
