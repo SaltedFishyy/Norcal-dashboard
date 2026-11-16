@@ -474,6 +474,18 @@ When the task has acceptance criteria, also state for each one whether it is met
 
 Prefer "existing functionality + better structure + better data + new features" over "complete rewrite".
 
+### Minimal Change Footprint (Product Owner 2026-11-16)
+
+Keep every code change as small as it can be, to prevent the codebase from turning into a pile of tangled patches.
+
+* Touch as few files as possible. Change only the files the requirement actually needs; do not "tidy up" neighboring files in the same task.
+* Prefer adding to the module that already owns the behavior over spreading one feature across many files. Create a new file only when it gives the logic a clear single owner (for example `web/basemap-rules.js`), not to split hairs.
+* Do not copy-paste logic. If the same rule, constant or helper is needed in a second place, reuse or extract it once instead of duplicating it.
+* Keep diffs focused: no drive-by renames, reformatting, reordering or comment rewrites in lines the task does not need.
+* Claude's task briefs name the files expected to change. If Codex needs to touch more files than the brief lists, or more than about 5 source files (tests and docs not counted), stop and explain why before continuing.
+* Reviews check the footprint: files outside the brief, duplicated logic and unrelated edits are review findings.
+* Cleanup of existing debt is done as its own small, approved task (see “Code Organization”), never smuggled into a feature change.
+
 ### Code Organization
 
 The current project contains large HTML files. Do not refactor purely for aesthetic reasons.
