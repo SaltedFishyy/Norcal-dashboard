@@ -628,7 +628,7 @@ Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`，O
 | 任务 | 内容 | 授权 |
 |---|---|---|
 | MVR-T11 | 阶段 A：水体（海 / 湖 / 河）与山（山峰、森林 / 公园）标注规则模块，接入两层底图，测试 | Product Owner 2026-11-13（“那开始做A吧”） |
-| MVR-T12 | 阶段 B：离线高程数据 + 地形阴影 | 另行授权（MVR-Q7） |
+| MVR-T12 | 阶段 B：离线高程数据 + 地形阴影 | **不做**（Product Owner 2026-11-16，“B不用”；MVR-Q7 已关闭） |
 
 ### MVR-T11 实现记录（Implementation Notes）
 

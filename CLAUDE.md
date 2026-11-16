@@ -172,3 +172,13 @@ DMS / browser automation → transform / normalization → store → API → fro
 7. 权限确认（Product Owner 2026-11-06）：Claude 自己可以安全判断的普通继续确认，不转给 Product Owner；仓库内读文件、test、`git status`、`git diff` 等直接执行。若某个低风险命令被 Claude Code 权限系统反复强制确认，先检查它是否属于已允许的低风险类别，符合时建议加入现有 allow 规则（修改 settings 前告知 Product Owner），不要把普通权限提示当作产品决策反复询问。
 8. 只读诊断放宽（Product Owner 2026-11-11）：已批准任务里，Claude 需要用 PowerShell、读取仓库外的普通文件 / 目录、查看进程、端口、日志、服务、计划任务（只查询）时，自己判断后直接执行，不再询问。仍必须先停下来问 Product Owner 的：读取 / 打印 secrets、token、密码、连接串（`.env`、`readonly.env`、`%LOCALAPPDATA%\nc-ops-console\secrets\`）；DMS 登录态（`playwright/.auth`）；删除文件或数据；扩大权限（含修改 Claude Code settings 放宽规则）；以及第 4.1 节其他停止条件。对应 settings：用户级 `additionalDirectories` 加入整个 `%LOCALAPPDATA%\nc-ops-console`，并对 `secrets/`、`config/readonly.env`、`playwright/`、仓库 `.env` 设置 `Read` deny；auto mode 的 allow / soft_deny 写入同样的边界；项目 `.claude/settings.local.json` 允许只读 PowerShell（`Get-*`、`Test-Path`、`Select-String`、`netstat`、`tasklist`、`schtasks /Query` 等）。第 5 条仍然有效：不关闭 `blockReadsOutsideWorkingDirectories`，改用 `additionalDirectories` 扩大可读范围。
 9. 已批准 Plan 内的普通操作自动放行（Product Owner 2026-11-12）：以下操作 Claude 自己判断后直接继续，不再问 Product Owner：仓库内纯只读 Bash（`ls / cat / tail / head / grep / find / awk / sort / uniq / cut`）；读取 handoff、test、docs、source 文件做分析；`git status / diff / diff --cached / show / log`；Git staging（`git add`、部分暂存、`git update-index` / `git hash-object`）以及为避免混入其他任务而做的临时文件处理；修改已批准 Plan 内的 docs / spec / open-questions，包括用 `sed / perl / python` 更新状态（Done / In review 等）和实现记录；普通 PowerShell / 进程 / 端口 / 日志 / 服务 / 计划任务的低风险诊断。仍然必须先问：secrets / token / 密码 / DMS 登录态；删除文件或数据；`reset --hard`、force push、`git clean` 等 destructive Git 操作；覆盖别人的未提交改动；扩大权限；正式数据库 migration / data migration；正式部署 / 服务重启；新 dependency；业务规则不明确或重大风险。对应 settings：用户级 `autoMode.allow` 增加同样内容的一条说明，并补充 PowerShell 的 git 检查 / staging 规则（Bash 已整体允许）。
+10. 尽量不让 Product Owner 手动点 yes（Product Owner 2026-11-16）。2026-11-16 统计历史记录：Product Owner 共手动确认 622 次，其中 559 次是 Bash 内置安全检查（`safetyCheck`）拦下的。这个检查不受 `Bash` allow 规则影响，触发原因是 Claude 的命令写法。Claude 执行命令时：
+    - 读、搜、改文件优先用 Read / Grep / Glob / Edit / Write 工具，不用 shell。
+    - 需要多行脚本时，先用 Write 写到 scratchpad，再用 `node <绝对路径> <参数>` 执行。
+    - Bash 中不用以下写法：变量赋值（`S=...`）、命令替换 `$(...)`、heredoc（`<<EOF`）、`node -e` / `python -`、`sed -i`、`for` / `while` 循环、`cd` 到其他目录。
+    - 一次只跑一条简单命令。管道只用于 `| head`、`| grep` 这类只读过滤。
+    - 需要确认的操作（`git push`、发布、`Stop-Process`、读仓库外文件）单独执行，不和普通命令串在一起。
+    - 对应 settings（Product Owner 2026-11-16 授权）：用户级 `autoMode.allow` 增加一条，覆盖以下三类情况：
+      - 按第 6 节已允许或已获确认的 `git commit` 和非 force 的 `git push origin main`；
+      - Product Owner 在当前对话中明确说“发布”后运行 `scripts/services/release.ps1`；
+      - 结束 Claude 自己启动的诊断进程（临时 node 服务、残留的 headless Chrome）。
