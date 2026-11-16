@@ -7,6 +7,10 @@ import { mapText as t, warehouseText, localizeMap } from './map-text.js';
 import { chooseSelection, readSelection, saveSelection, readMapScope, saveMapScope, populateDistricts, populateStations } from './station-preference.js';
 
 export const DISTRICT_CACHE_MS = 5 * 60 * 1000;
+// Keep the basemap available even when startup stalls or start() is never called.
+export const BASEMAP_START_FALLBACK_MS = 4000;
+// Hidden pages may never run rAF, so bound the wait for a polygon paint.
+export const BASEMAP_PAINT_YIELD_MS = 100;
 
 const knownErrors = new Set(['district_config_invalid', 'district_not_found', 'invalid_district', 'invalid_station', 'snapshot_invalid', 'internal_error', 'postal_codes_missing',
   'route_zip_conflict', 'boundary_invalid', 'boundary_not_found', 'invalid_postal_code', 'snapshot_not_found', 'station_not_found']);
@@ -93,6 +97,29 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     view.fitRoute(routeId);
   };
   const panel = createMapPanel({ document: doc, onClear: deselect, onRoute: chooseRoute, onSearch: searchQuery });
+  let basemapStarted = false, startupCalled = false;
+  let resolveBasemap, rejectBasemap;
+  const basemapReady = new Promise((resolve, reject) => { resolveBasemap = resolve; rejectBasemap = reject; });
+  const basemapFallback = setTimeout(() => startBasemaps(false), BASEMAP_START_FALLBACK_MS);
+  function startBasemaps(afterPaint = true) {
+    if (basemapStarted) return;
+    basemapStarted = true;
+    clearTimeout(basemapFallback);
+    let loading = false, paintFallback;
+    const load = () => {
+      if (loading) return;
+      loading = true;
+      clearTimeout(paintFallback);
+      return Promise.resolve().then(() => view.loadBasemaps()).then(resolveBasemap, rejectBasemap);
+    };
+    if (!afterPaint) { void load(); return; }
+    // rAF runs before paint; defer work to the next task so polygons can be painted first.
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      paintFallback = setTimeout(load, BASEMAP_PAINT_YIELD_MS);
+      globalThis.requestAnimationFrame(() => setTimeout(load, 0));
+    }
+    else setTimeout(load, 0);
+  }
   let warehouseDistrict, warehouseSequence = 0, warehouseLoading = Promise.resolve(false);
   const noopWarehouse = { load: () => Promise.resolve(false), clear() {}, focus() {}, isOpen: () => false };
   let warehouseLayer = noopWarehouse, warehousePanel = noopWarehouse;
@@ -257,6 +284,8 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     }
   }
   async function start() {
+    const firstStart = !startupCalled;
+    startupCalled = true;
     const current = ++sequence;
     clear(); status('loading', t.loadingStations); stationSelect.disabled = true; districtSelect.disabled = true;
     try {
@@ -276,6 +305,7 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
       if (current !== sequence) return;
       await loadStation();
     } catch { status('error', t.stationsError); }
+    finally { if (firstStart) startBasemaps(); }
   }
   function retainedZipHint() {
     const query = element('search').value || '';
@@ -315,7 +345,6 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
   retry.addEventListener('click', () => { districtCache = null; return stationsLoaded ? loadStation() : start(); });
   doc.addEventListener('keydown', event => { if (event.key === 'Escape' && !warehousePanel.isOpen() && !panel.closeCoverage()) deselect(); });
   void initializeWarehouses();
-  const basemapReady = view.loadBasemaps();
   return { start, loadStation, searchQuery, map: view.map, basemapReady };
 }
 

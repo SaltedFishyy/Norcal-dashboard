@@ -689,3 +689,39 @@ Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`，O
 - `server/test/route-map-web.test.js` 新增 1 项测试，验证常量导出、9 层在 addTo 前均为 128，以及 labelers 缺失、上限缺失或非数字时仍加入地图且不调用 onBasemapError；原有断言未改。
 - 检查：`npm.cmd test` 919/919 通过，0 失败 / 跳过；`git diff --check` 通过（仅既有 LF/CRLF 提示）。项目无 lint / build 命令。无数据、schema、依赖或底图文件改动；保留任务开始前已有工作区改动，未启停服务、commit、push 或部署。
 - MVR-BF1-AC1–AC3 满足；按 brief 未做浏览器实测，AC4 留给 Claude 在 3200 使用原复现脚本与性能测量验证。
+- Claude 验收（2026-11-16）：3200 重启后用原复现脚本跑 3 轮（CPU 降速 4 倍、20 Mbps、连续点 25 条线路），都没有卡死，点完后 1.5–2.4 秒内页面能响应；地图性能复测超过 50ms 的帧为 16 / 5 / 5（修复前 4，16 那次是测试波动）。2026-11-16 已发布到 3000（`0a4d13a`）。
+
+## 16. 首次打开加速（MVR-P8，Approved，Product Owner 2026-11-16，“那先做1和2”）
+
+### 现状（Claude 2026-11-16 测量）
+
+- 模拟慢电脑（CPU 降速 4 倍、20 Mbps、无缓存）首次打开 `/map`：线路列表 6.4 秒出现，网络空闲 9.6 秒；加载期间有一段约 1.5 秒的 long task。
+- 主线程占用：底图解码和绘制约 3.5 秒；线路配色 `assignAllColors` 约 0.7 秒；多边形和线路名绘制约 0.8 秒；时间格式化约 0.2 秒（`web/format.js` 的 `formatUpdated` 每次调用都新建 `Intl.DateTimeFormat`）。
+- 底图加载（`view.loadBasemaps()`，`web/map.js` 第 318 行）和片区线路请求同时开始，底图解码与线路处理抢 CPU。
+
+### 范围
+
+- **MVR-T13**：缓存 `Intl` 格式化对象（`web/format.js` 的 `formatUpdated`、`formatNumber`；`web/data-status.js` 的 `pacificTime`）。输出文字完全不变。
+- **MVR-T14**：先显示线路，再加载底图。第一次 `start()` 的片区数据处理完（成功或失败）、并让浏览器画出一帧之后，再开始 `loadBasemaps()`；另设保底时间，避免接口很慢时底图一直不出来。
+- 不做：服务器端预算配色（Product Owner 2026-11-16：先做 1 和 2，复测后再决定）；减少底图内容；换底图库。
+
+### 验收标准
+
+- **MVR-P8-AC1**：T13 后所有格式化输出与原来逐字相同（含时区缩写、小数位、非法输入的 `—`）。
+- **MVR-P8-AC2**：T14 后首次打开时，底图请求在线路多边形渲染之后才开始；片区接口失败或超过保底时间时底图仍会加载。`basemapReady` 仍是 Promise，地图其他行为不变（切换站点 / 片区、底图缺失提示、MVR-BF1 标注上限）。
+- **MVR-P8-AC3**：现有测试全部通过。
+- **MVR-P8-AC4**（Claude）：同样条件复测，线路列表出现时间明显提前，加载期间最长 long task 变短；地图拖动性能不变差。
+
+### 实现记录
+
+- MVR-T13（2026-11-16，第 1 轮修复）：修改 `web/format.js`、`web/data-status.js`，新增 `server/test/format-cache.test.js`。`formatUpdated` 和 `pacificTime` 在模块内懒创建并复用日期格式化器；`formatNumber` 按数值型小数位参数组合缓存，非数值型参数仍逐次交给 Intl 转换和校验，避免改变对象参数的转换行为。
+- 按审查澄清保留全部原有输出与异常：`formatUpdated` 的本地时区、`pacificTime` 的太平洋时区及空值 `—` 不变；`pacificTime` 对非空非法日期仍抛 `RangeError: Invalid time value`，`formatNumber` 对非法小数位参数仍抛 RangeError。
+- 新增 4 项测试，覆盖与原实现逐字对照、重复调用、小数位组合隔离、参数转换、异常，以及懒创建和实例复用；未修改已有断言或扩大生产模块导出面。
+- 检查：`npm.cmd test` 全量 919/919 通过；随后补充的构造次数测试连同该文件其余测试单独运行，4/4 通过。`git diff --check` 通过。项目无 lint / build 命令。本任务未启停服务，未做浏览器预览或性能复测；AC2、AC4 留给 T14 / Claude 后续验证。
+- MVR-T14（2026-11-16）：修改 `web/map.js`、`server/test/route-map-web.test.js`，并在本节补充记录。首次 `start()` 在 `finally` 中触发一次性底图加载，覆盖成功、接口失败及被新 sequence 取代的返回路径；先经 `requestAnimationFrame`，再经 `setTimeout(0)` 给线路多边形绘制机会，无 rAF 时使用 `setTimeout(0)`。创建页面后 4000 ms 仍未触发时直接加载，覆盖接口挂起和未调用 `start()`；正常触发后清除保底计时器。`basemapReady` 保持为 Promise，等待原 `loadBasemaps()` 完成，未修改底图内部逻辑、缺失提示或标注上限。
+- 测试：新增 8 项，覆盖线路渲染与底图请求顺序、rAF 后让出任务、Promise 完成时机、两类接口的 HTTP / 网络失败、未调用与挂起的启动、被取代的首次启动及重复触发。原 fixture 中唯一的 `await page.basemapReady` 改为先触发捕获的保底回调，避免旧视图测试等待真实 4 秒；新增调度测试保留真实调度路径并使用假计时器。
+- 检查：`npm.cmd test` 全量 927/927 通过；随后加强并发启动断言，地图测试单独复验 83/83 通过（含新增 8 项）。`git diff --check` 通过；项目无 lint / build 命令。未启停服务、未做浏览器实测，MVR-P8-AC4 的性能复测及 UI 预览确认由 Claude / Product Owner 后续完成。
+- MVR-T14（2026-11-16，第 1 轮修复）：修改 `web/map.js`、`server/test/route-map-web.test.js`，并补充本节记录。新增 `BASEMAP_PAINT_YIELD_MS = 100`，rAF 后的加载任务与 100 ms 超时竞争，同一加载守卫阻止重复执行；实际开始加载时清除画帧保底计时器。隐藏页面不执行 rAF 时仍可加载底图，保留无 rAF 的 `setTimeout(0)` 路径及 `basemapReady` 完成语义。
+- 第 1 轮新增 2 项测试：rAF 始终未触发时在让步上限后加载，rAF 先到时超时及迟到帧不会重复加载；均检查线路先渲染。地图测试 85/85 通过。未启停服务或做浏览器实测，AC4 仍由 Claude / Product Owner 复测确认。
+- 第 1 轮检查：`npm.cmd test` 全量 929/929 通过；`git diff --check` 通过（仅 Git 的 LF/CRLF 提示）。项目无 lint / build 命令。
+- Claude 验收（2026-11-16）：同样慢速条件（CPU 4 倍、20 Mbps、无缓存）复测，线路列表约 4 秒出现（原 6.4 秒），底图请求在线路多边形之后才开始；隐藏标签页中底图仍会加载（第 1 轮修复后）。拖动性能复测在同一服务上交替跑 HEAD 与新代码，差异在测试波动范围内，未见明确变差。2026-11-16 随 CH-T4 一起发布到 3000。

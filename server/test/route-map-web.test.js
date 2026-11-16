@@ -162,8 +162,8 @@ export class Element {
   close() { this.open = false; }
 }
 
-export async function fixture(search = '', basemapStatus = 206, storage = null, warehouseOptions = {}, basemapTile = async () => { throw new Error('mock archive unavailable'); }) {
-  const { createMapPage } = await import('../../web/map.js');
+export async function fixture(search = '', basemapStatus = 206, storage = null, warehouseOptions = {}, basemapTile = async () => { throw new Error('mock archive unavailable'); }, deferBasemap = false) {
+  const { createMapPage, BASEMAP_START_FALLBACK_MS } = await import('../../web/map.js');
   const warehouseModules = await Promise.all([import('../../web/warehouse-layer.js'), import('../../web/warehouse-panel.js')]);
   const ids = ['route-map', ...['district', 'station', 'dsp', 'message', 'retry', 'content', 'selection', 'coverage',
     'missing', 'missing-empty', 'regenerate', 'source', 'updated', 'search', 'route-count', 'routes', 'no-match', 'clear', 'summary', 'zip-panel', 'coverage-count', 'missing-details', 'missing-title', 'basemap-message', 'zip-heading', 'summary-heading', 'search-hint', 'search-message', 'summary-panel', 'conflicts-details', 'conflicts-title', 'conflicts'].map(id => `map-${id}`)];
@@ -227,7 +227,15 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
       openPopup() { this.popupOpen = true; } };
     return marker;
   };
-  const page = createMapPage({ document: doc, leaflet, search, storage,
+  // Existing view tests need installed baselayers without waiting four real seconds.
+  const originalTimeout = globalThis.setTimeout;
+  let fallback;
+  if (!deferBasemap) globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay === BASEMAP_START_FALLBACK_MS) { fallback = callback; return undefined; }
+    return originalTimeout(callback, delay, ...args);
+  };
+  let page;
+  try { page = createMapPage({ document: doc, leaflet, search, storage,
     loadWarehouseModules: () => Promise.resolve(warehouseModules), ...warehouseOptions, protomaps: {
     LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
     paintRules: flavor => [{ flavor }], labelRules: (flavor, lang) => [{ flavor, lang }],
@@ -235,7 +243,10 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
     leafletLayer(options) {
     const layer = { options, on(name, fn) { this.error = fn; }, addTo() { baselayers.push(this); return this; } }; return layer;
   } }, fetch: async (url, options) => {
-    if (url.startsWith('/basemap/')) return { status: typeof basemapStatus === 'function' ? basemapStatus(url) : basemapStatus, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+    if (url.startsWith('/basemap/')) {
+      await warehouseOptions.onBasemapRequest?.(url, groups);
+      return { status: typeof basemapStatus === 'function' ? basemapStatus(url) : basemapStatus, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+    }
     if (url === '/api/capabilities' && initialCapabilities) {
       initialCapabilities = false;
       const reply = warehouseOptions.capabilityReply;
@@ -253,13 +264,13 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
     const reply = replies.shift();
     if (reply instanceof Error) throw reply;
     return typeof reply === 'function' ? reply() : reply;
-  } });
+  } }); } finally { globalThis.setTimeout = originalTimeout; }
   const reply = (status, data) => ({ status, json: async () => {
     if (data?.stations && !data.routes && typeof data.stations[0] !== 'object') return { districts: [{ id: 'mock', name_zh: '测试片区', name_en: 'Mock District', stations: data.stations.map(code => ({ code, has_snapshot: true })) }] };
     if (data?.routes && !data.stations) return { ...data, routes: data.routes.map(route => ({ ...route, station: data.station })), district: 'mock', stations: [{ code: data.station, fetched_at: data.fetched_at, route_count: data.routes.length }], missing: data.missing.map(row => ({ ...row, station: data.station })) };
     return data;
   } });
-  await page.basemapReady;
+  if (!deferBasemap) { fallback(); await page.basemapReady; }
   return { doc, leaflet, controls, baselayers, renderers, elements, map, groups, page, requests, replies, reply, warehouseRequests, warehouseReplies, markers, routeMarkers };
 }
 const payload = () => buildRouteMap({ profiles: profiles(), station: 'MOCKA', boundaries: boundaries() });
@@ -2019,4 +2030,149 @@ test('CH-T2 direct and map-view basemap loaders preserve layers, requests and co
     return { requests, events, options: layers.map(({ options: { url, paintRules, labelRules, ...rest } }) => ({ url: url.url, ...rest })) };
   };
   assert.deepEqual(await run(true), await run(false));
+});
+
+test('MVR-T14 renders polygons before the animation frame and resolves readiness after basemap loading', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  let frame, requests = 0;
+  const releases = [];
+  globalThis.requestAnimationFrame = callback => { frame = callback; };
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'requestAnimationFrame', previous);
+    else delete globalThis.requestAnimationFrame;
+  });
+  const f = await fixture('', 206, null, { onBasemapRequest: (_, groups) => {
+    requests++;
+    assert.ok(groups.some(group => group.layers.length > 0));
+    if (requests === 1) return new Promise(resolve => { releases.push(resolve); });
+  } }, undefined, true);
+  assert.ok(f.page.basemapReady instanceof Promise);
+  let ready = false;
+  void f.page.basemapReady.then(() => { ready = true; });
+  let releaseDistrict;
+  f.replies.push(f.reply(200, { stations: ['MOCKA'] }), () => new Promise(resolve => { releaseDistrict = resolve; }));
+  const starting = f.page.start();
+  for (let i = 0; i < 20 && !releaseDistrict; i++) await Promise.resolve();
+  assert.equal(requests, 0);
+  assert.equal(frame, undefined);
+  releaseDistrict(f.reply(200, payload()));
+  await starting;
+  assert.ok(f.groups.some(group => group.layers.length > 0));
+  assert.equal(requests, 0);
+  frame();
+  assert.equal(requests, 0);
+  t.mock.timers.tick(0);
+  await Promise.resolve();
+  assert.ok(requests > 0);
+  assert.equal(ready, false);
+  releases.forEach(resolve => resolve());
+  await f.page.basemapReady;
+  assert.equal(ready, true);
+  const count = requests;
+  f.replies.push(f.reply(500, { error: 'internal_error' }));
+  await f.page.start();
+  t.mock.timers.tick(4000);
+  assert.equal(requests, count);
+});
+
+for (const frameFirst of [false, true]) {
+  test(`MVR-T14 paint yield loads once when ${frameFirst ? 'rAF wins' : 'rAF never fires'}`, async t => {
+    const { BASEMAP_PAINT_YIELD_MS } = await import('../../web/map.js');
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+    let frame, requests = 0;
+    globalThis.requestAnimationFrame = callback => { frame = callback; };
+    t.after(() => {
+      if (previous) Object.defineProperty(globalThis, 'requestAnimationFrame', previous);
+      else delete globalThis.requestAnimationFrame;
+    });
+    const f = await fixture('', 206, null, { onBasemapRequest: () => { requests++; } }, undefined, true);
+    f.replies.push(f.reply(200, { stations: ['MOCKA'] }), f.reply(200, payload()));
+    await f.page.start();
+    assert.ok(f.groups.some(group => group.layers.length > 0));
+    assert.equal(requests, 0);
+    if (frameFirst) {
+      frame();
+      t.mock.timers.tick(0);
+    } else {
+      t.mock.timers.tick(BASEMAP_PAINT_YIELD_MS - 1);
+      await Promise.resolve();
+      assert.equal(requests, 0);
+      t.mock.timers.tick(1);
+    }
+    await f.page.basemapReady;
+    assert.equal(f.baselayers.length, basemaps.length);
+    const count = requests;
+    assert.ok(count > 0);
+    t.mock.timers.tick(BASEMAP_PAINT_YIELD_MS);
+    // A late frame after the timeout must also be harmless.
+    frame();
+    t.mock.timers.tick(0);
+    await Promise.resolve();
+    assert.equal(requests, count);
+    assert.equal(f.baselayers.length, basemaps.length);
+  });
+}
+
+for (const endpoint of ['districts', 'route-map/district']) {
+  for (const failure of ['http', 'network']) {
+    test(`MVR-T14 loads basemaps after ${endpoint} ${failure} failure without rAF`, async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const f = await fixture('', 206, null, {}, undefined, true);
+      if (endpoint !== 'districts') f.replies.push(f.reply(200, { stations: ['MOCKA'] }));
+      f.replies.push(failure === 'http' ? f.reply(500, { error: 'internal_error' }) : new Error('mock network failure'));
+      await f.page.start();
+      assert.equal(f.baselayers.length, 0);
+      t.mock.timers.tick(0);
+      await f.page.basemapReady;
+      assert.equal(f.baselayers.length, basemaps.length);
+      t.mock.timers.tick(4000);
+      assert.equal(f.baselayers.length, basemaps.length);
+    });
+  }
+}
+
+for (const stalled of [false, true]) {
+  test(`MVR-T14 fallback loads once when start is ${stalled ? 'stalled' : 'never called'}`, async t => {
+    const { BASEMAP_START_FALLBACK_MS } = await import('../../web/map.js');
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = await fixture('', 206, null, {}, undefined, true);
+    let starting, release;
+    if (stalled) {
+      f.replies.push(() => new Promise(resolve => { release = resolve; }));
+      starting = f.page.start();
+    }
+    t.mock.timers.tick(BASEMAP_START_FALLBACK_MS - 1);
+    await Promise.resolve();
+    assert.equal(f.baselayers.length, 0);
+    t.mock.timers.tick(1);
+    await f.page.basemapReady;
+    assert.equal(f.baselayers.length, basemaps.length);
+    if (stalled) { release(f.reply(500, { error: 'internal_error' })); await starting; }
+    else { f.replies.push(f.reply(500, { error: 'internal_error' })); await f.page.start(); }
+    t.mock.timers.tick(BASEMAP_START_FALLBACK_MS);
+    assert.equal(f.baselayers.length, basemaps.length);
+  });
+}
+
+test('MVR-T14 superseded startup still schedules basemaps once', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = await fixture('', 206, null, {}, undefined, true);
+  let release;
+  f.replies.push(() => new Promise(resolve => { release = resolve; }));
+  const starting = f.page.start();
+  f.replies.push(f.reply(500, { error: 'internal_error' }));
+  await f.page.start();
+  t.mock.timers.tick(0);
+  await Promise.resolve();
+  assert.equal(f.baselayers.length, 0);
+  release(f.reply(200, { stations: ['MOCKA'] }));
+  await starting;
+  assert.equal(f.baselayers.length, 0);
+  t.mock.timers.tick(0);
+  await f.page.basemapReady;
+  assert.equal(f.baselayers.length, basemaps.length);
+  t.mock.timers.tick(4000);
+  assert.equal(f.baselayers.length, basemaps.length);
 });
