@@ -206,6 +206,13 @@
 - [ ] RS-Q1 Worker（3100）是否也改为运行发布副本？第一版不改：Worker 依赖 repo `.env` 里的凭据，改的话要把凭据移到仓库外的配置文件（凭据操作，需要 Product Owner 执行或批准）。目前 3100 只有 Product Owner 本机使用。（2026-11-13）
 - [ ] RS-Q2 旧发布版本保留多少个？第一版不自动删除，清理前先问 Product Owner。（2026-11-13）
 
+## 地图按价格着色 / Map Price Coloring
+
+见 `docs/features/map-price-color.md`（Approved，待实现授权，2026-11-17）。
+
+- [ ] MPC-Q1 左侧线路列表的色块：一条线路里的 ZIP 可能有不同首票价，色块用哪个？Claude 暂定用线路最高首票价（MPC-D7），Product Owner 看 spec 时可改为最低价或中间值。（2026-11-17）
+- [ ] MPC-Q2 无报价 ZIP 目前用灰色、south-cal 整片为灰（MPC-D4，“暂时这样”）。等报价数据补齐或用过一段时间后再看是否要改。（2026-11-17）
+
 ## 底图细节 / Basemap Detail
 
 - ~~**MVR-Q7**~~（2026-11-13，**已关闭**）是否做地形阴影（MVR-P7 阶段 B）：Product Owner 2026-11-16 决定不做（“B不用”）。
