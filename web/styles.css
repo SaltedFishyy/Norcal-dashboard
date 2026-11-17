@@ -350,7 +350,7 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 
 /* MVR */
 .map-page .leaflet-tile-pane { filter: none; }
-.map-page #route-map { background: #aadaff; }
+.map-page #route-map { background: #f5f3f0; }
 
 .map-page .map-legend { box-sizing: border-box; width: 230px; max-width: calc(100vw - 64px); padding: 10px 12px; background: rgba(10,16,30,.86); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(4px); }
 .map-page .map-legend strong { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }

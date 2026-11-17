@@ -26,7 +26,7 @@ test('basemap store validates header and fixed whitelist with sanitized errors',
   assert.equal(file.size, bytes.length);
   const parts = []; for await (const part of file.stream(8, 11)) parts.push(part);
   assert.deepEqual(Buffer.concat(parts), bytes.subarray(8, 12)); await file.close();
-  for (const name of ['../us', 'constructor', 'US', 'us.pmtiles', 'ops', 'norcal', 'service']) {
+  for (const name of ['../us', 'constructor', 'US', 'us.pmtiles', 'norcal', 'service']) {
     await assert.rejects(readBasemap({ basemapDir, name }), BasemapNotFoundError);
   }
   for (const invalid of [Buffer.from('bad'), Buffer.from('PMTiles\x02'), Buffer.from('Invalid\x03')]) {
@@ -90,11 +90,15 @@ test('basemap API streams full files, supports single ranges and preserves secur
   assert.equal(hawaii.status, 206);
   assert.equal(hawaii.headers.get('content-range'), 'bytes 0-7/' + bytes.length);
   assert.deepEqual(Buffer.from(await hawaii.arrayBuffer()), bytes.subarray(0, 8));
-  let response = await fetch(url + '/basemap/ops.pmtiles');
+  let response = await fetch(url + '/basemap/norcal.pmtiles');
   assert.equal(response.status, 404); assert.deepEqual(await response.json(), { error: 'basemap_not_found' });
-  await fs.writeFile(path.join(basemapDir, 'ops.pmtiles'), 'invalid');
-  response = await fetch(url + '/basemap/ops.pmtiles');
+  await fs.writeFile(path.join(basemapDir, 'norcal.pmtiles'), 'invalid');
+  response = await fetch(url + '/basemap/norcal.pmtiles');
   assert.equal(response.status, 500); assert.deepEqual(await response.json(), { error: 'basemap_invalid' });
+  await fs.writeFile(path.join(basemapDir, 'ops.pmtiles'), bytes);
+  response = await fetch(url + '/basemap/ops.pmtiles');
+  assert.equal(response.status, 404); assert.deepEqual(await response.json(), { error: 'not_found' });
+  await assert.rejects(readBasemap({ basemapDir, name: 'ops' }), BasemapNotFoundError);
   response = await fetch(url + '/basemap/unknown.pmtiles'); assert.equal(response.status, 404);
 });
 

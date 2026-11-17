@@ -289,6 +289,8 @@ server/test/route-map.test.js           组装逻辑、API、颜色函数、静�
   | `hawaii.pmtiles` | ????bbox `-160.6,18.8,-154.7,22.4`??? `20261028` | 0?10 | 0.9 MB |
   | `ops.pmtiles` | SFO01 运营区 | 0–14 | 125.2 MB |
 
+  备注：2026-11-16 起前端和服务端不再使用 `ops`（MVR-T15），runtime 文件暂留。
+
   合计约 197 MB。所有文件均为 PMTiles spec v3、tile type `mvt`。超过各层最大 zoom 时由前端 overzoom 显示。
 - 更新：需要更新底图（例如几个月一次，或新增运营区）时，换成新的构建日期重新执行上面的命令，并更新本表。新增 Station 时扩大或新增 `ops` 层的 bbox。
 

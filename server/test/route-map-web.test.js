@@ -530,20 +530,20 @@ test('RM2 search, list selection, summary, clearing, Fit Station and basemap set
   assert.equal(map.options.maxBounds, undefined);
   assert.deepEqual(map.zoomTitles, { zoomInTitle: '放大', zoomOutTitle: '缩小' });
   assert.equal(e['map-missing-title'].textContent, '缺少边界的邮编 (2)');
-  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 10, 10, 10, 10, 14, 14]);
+  assert.deepEqual(baselayers.map(layer => layer.options.maxDataZoom), [6, 10, 10, 10, 10, 10, 10, 14]);
   assert.ok(baselayers.every(layer => !('flavor' in layer.options) && layer.options.paintRules.some(rule => rule.flavor === BASEMAP_FLAVOR) && layer.options.labelRules.some(rule => rule.lang === 'en')));
   for (const layer of baselayers) {
     assert.ok(layer.options.paintRules.some(rule => rule.dataLayer === 'water' && rule.filter(9, { geomType: 2, props: { kind: 'river' } })));
     assert.ok(layer.options.labelRules.some(rule => rule.dataLayer === 'pois' && rule.filter(12, { geomType: 1, props: { kind: 'peak', name: 'Mount Diablo' } })));
   }
-  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/socal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/pnw.pmtiles', '/basemap/az.pmtiles', '/basemap/hawaii.pmtiles', '/basemap/ops.pmtiles', '/basemap/service.pmtiles']);
+  assert.deepEqual(baselayers.map(layer => layer.options.url.url), ['/basemap/us.pmtiles', '/basemap/norcal.pmtiles', '/basemap/socal.pmtiles', '/basemap/mountain.pmtiles', '/basemap/pnw.pmtiles', '/basemap/az.pmtiles', '/basemap/hawaii.pmtiles', '/basemap/service.pmtiles']);
   assert.deepEqual(basemaps.find(layer => layer.name === 'us').bounds, [[24.0, -125.0], [49.5, -66.5]]);
   assert.deepEqual(baselayers[0].options.bounds, [[24.0, -125.0], [49.5, -66.5]]);
   assert.deepEqual(baselayers[1].options.bounds, [[35.5, -124.6], [42.5, -119.0]]);
   assert.deepEqual(baselayers[3].options.bounds, [[34.0, -116.5], [47.0, -103.0]]);
   assert.deepEqual(baselayers[4].options.bounds, [[42.0, -124.9], [49.1, -116.4]]);
   assert.deepEqual(baselayers[5].options.bounds, [[31.2, -115.0], [37.4, -108.8]]);
-  assert.deepEqual(baselayers[7].options.bounds, [[36.43, -123.16], [39.01, -121.06]]);
+  assert.deepEqual(baselayers[7].options.bounds, [[21.21, -158.33], [49.05, -104.24]]);
   assert.deepEqual(baselayers[2].options.bounds, [[32.4, -121.5], [35.6, -114.0]]);
   assert.deepEqual(baselayers[6].options.bounds, [[18.8, -160.6], [22.4, -154.7]]);
   const search = e['map-search']; search.value = ' mock-a '; search.listeners.input();
@@ -989,11 +989,11 @@ test('MAP-PERF basemaps hand off US coverage to regional layers and retain buffe
     assert.equal(layer.options.url.url, '/basemap/' + name + '.pmtiles');
   }
   assert.equal(Object.hasOwn(baselayers[0].options, 'minZoom'), false);
-  assert.equal(basemaps[0].maxZoom, 6);
-  assert.equal(baselayers[0].options.maxZoom, 6);
+  assert.equal(Object.hasOwn(basemaps[0], 'maxZoom'), false);
+  assert.equal(Object.hasOwn(baselayers[0].options, 'maxZoom'), false);
   assert.equal(basemaps[6].minZoom, 7);
   assert.equal(baselayers[6].options.minZoom, 7);
-  assert.deepEqual(baselayers.slice(1).map(layer => layer.options.minZoom), [7, 7, 7, 7, 7, 7, 10, 11]);
+  assert.deepEqual(baselayers.slice(1).map(layer => layer.options.minZoom), [7, 7, 7, 7, 7, 7, 11]);
 });
 
 test('R1 focus outline suppression is scoped to interactive map SVG paths', async () => {
@@ -1298,14 +1298,14 @@ test('RM12 All Stations gives every route label focused priority', async () => {
 });
 
 
-test('MVR filter is scoped to the basemap tile pane, with an unfiltered ocean background', async () => {
+test('MVR filter is scoped to the basemap tile pane, with an unfiltered land background', async () => {
   const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   const block = css.split('/* MVR */')[1];
   const rules = [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   assert.deepEqual(rules.filter(([, , body]) => /(?:^|;)\s*filter:/.test(body)).map(([, selector]) => selector.trim()),
     ['.map-page .leaflet-tile-pane']);
   assert.match(block, /filter: none/);
-  assert.match(block, /\.map-page #route-map \{ background: #aadaff; \}/);
+  assert.match(block, /\.map-page #route-map \{ background: #f5f3f0; \}/);
 
   const grid = await fs.readFile(new URL('../../node_modules/leaflet/src/layer/tile/GridLayer.js', import.meta.url), 'utf8');
   assert.match(grid, /pane: 'tilePane'/);
@@ -1681,7 +1681,9 @@ test('MVR P3 service and regional tile ownership is exclusive, including overzoo
     for (const [lon,lat] of [[-140,35],[-110,39],[-124,40]]) {
       const tile = tileAt(lon,lat,z);
       assert.equal(service._isValidTile(tile), false);
-      assert.ok(regional._isValidTile(tile));
+      const owner = lon === -110 ? 'mountain' : 'norcal';
+      assert.ok(baselayers[basemaps.findIndex(layer => layer.name === owner)]._isValidTile(tile));
+      if (owner === 'mountain') assert.equal(baselayers[basemaps.findIndex(layer => layer.name === 'norcal')]._isValidTile(tile), false);
     }
   }
   const outside = tileAt(-140,35,12);
@@ -1689,6 +1691,148 @@ test('MVR P3 service and regional tile ownership is exclusive, including overzoo
   assert.equal(calls.length,0);
   assert.ok(!preflights.includes('/basemap/service.pmtiles'));
   assert.equal(serviceTile(tileAt(-122,37,10)),null);
+});
+
+test('MVR-T18 US retains low zoom admission and overzooms only outside loaded regions', async () => {
+  const { baselayers } = await fixture();
+  const us = baselayers[0];
+  assert.equal(us.options.maxDataZoom, 6);
+  // The existing fixture has no GridLayer predicate: original admission is true.
+  for (let z = 0; z <= 6; z++) {
+    for (let x = 0; x < 2 ** z; x++) {
+      for (let y = 0; y < 2 ** z; y++) assert.equal(us._isValidTile({ x, y, z }), true);
+    }
+  }
+  const gap = tileAt(-107.5, 32.5, 8);
+  assert.equal(us._isValidTile(gap), true);
+  // Check actual regional bounds because the fixture does not implement GridLayer bounds.
+  for (const [i, region] of basemaps.entries()) {
+    if (region.name === 'us' || region.name === 'service') continue;
+    const [[s, w], [n, e]] = region.bounds;
+    const southwest = tileAt(w, s, 8), northeast = tileAt(e, n, 8);
+    const admitted = gap.x >= southwest.x && gap.x <= northeast.x && gap.y >= northeast.y && gap.y <= southwest.y;
+    assert.equal(admitted && baselayers[i]._isValidTile(gap), false, region.name);
+  }
+  assert.equal(us._isValidTile(tileAt(-112, 32.5, 8)), false);
+  // This tile crosses AZ's eastern bound and lies south of mountain coverage.
+  const edge = tileAt(-108.7, 32.5, 8);
+  assert.ok(edge.x / 2 ** edge.z * 360 - 180 < -108.8);
+  assert.equal(us._isValidTile(edge), false);
+  const service = tileAt(-122, 37, 12);
+  assert.equal(baselayers.at(-1)._isValidTile(service), true);
+  assert.equal(us._isValidTile(service), false);
+});
+
+test('MVR-T18 US high zoom fallback waits for all layers to settle before redraw', async () => {
+  const { loadBasemapLayers } = await import('../../web/basemap-layers.js');
+  for (const failRegion of [false, true]) {
+    const layers = [], requests = [], redraws = [];
+    const gap = tileAt(-107.5, 32.5, 8);
+    const assertLoading = () => {
+      assert.equal(layers[0]._isValidTile(gap), false);
+      assert.equal(layers[0]._isValidTile(tileAt(-107.5, 32.5, 6)), true);
+    };
+    const protomaps = {
+      LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
+      paintRules: () => [], labelRules: () => [],
+      PmtilesSource: class { constructor() { this.p = { getZxy: async () => undefined }; } },
+      leafletLayer() {
+        return { on() {}, addTo() { layers.push(this); assertLoading(); },
+          redraw() { redraws.push(this); assert.equal(layers[0]._isValidTile(gap), true); } };
+      },
+    };
+    let errors = 0;
+    await loadBasemapLayers({ protomaps, map: {}, onBasemapError: () => { errors++; },
+      request: async url => {
+        requests.push(url);
+        if (layers.length) assertLoading();
+        return { status: failRegion && url === '/basemap/hawaii.pmtiles' ? 404 : 206,
+          arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer };
+      } });
+    assert.equal(requests.length, basemaps.length - 1);
+    assert.equal(errors, Number(failRegion));
+    assert.equal(layers[0]._isValidTile(gap), true);
+    assert.deepEqual(redraws, layers);
+  }
+});
+
+test('MVR-T18 failed regional validation restores US fallback in its uncovered area', async () => {
+  const { baselayers } = await fixture('', url => url === '/basemap/az.pmtiles' ? 404 : 206);
+  assert.equal(baselayers.some(layer => layer.options.url.url === '/basemap/az.pmtiles'), false);
+  assert.equal(baselayers[0]._isValidTile(tileAt(-112, 32.5, 8)), true);
+});
+
+test('MVR-T18 US always preserves the original GridLayer admission predicate', async () => {
+  const { loadBasemapLayers } = await import('../../web/basemap-layers.js');
+  const layers = [];
+  let admitted = true;
+  const protomaps = {
+    LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
+    paintRules: () => [], labelRules: () => [],
+    PmtilesSource: class { constructor() { this.p = { getZxy: async () => undefined }; } },
+    leafletLayer(options) {
+      return { options, _isValidTile() { assert.equal(this.options, options); return admitted; },
+        on() {}, addTo() { layers.push(this); } };
+    },
+  };
+  await loadBasemapLayers({ protomaps, map: {}, onBasemapError: () => assert.fail('unexpected error'),
+    request: async () => ({ status: 206, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer }) });
+  for (const value of [true, false]) {
+    admitted = value;
+    for (const z of [0, 1, 2, 3, 4, 5, 6, 8]) {
+      assert.equal(layers[0]._isValidTile(tileAt(-107.5, 32.5, z)), value);
+    }
+  }
+});
+
+test('MVR-T16 service admission matches the original display bounds algorithm', () => {
+  const original = coords => {
+    if (coords.z < 11) return null;
+    const z = Math.min(coords.z, 14), scale = 2 ** (coords.z - z);
+    const x = Math.floor(coords.x / scale), y = Math.floor(coords.y / scale);
+    const displayN = 2 ** coords.z;
+    const displayLat = row => Math.atan(Math.sinh(Math.PI * (1 - 2 * row / displayN))) * 180 / Math.PI;
+    const west = coords.x / displayN * 360 - 180, east = (coords.x + 1) / displayN * 360 - 180;
+    const north = displayLat(coords.y), south = displayLat(coords.y + 1);
+    return SERVICE_BOUNDS.some(([w, s, e, n]) => west < e && east > w && south < n && north > s)
+      ? { z, x, y, key: z + '/' + x + '/' + y } : null;
+  };
+  for (const z of [10, 11, 14, 15, 16]) {
+    const points = [[-140, 35], [-110, 39], [-124, 40]];
+    for (const [w, s, e, n] of SERVICE_BOUNDS) {
+      points.push([(w + e) / 2, (s + n) / 2], [w, s], [e, n], [w - 0.001, s], [e + 0.001, n]);
+    }
+    for (const [lon, lat] of points) {
+      const tile = tileAt(lon, lat, z);
+      assert.deepEqual(serviceTile(tile), original(tile), JSON.stringify(tile));
+    }
+  }
+});
+
+test('MVR-T16 loaded regional owners suppress overlap and preserve uncontained edge tiles', async () => {
+  const { baselayers } = await fixture();
+  const layer = name => baselayers[basemaps.findIndex(region => region.name === name)];
+  for (const z of [10, 15]) {
+    const overlap = tileAt(-110, 35, z);
+    assert.equal(layer('mountain')._isValidTile(overlap), false);
+    assert.equal(layer('az')._isValidTile(overlap), true);
+  }
+  const edge = tileAt(-120, 35.55, 7);
+  assert.equal(layer('norcal')._isValidTile(edge), true);
+  assert.equal(layer('socal')._isValidTile(edge), true);
+  const bay = tileAt(-122, 37, 10);
+  assert.deepEqual(basemaps.filter((region, i) => {
+    const { minZoom = 0, maxZoom = Infinity, bounds: [[s, w], [n, e]] } = region;
+    return bay.z >= minZoom && bay.z <= maxZoom && -122 >= w && -122 <= e && 37 >= s && 37 <= n && baselayers[i]._isValidTile(bay);
+  }).map(region => region.name), ['norcal']);
+  assert.equal(layer('us')._isValidTile(bay), false);
+});
+
+test('MVR-T16 failed regional validation leaves ownership with the loaded lower layer', async () => {
+  const { baselayers } = await fixture('', url => url === '/basemap/az.pmtiles' ? 404 : 206);
+  assert.equal(baselayers.some(layer => layer.options.url.url === '/basemap/az.pmtiles'), false);
+  const mountain = baselayers.find(layer => layer.options.url.url === '/basemap/mountain.pmtiles');
+  assert.equal(mountain._isValidTile(tileAt(-110, 35, 10)), true);
 });
 
 test('MVR P3 absent tiles are quiet and return ownership to regional fallback', async () => {
@@ -1705,7 +1849,7 @@ test('MVR P3 absent tiles are quiet and return ownership to regional fallback', 
 test('MVR P3 missing service archive preserves regional layers and route interactions', async () => {
   const { elements:e, baselayers, page, groups, replies, reply } = await fixture('',url => url.includes('/service.') ? 404 : 206);
   replies.push(reply(200,{stations:['MOCKA']}),reply(200,payload())); await page.start();
-  assert.equal(baselayers.length,9);
+  assert.equal(baselayers.length,8);
   const tile = tileAt(-122,37,14);
   await baselayers.at(-1).options.url.getZxy(tile.z,tile.x,tile.y);
   assert.ok(baselayers[1]._isValidTile(tile));
@@ -1985,9 +2129,63 @@ test('MVR-BF1 caps labels on all nine layers before adding them and tolerates un
       protomaps, map, onBasemapError: () => { errors++; },
       request: async () => ({ status: 206, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer }),
     }));
-    assert.equal(layers.length, 9);
+    assert.equal(layers.length, 8);
     assert.equal(errors, 0);
   }
+});
+
+test('MVR-T17 expands every basemap pixel bounds by 25% and tolerates missing internals', async () => {
+  const { loadBasemapLayers, BASEMAP_PREFETCH } = await import('../../web/basemap-layers.js');
+  assert.equal(BASEMAP_PREFETCH, 0.25);
+  // Leaflet source uses extensionless imports and Util expects a browser window.
+  // Adapt module URLs for Node while keeping the actual geometry implementations.
+  const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  const source = file => fs.readFile(new URL(`../../node_modules/leaflet/src/${file}.js`, import.meta.url), 'utf8');
+  const utilUrl = moduleUrl(`const window = {};
+${await source('core/Util')}`);
+  const pointUrl = moduleUrl((await source('geometry/Point')).replace("'../core/Util'", JSON.stringify(utilUrl)));
+  const { Point } = await import(pointUrl);
+  const { Bounds } = await import(moduleUrl((await source('geometry/Bounds')).replace("'./Point'", JSON.stringify(pointUrl))));
+  for (const hasBounds of [true, false]) {
+    const layers = [], map = {}, center = { lat: 37, lng: -122 };
+    let errors = 0;
+    const protomaps = {
+      LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
+      paintRules: () => [], labelRules: () => [],
+      PmtilesSource: class { constructor() { this.p = { getZxy: async () => undefined }; } },
+      leafletLayer(options) {
+        const layer = {
+          options, on() {},
+          addTo(target) {
+            assert.equal(target, map);
+            for (const [key, value] of Object.entries(MAP_RENDER.basemapGrid)) assert.equal(this.options[key], value);
+            if (hasBounds) {
+              const expanded = this._getTiledPixelBounds(center);
+              assert.ok(expanded instanceof Bounds);
+              assert.deepEqual(expanded, new Bounds([-300, 100], [900, 700]));
+              assert.ok(expanded.min instanceof Point);
+              assert.ok(expanded.max instanceof Point);
+              assert.deepEqual(expanded.getSize(), new Point(1200, 600));
+              assert.deepEqual(expanded.min.unscaleBy(new Point(256, 256)), new Point(-300 / 256, 100 / 256));
+            } else assert.equal(this._getTiledPixelBounds, undefined);
+            layers.push(this);
+          },
+        };
+        if (hasBounds) layer._getTiledPixelBounds = function (received) {
+          assert.equal(this, layer); assert.equal(received, center);
+          return new Bounds([-100, 200], [700, 600]);
+        };
+        return layer;
+      },
+    };
+    await loadBasemapLayers({ protomaps, map, grid: MAP_RENDER.basemapGrid,
+      onBasemapError: () => { errors++; },
+      request: async () => ({ status: 206, arrayBuffer: async () => Uint8Array.from([80,77,84,105,108,101,115,3]).buffer }),
+    });
+    assert.equal(layers.length, basemaps.length);
+    assert.equal(errors, 0);
+  }
+  assert.deepEqual(MAP_RENDER.basemapGrid, { noWrap: true, updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4 });
 });
 
 test('CH-T2 direct and map-view basemap loaders preserve layers, requests and coverage refresh', async () => {

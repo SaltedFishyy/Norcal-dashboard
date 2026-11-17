@@ -4,6 +4,7 @@ import { buildPaintRules, buildLabelRules } from './basemap-rules.js';
 // when a viewport spans more than 16 data tiles. Recheck this internal property
 // on library upgrades; see docs/features/map-visual-refresh.md MVR-BF1.
 export const LABEL_TILE_CAP = 128;
+export const BASEMAP_PREFETCH = 0.25;
 
 // Based on @protomaps/basemaps 5.7.2 LIGHT; BSD-3-Clause, © Protomaps.
 // Google daytime style overrides follow map-visual-refresh.md P4-1.
@@ -157,6 +158,13 @@ export const SERVICE_BOUNDS = [
   [-112,34.89,-110.99,35.77], // FLG01
 ];
 
+function tileBounds({ x, y, z }) {
+  const n = 2 ** z;
+  const lat = row => Math.atan(Math.sinh(Math.PI * (1 - 2 * row / n))) * 180 / Math.PI;
+  return { west: x / n * 360 - 180, east: (x + 1) / n * 360 - 180,
+    north: lat(y), south: lat(y + 1) };
+}
+
 // Match the actual service data tile (including overzoom), not a continent-sized envelope.
 export function serviceTile(coords) {
   if (coords.z < 11) return null;
@@ -164,29 +172,43 @@ export function serviceTile(coords) {
   const x = Math.floor(coords.x / scale), y = Math.floor(coords.y / scale);
   // Admission follows display tiles; using only an overzoom parent would suppress
   // fallback beyond the outer bounds where GridLayer never creates service tiles.
-  const displayN = 2 ** coords.z;
-  const displayLat = row => Math.atan(Math.sinh(Math.PI * (1 - 2 * row / displayN))) * 180 / Math.PI;
-  const west = coords.x / displayN * 360 - 180, east = (coords.x + 1) / displayN * 360 - 180;
-  const north = displayLat(coords.y), south = displayLat(coords.y + 1);
+  const { west, east, north, south } = tileBounds(coords);
   return SERVICE_BOUNDS.some(([w, s, e, n]) => west < e && east > w && south < n && north > s)
     ? { z, x, y, key: z + '/' + x + '/' + y } : null;
 }
 export const basemaps = [
-  { name: 'us', maxZoom: 6, maxDataZoom: 6, bounds: [[24.0, -125.0], [49.5, -66.5]] },
+  { name: 'us', maxDataZoom: 6, bounds: [[24.0, -125.0], [49.5, -66.5]] },
   { name: 'norcal', minZoom: 7, maxDataZoom: 10, bounds: [[35.5, -124.6], [42.5, -119.0]] },
   { name: 'socal', minZoom: 7, maxDataZoom: 10, bounds: [[32.4, -121.5], [35.6, -114.0]] },
   { name: 'mountain', minZoom: 7, maxDataZoom: 10, bounds: [[34.0, -116.5], [47.0, -103.0]] },
   { name: 'pnw', minZoom: 7, maxDataZoom: 10, bounds: [[42.0, -124.9], [49.1, -116.4]] },
   { name: 'az', minZoom: 7, maxDataZoom: 10, bounds: [[31.2, -115.0], [37.4, -108.8]] },
   { name: 'hawaii', minZoom: 7, maxDataZoom: 10, bounds: [[18.8, -160.6], [22.4, -154.7]] },
-  { name: 'ops', minZoom: 10, maxDataZoom: 14, bounds: [[36.43, -123.16], [39.01, -121.06]] },
   { name: 'service', minZoom: 11, maxDataZoom: 14, levelDiff: 0, bounds: [[21.21, -158.33], [49.05, -104.24]] },
 ];
 
 // Preflight the local archives: the renderer logs archive failures rather than firing tileerror.
 // Missing archives must not prevent operational polygons from rendering.
 export async function loadBasemapLayers({ protomaps, map, request, onBasemapError, grid }) {
-  const baseLayers = [], missing = new Set();
+  const baseLayers = [], regions = [], missing = new Set();
+  let regionsSettled = false;
+  const intersectsRegion = coords => {
+    const { west, east, north, south } = tileBounds(coords);
+    return regions.some(({ minZoom = 0, maxZoom = Infinity, bounds: [[s, w], [n, e]] }) =>
+      coords.z >= minZoom && coords.z <= maxZoom && west < e && east > w && south < n && north > s);
+  };
+  const owner = coords => {
+    const { west, east, north, south } = tileBounds(coords);
+    for (let i = regions.length - 1; i >= 0; i--) {
+      const { name, minZoom = 0, maxZoom = Infinity, bounds: [[s, w], [n, e]] } = regions[i];
+      if (coords.z >= minZoom && coords.z <= maxZoom && west >= w && east <= e && south >= s && north <= n) return name;
+    }
+    return null;
+  };
+  const ownsRegion = (name, coords) => {
+    const region = owner(coords);
+    return region === null || region === name;
+  };
   let serviceAvailable = false, refreshPending = false;
   const refreshCoverage = () => {
     if (refreshPending) return;
@@ -237,18 +259,34 @@ export async function loadBasemapLayers({ protomaps, map, request, onBasemapErro
         }
       };
       const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: buildPaintRules(protomaps, BASEMAP_FLAVOR), labelRules: buildLabelRules(protomaps, BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, ...grid });
+      // Leaflet internal method: recheck on upgrades. Render a surrounding ring
+      // after movement ends; updateWhenIdle still prevents new tiles during dragging.
+      if (typeof layer._getTiledPixelBounds === 'function') {
+        const pixelBounds = layer._getTiledPixelBounds.bind(layer);
+        layer._getTiledPixelBounds = center => {
+          const bounds = pixelBounds(center);
+          const pad = bounds.getSize().multiplyBy(BASEMAP_PREFETCH);
+          bounds.min = bounds.min.subtract(pad);
+          bounds.max = bounds.max.add(pad);
+          return bounds;
+        };
+      }
       if (typeof layer.labelers?.maxLabeledTiles === 'number') {
         layer.labelers.maxLabeledTiles = LABEL_TILE_CAP;
       }
-      // GridLayer bounds only understands one rectangle. Refine admission to the union
-      // and give each display tile exactly one owner; regional overzoom fills the rest.
+      // Service owns its union; otherwise the last loaded region fully containing the tile owns it.
+      // If no region fully contains an edge tile, preserve GridLayer admission to avoid gaps.
       const validTile = layer._isValidTile?.bind(layer) ?? (() => true);
+      // Wait for all layers to settle before US overzooms outside loaded regions and their edges.
       layer._isValidTile = coords => validTile(coords) &&
-        (name === 'service' ? Boolean(hasService(coords)) : !hasService(coords));
+        (name === 'service' ? Boolean(hasService(coords)) : !hasService(coords) &&
+          (name === 'us' ? coords.z <= 6 || (regionsSettled && !intersectsRegion(coords)) : ownsRegion(name, coords)));
       if (name === 'service') serviceAvailable = true;
       baseLayers.push(layer);
       layer.on('tileerror', onBasemapError); layer.addTo(map);
+      if (name !== 'service' && name !== 'us') regions.push({ name, ...options });
     } catch { onBasemapError(); }
   }
+  regionsSettled = true;
   refreshCoverage();
 }

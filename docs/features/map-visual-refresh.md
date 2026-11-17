@@ -725,3 +725,87 @@ Product Owner 2026-11-13 反馈：旧 dashboard（`CassieLu0/nc-ops-console`，O
 - 第 1 轮新增 2 项测试：rAF 始终未触发时在让步上限后加载，rAF 先到时超时及迟到帧不会重复加载；均检查线路先渲染。地图测试 85/85 通过。未启停服务或做浏览器实测，AC4 仍由 Claude / Product Owner 复测确认。
 - 第 1 轮检查：`npm.cmd test` 全量 929/929 通过；`git diff --check` 通过（仅 Git 的 LF/CRLF 提示）。项目无 lint / build 命令。
 - Claude 验收（2026-11-16）：同样慢速条件（CPU 4 倍、20 Mbps、无缓存）复测，线路列表约 4 秒出现（原 6.4 秒），底图请求在线路多边形之后才开始；隐藏标签页中底图仍会加载（第 1 轮修复后）。拖动性能复测在同一服务上交替跑 HEAD 与新代码，差异在测试波动范围内，未见明确变差。2026-11-16 随 CH-T4 一起发布到 3000。
+
+## 17. 快速拖动时底图空白（MVR-P9，Approved，Product Owner 2026-11-16，“Go ahead”）
+
+### 现象与原因（Claude 2026-11-16 测量）
+
+- Product Owner 反馈：快速拖动地图时，底图来不及画，露出整片蓝色。
+- 原因：MVR-P5（第 13 节）为了拖动流畅，底图设了 `updateWhenIdle: true`，拖动中不画新瓦片，露出的是 `#route-map` 的蓝色背景。该设置保留：去掉后 CPU 降速 4 倍时超过 50ms 的帧从约 66 个升到 702 个。
+- 另外发现两处无效绘制：
+  - z10 时 `norcal` 和 `ops` 把同样的 20 张瓦片各画一遍，`ops` 在上层，`norcal` 那份看不见。
+  - 区域底图互相重叠（如 `mountain` / `az` 在 Flagstaff、Prescott 一带），重叠处的下层瓦片同样被遮住。
+- `ops`（SFO01 运营区，z0–14，route-map.md 第 275 行）已被 `service`（所有站点 z11–14）取代：z11–14 全部由 `service` 负责，z10 与 `norcal` 重复。去掉后 z10 截图与现状一致。
+
+### 方案
+
+1. **MVR-T15 去掉 `ops` 底图层**：前端 `basemaps` 列表、服务端白名单（`server/src/api/basemap.js`、`server/src/store/basemap-file.js`）删除 `ops`。runtime 里的 `ops.pmtiles` 文件不删除（删除另行询问 Product Owner）。
+2. **MVR-T16 每张瓦片只画一次**：在 `web/basemap-layers.js` 把“只由一层负责”的规则从 service 专用扩展为通用——区域底图的一张瓦片如果完全落在一个更靠上（列表更靠后）且已加载的区域底图范围内，则跳过；service 规则不变。顺带把 `serviceTile` 中的瓦片经纬度计算提成一个内部函数复用。
+3. **MVR-T17 空闲预绘制 + 陆地底色**：
+   - 底图松手后，除了当前视野，再把视野外各方向 25% 的一圈也画好（常量 `BASEMAP_PREFETCH = 0.25`）。实现方式：包装 Leaflet GridLayer 的 `_getTiledPixelBounds`，与现有 `_isValidTile` 包装同类，写注释说明升级 Leaflet 时要复查。
+   - 拖动中仍然不画新瓦片（`updateWhenIdle` 不变）。
+   - `.map-page #route-map` 背景从 `#aadaff` 改为陆地色 `#f5f3f0`（`BASEMAP_FLAVOR.earth`）；瓦片内部的海水颜色不变。
+
+### 验收标准
+
+- **MVR-P9-AC1**：底图列表不含 `ops`；`/basemap/ops.pmtiles` 与任何未知底图路径一样返回 404 `not_found`（即使文件存在；2026-11-16 Claude 更正，原写 `basemap_not_found` 有误）；其余底图接口行为不变。
+- **MVR-P9-AC2**：z10 湾区视野只有 `norcal` 一层瓦片；完全落在上层区域内的区域瓦片不创建；部分重叠的边缘瓦片照旧绘制（不出现空洞）；service 覆盖、缺失瓦片回退、底图缺失提示行为不变。
+- **MVR-P9-AC3**：GridLayer 计算的瓦片范围在视野外扩 25%；拖动中不请求、不绘制新瓦片的行为不变；`#route-map` 背景为 `#f5f3f0`。
+- **MVR-P9-AC4**：`npm test` 全部通过，`git diff --check` 通过。
+- **MVR-P9-AC5**（Claude 在 3200 复测，CPU 降速 4 倍）：快速拖动时视野内空白比例明显低于现状（现状最多 33–42%）；超过 50ms 的帧数不高于现状；线路列表首次出现时间不变差。截图与现状一致（除空白处底色）。
+- **MVR-P9-AC6**（Product Owner）：3200 预览签字。
+
+### 任务
+
+| 任务 | 内容 | 预期文件 |
+|---|---|---|
+| MVR-T15 | 删除 `ops` 层 | `web/basemap-layers.js`、`server/src/api/basemap.js`、`server/src/store/basemap-file.js`、测试、`docs/features/route-map.md` 底图表备注 |
+| MVR-T16 | 通用单层绘制规则 | `web/basemap-layers.js` + 测试 |
+| MVR-T17 | 空闲预绘制 + 陆地底色 | `web/basemap-layers.js`、`web/styles.css` + 测试 |
+| MVR-T18（Approved，Product Owner 2026-11-16 同意，2026-11-17 “按昨天你说的解决方法来做”） | 区域底图未覆盖处由 `us` 低精度兜底：z≥7 时，没有任何已加载区域层 / service 与瓦片相交的地方，由 `us`（overzoom）绘制；有区域层的地方不重复绘制。背景：PHX01 视野东南（新墨西哥南部、墨西哥）z≥7 无底图，改前改后相同（2026-11-16 Claude 截图对照） | `web/basemap-layers.js` + 测试 |
+
+**MVR-T18 验收标准**：
+
+- **MVR-T18-AC1**：z0–6 时 `us` 的行为不变。
+- **MVR-T18-AC2**：z≥7 时，瓦片与任何已成功加载的区域层（在其 zoom 范围内）或 service 有数据的瓦片相交，则 `us` 不创建该瓦片；否则（在 `us` 自身 bounds 内）由 `us` 以 z6 数据 overzoom 绘制。某个区域底图文件缺失 / 加载失败时，它的范围也由 `us` 兜底。
+- **MVR-T18-AC3**：区域层、service 的归属与 MVR-T16 一致，不因 `us` 改变；有区域层的地方 `us` 不重复绘制。
+- **MVR-T18-AC4**：`npm test`、`git diff --check` 通过。
+- **MVR-T18-AC5**（Claude，3200）：PHX01 视野东南 z8 不再出现大块空白；湾区 z9–14 每张瓦片仍只由一层绘制；拖动流畅度不变差。
+
+### 实现记录
+
+- MVR-T15（2026-11-16，Codex，受阻，未完成）：已从 `web/basemap-layers.js`、`server/src/api/basemap.js`、`server/src/store/basemap-file.js` 删除 `ops`，其余条目顺序不变；更新 `server/test/route-map-web.test.js` 中指定 URL / 层数断言，`server/test/basemap-file.test.js` 改用 `norcal` 验证缺失和无效文件，并补充存在合法 `ops.pmtiles` 时拒绝访问的断言；`docs/features/route-map.md` 已添加停用备注，runtime 文件未改动。
+- 检查：`npm.cmd test` 共 931 项，927 通过、4 失败；定向测试共 88 项，84 通过、4 失败。三项失败是旧图层配置列表 / 层数断言；另一项为 `/basemap/ops.pmtiles` 实际返回 404 `not_found`，与要求的 `basemap_not_found` 不符。`server/src/api/app.js:148` 对白名单外路径使用通用 404，修复需要扩展 brief 授权源文件范围；按任务要求停止，未放宽错误码断言，也未继续调整其他测试。未启停服务、未进行浏览器预览；无 lint / build 脚本。
+
+- MVR-T15（2026-11-16，第 1 轮修复）：按 Claude 更正后的 MVR-P9-AC1，仅修改 `server/test/basemap-file.test.js:100` 的 ops HTTP 错误码预期为 404 `{ error: 'not_found' }`；保留文件存在时 `readBasemap({ name: 'ops' })` 抛 `BasemapNotFoundError` 的断言，未修改 `server/src/api/app.js` 或其他源文件。
+- 同步 `server/test/route-map-web.test.js` 中移除 ops 后的配置断言：`:533` maxDataZoom 列表从 `[6, 10, 10, 10, 10, 10, 10, 14, 14]` 改为 `[6, 10, 10, 10, 10, 10, 10, 14]`；`:996` minZoom 列表从 `[7, 7, 7, 7, 7, 7, 10, 11]` 改为 `[7, 7, 7, 7, 7, 7, 11]`；`:1708` 层数从 9 改为 8。另同步被首个失败遮挡的 `:546` 第 8 层 bounds：从 ops 的 `[[36.43, -123.16], [39.01, -121.06]]` 改为既有 service 的 `[[21.21, -158.33], [49.05, -104.24]]`。均仅为层配置列表 / 层数更新，没有改动交互或回退断言。
+- 第 1 轮检查：`npm.cmd test` 全量 931/931 通过，0 失败、0 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目无 lint / build 命令。MVR-P9-AC1、AC4 满足；AC2、AC3 属于后续任务，AC5、AC6 待 Claude / Product Owner 验证。本轮无数据、schema、依赖或 runtime 文件变化，未启停服务、commit、push、部署或进行浏览器预览，保留其他既有工作区改动。
+
+- MVR-T16（2026-11-16，第 1 轮修复）：仅修改 `web/basemap-layers.js`、`server/test/route-map-web.test.js` 与本节记录。提取内部 `tileBounds`，复用显示瓦片经纬度计算；按成功创建顺序记录非 service 区域层，选择 zoom 范围内完全包含显示瓦片的最后一层。无完全包含者时保留原 admission，service 覆盖、缺失瓦片回退、refreshCoverage 与错误处理不变。
+- 第 1 轮授权断言修改：仅修改既有 `MVR P3 service and regional tile ownership is exclusive, including overzoom and gaps` 测试的第二个循环，按 basemaps 的 name 查层；`[-110,39]` 改验 mountain 有效且 norcal 无效，`[-140,35]` 与 `[-124,40]` 仍验 norcal 有效。保留 service 无效断言与第一个循环，其他既有断言未改动。
+- 新增 3 项测试：serviceTile 在 z10、z11、z14、z15 / z16 overzoom、所有服务区中心与边缘及空隙逐项对照原算法；区域重叠由上层负责、无人完全包含的跨界瓦片保留两层、z10 湾区由 norcal 负责；上层 validate 失败时下层保留归属。
+- 检查：`npm.cmd test` 全量 934/934 通过，0 失败、0 跳过；`node --test server/test/route-map-web.test.js` 88/88 通过；`git diff --check` 通过（仅 LF/CRLF 提示）。无 lint / build 命令。MVR-P9-AC2 自动化验证通过、AC4 满足；AC1 为前置 T15，AC3 属于 T17，AC5 待 Claude 复测、AC6 待 Product Owner 预览签字。遵守 brief 禁止启停服务，未进行浏览器预览；无数据、schema、依赖或凭据变更，未 commit、push、部署，保留其他既有工作区改动。根目录 REQUIREMENTS.md 不存在，依据指定 brief 与本 spec 实现。
+
+- MVR-T17（2026-11-16，第 1 轮授权）：导出 `BASEMAP_PREFETCH = 0.25`，在每个底图 layer 加入地图前包装 `_getTiledPixelBounds`，按原宽高向四边各外扩 25%，返回原结果类型的新 Bounds，不修改原范围；原方法缺失时跳过包装。添加 Leaflet 内部方法升级复查注释，保留全部 grid 选项、覆盖归属及回退逻辑。容器背景改为 `#f5f3f0`，瓦片内部配色不变，保留既有工作区改动及 CSS 换行符状态。
+- 按本轮明确授权，仅将既有背景断言的 `#aadaff` 改为 `#f5f3f0`，测试名改为 land background，其他既有断言未改。新增测试覆盖全部底图层范围外扩、原范围不变、方法绑定与 center 转发、缺失方法时仍加入地图及 grid 选项不变。定向测试 `node --test server/test/route-map-web.test.js` 89/89 通过；首轮全量测试发现新增 mock 缺少 paintRules / labelRules，补齐后定向通过，最终全量结果见下。
+- 最终检查：`npm.cmd test` 935/935 通过，0 失败、0 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目无 lint / build 命令。AC1、AC2 为前置 T15 / T16，本次全量回归通过；AC3 自动化验证通过，AC4 满足；AC5 待 Claude 在 3200 性能复测，AC6 待 Product Owner 预览签字。遵守 brief 禁止启停服务，未进行浏览器预览；无数据、schema、依赖、runtime 或凭据变更，未 commit、push、部署。
+
+- MVR-T17（2026-11-16，第 2 轮修复）：第 1 轮用 `new bounds.constructor(...)` 构造外扩范围，但 Leaflet 1.9 用 `Bounds.prototype = {...}` 整体替换了 prototype，`constructor` 实际是 `Object`，返回值没有 `min` / `max`，3200 上底图完全不显示（`_pxBoundsToTileRange` 报 `unscaleBy` 错误）。改为在原函数每次新建的 Bounds 上原地外扩：`pad = bounds.getSize().multiplyBy(BASEMAP_PREFETCH)`，`min` / `max` 分别 `subtract` / `add`。上一条记录中“返回新 Bounds、不修改原范围”的描述以本条为准。
+- 测试改为从 `node_modules/leaflet/src/geometry/Bounds.js`、`Point.js` 导入 Leaflet 真实的 Bounds / Point，断言结果仍是 Bounds、四边外扩 25%，`getSize()`、`min.unscaleBy(...)` 可用。
+- 第 2 轮检查：地图定向测试 89/89 通过；`npm.cmd test` 935/935 通过；`git diff --check` 通过（仅 LF/CRLF 提示）。3200 `/map` 浏览器检查创建 26 张底图瓦片，无页面异常。（本条由 Claude 重写：Codex 原文写入时编码错误，中文变成了问号。）
+- Claude 验收（2026-11-16，3200，CPU 降速 4 倍）：
+  - 拖动流畅度：超过 50ms 的帧 69 个（改前 66–68 个，同一测试的正常波动范围内）。
+  - 快速拖动时视野内空白：z10 最多 8%，放大后最多 17%（改前 33–42%）；大多数拖动 0%。
+  - 首次打开（CPU 4 倍、20 Mbps）：线路列表约 3.2 秒出现，未变慢。
+  - z9–z14 各缩放级别每张瓦片只由一层绘制（z10 湾区只有 `norcal`）。
+  - MVR-P9-AC1–AC5 满足；AC6 待 Product Owner 预览签字。
+
+- MVR-T18（2026-11-17）：仅修改 `web/basemap-layers.js`、`server/test/route-map-web.test.js` 与本节记录。移除 `us.maxZoom: 6`，保留 z6 数据上限与 bounds；z0–6 保留原 GridLayer 准入，z7+ 仅在不与成功登记且 zoom 有效的区域层相交、且没有 service 数据覆盖时兜底。矩形相交复用 `tileBounds`；`us` 不登记到区域归属列表，其他区域与 service 的归属、缺失瓦片回退和预绘制不变。
+- 新增 3 项测试，覆盖 z0–6 全部标准瓦片、z8 区域外空白、AZ 内部与边缘相交、AZ 校验失败、z12 service 覆盖，以及原 GridLayer 准入谓词与绑定保留。T16 原断言未修改；按 brief 授权逐条更新两项配置断言：`basemaps[0].maxZoom === 6`、`baselayers[0].options.maxZoom === 6` 均改为验证不存在 `maxZoom` 属性。地图定向测试 92/92 通过。
+- 最终检查：`npm.cmd test` 全量 938/938 通过，0 失败、0 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目无 lint / build 命令。MVR-T18-AC1–AC3 自动化验证通过，AC4 满足。
+- 未启停服务或进行浏览器 / 性能实测，MVR-T18-AC5 留给 Claude 在 3200 验证；无数据、schema、依赖、runtime 或凭据变更，未 commit、push 或部署，保留既有 T15–T17 工作区改动。
+
+- MVR-T18（2026-11-17，第 1 轮修复）：增加 `regionsSettled`，所有底图层处理完成（成功或失败）后、最后一次 `refreshCoverage()` 前才设为 true。z7+ 的 `us` 兜底准入要求此状态，避免首次加入地图时区域列表尚为空而多绘制一屏；z0–6 行为不变。
+- 第 1 轮新增 1 项测试，分别覆盖区域层全部成功和最后一个区域层校验失败：首次 addTo、后续校验与图层加入期间，区域外 z8 瓦片均无效且 z6 仍有效；加载完成后的 redraw 中 z8 瓦片有效。现有测试断言未改动。仅修改指定的两个代码 / 测试文件及本节记录，未启停服务或进行浏览器 / 性能实测，AC5 仍待 Claude 在 3200 验证。
+- 第 1 轮检查：`npm.cmd test` 全量 939/939 通过，0 失败、0 跳过；`git diff --check` 通过（仅 LF/CRLF 提示）。项目无 lint / build 命令。AC1–AC3 自动化回归通过，AC4 满足；无数据或 schema 变更，未 commit、push 或部署。
+- Claude 验收（2026-11-17，3200）：PHX01 视野往东南拖到 z8，改前新墨西哥南部 / 墨西哥一大块没有底图，改后由 `us` 低精度补齐，无空洞（截图对照）。湾区 z9–z14 每张瓦片仍只由一层绘制（z9/z10 `norcal`，z11+ `service`）。CPU 降速 4 倍拖动：超过 50ms 的帧 45 个（MVR-P9 复测 69 个，在波动范围内，未变差）。MVR-T18-AC1–AC5 满足；与 MVR-P9 一起待 Product Owner 预览签字（AC6）。
