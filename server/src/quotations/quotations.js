@@ -1,3 +1,5 @@
+import { UNDATED_EFFECTIVE_FROM } from './lark-sheet-parse.js';
+
 export class RouteNotFoundError extends Error {
   constructor() { super('Route not found.'); this.name = 'RouteNotFoundError'; }
 }
@@ -45,7 +47,7 @@ export function buildRouteQuotation({ route, station, current, upcoming, weightB
   const times = current.filter(row => row.imported_at != null).map(row => new Date(row.imported_at).getTime());
   return { route_id: route.route_id, route_name: route.route_name, station,
     weight_bands: bands.map(({ code, label_zh, label_en }) => ({ code, label_zh, label_en })),
-    groups: [...groups.values()].map(group => ({ ...group, postal_codes: group.postal_codes.sort() }))
+    groups: [...groups.values()].map(group => ({ ...group, effective_from: group.effective_from === UNDATED_EFFECTIVE_FROM ? null : group.effective_from, postal_codes: group.postal_codes.sort() }))
       .sort((a, b) => a.postal_codes[0].localeCompare(b.postal_codes[0])),
     unquoted_postal_codes: [...zips].filter(zip => !quoted.has(zip)).sort(),
     extra_quoted_postal_codes: [...quoted].filter(zip => !zips.has(zip)).sort(),

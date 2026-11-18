@@ -10,6 +10,28 @@ const plan = (p, scopeLines = [], options = {}) => planQuotationSync({ parsed: p
 const insert = () => plan(parsed(syntheticCells())).inserts[0];
 const old = (line_id = '1', fields = {}) => ({ ...insert(), line_id, ...fields });
 
+test('LQ-T17 matches normalized names before aliases while retaining sheet names', () => {
+  const route = name => ({ route_id: name, route_name: name, station_code: 'DMS', postal_codes: ['12345'] });
+  const run = (name, names) => {
+    const row = syntheticCells(); row[2] = name;
+    return plan(parsed(row), [], { activeRoutes: names.map(route) });
+  };
+  for (const [name, dms] of [['IFP01 - 001', 'IFP01-001'], ['WE - CGZ01 - 001', 'CGZ01-001'],
+    ['RDG01-004', 'WE-RDG01-004'], ['WE-RDG01-004', 'RDG01-004']]) {
+    const result = run(name, [dms]);
+    assert.equal(result.inserts[0].route_id, dms);
+    assert.equal(result.inserts[0].route_name, name);
+    assert.equal(result.warnings[0].code, 'route_name_normalized');
+  }
+  assert.equal(run('RDG01 - 004', ['RDG01-004', 'WE-RDG01-004']).rejected[0].reason, 'route_ambiguous');
+  const exact = run('RDG01-004', ['RDG01-004', 'WE-RDG01-004']);
+  assert.equal(exact.inserts[0].route_id, 'RDG01-004');
+  assert.deepEqual(exact.warnings, []);
+  const alias = run('WE - LAS02 - 01', ['LAS01-01']);
+  assert.equal(alias.inserts[0].route_id, 'LAS01-01');
+  assert.equal(alias.warnings[0].code, 'route_alias_matched');
+});
+
 test('LQ plan inserts with DMS station, remains unchanged by cents and replaces changed content', () => {
   const p = parsed(syntheticCells()), before = structuredClone(p), newPlan = plan(p);
   assert.equal(newPlan.result, 'completed'); assert.equal(newPlan.counts.inserted, 1);
@@ -36,6 +58,67 @@ test('LQ plan rejects missing/ambiguous routes and warns on ZIP outside current 
   }
   const zip = plan(p, [], { activeRoutes: [{ ...activeRoutes[0], postal_codes: [] }] });
   assert.equal(zip.counts.inserted, 1); assert.equal(zip.warnings[0].code, 'zip_not_in_route');
+});
+
+test('LQ-T15 matches aliases only with a unique prefix, sequence and ZIP', () => {
+  const run = (name, zip, routes) => {
+    const row = syntheticCells(); row[2] = name; row[3] = zip;
+    return plan(parsed(row), [], { activeRoutes: routes });
+  };
+  const route = (name, zip, id = name) => ({ route_id: id, route_name: name, station_code: 'DMS', postal_codes: [zip] });
+  for (const [name, zip, dms] of [['LAS02-01', '89110', 'LAS01-01'],
+    ['SFO02-002', '94501', 'SFO01-002'], ['WE-RDG02-004', '12345', 'WE-RDG01-004']]) {
+    const result = run(name, zip, [route(dms, zip)]);
+    assert.equal(result.inserts[0].route_id, dms);
+    assert.equal(result.inserts[0].station_code, 'DMS');
+    assert.equal(result.inserts[0].route_name, name);
+    assert.equal(result.warnings[0].code, 'route_alias_matched');
+  }
+  for (const [name, zip, routes] of [
+    ['SMX02-002', '93442', [route('SMX01-002', '93443')]],
+    ['LAS02-01', '89110', [route('SFO01-01', '89110')]],
+    ['LAS02-01', '89110', [route('LAS01-01', '89110'), route('LAS03-01', '89110')]],
+  ]) assert.equal(run(name, zip, routes).rejected[0].reason, 'route_not_found');
+  for (const [name, dms] of [['BKD-002', 'BKD-004'], ['BKD-005', 'BKD01-005']]) {
+    const result = run(name, '12345', [route(dms, '12345')]);
+    assert.equal(result.inserts[0].route_id, dms);
+    assert.equal(result.inserts[0].route_name, name);
+    assert.deepEqual(result.warnings.map(warning => warning.code), ['route_zip_matched']);
+  }
+  const exact = run('LAS02-01', '89110', [route('LAS02-01', '89110'), route('LAS01-01', '89110')]);
+  assert.equal(exact.inserts[0].route_id, 'LAS02-01');
+  assert.deepEqual(exact.warnings, []);
+});
+
+test('LQ-T21 falls back to a unique same-prefix ZIP after earlier matches', () => {
+  const route = (name, zips) => ({ route_id: name, route_name: name, station_code: 'DMS', postal_codes: zips });
+  const run = (name, zip, routes) => {
+    const row = syntheticCells(); row[2] = name; row[3] = zip;
+    return plan(parsed(row), [], { activeRoutes: routes });
+  };
+  for (const [name, zip, routes, expected] of [
+    ['BKD-003', '93203', [route('BKD-004', ['93263']), route('BKD-005', ['93203'])], 'BKD-005'],
+    ['SMX02-002', '93442', [route('SMX01-002', ['93443']), route('SMX01-005', ['93442'])], 'SMX01-005'],
+  ]) {
+    const result = run(name, zip, routes);
+    assert.equal(result.inserts[0].route_id, expected);
+    assert.equal(result.inserts[0].route_name, name);
+    assert.deepEqual(result.warnings.map(warning => warning.code), ['route_zip_matched']);
+  }
+  for (const [name, zip, routes] of [
+    ['SMF01-002', '95824', [route('SCK01-009', ['95824'])]],
+    ['BKD-003', '93203', [route('BKD-004', ['93203']), route('BKD-005', ['93203'])]],
+    ['BKD-003', '93203', [route('BKD-005', ['93204'])]],
+  ]) assert.equal(run(name, zip, routes).rejected[0].reason, 'route_not_found');
+  for (const [name, routes, expected, warning] of [
+    ['LAS02-01', [route('LAS02-01', ['89110']), route('LAS01-02', ['89110'])], 'LAS02-01', []],
+    ['WE - LAS02 - 01', [route('LAS02-01', ['89110']), route('LAS01-02', ['89110'])], 'LAS02-01', ['route_name_normalized']],
+    ['LAS02-01', [route('LAS01-01', ['89110']), route('LAS01-02', ['89110'])], 'LAS01-01', ['route_alias_matched']],
+  ]) {
+    const result = run(name, '89110', routes);
+    assert.equal(result.inserts[0].route_id, expected);
+    assert.deepEqual(result.warnings.map(item => item.code), warning);
+  }
 });
 
 test('LQ plan rejects every sheet duplicate and other-source conflict and protects all old dates', () => {
@@ -137,4 +220,27 @@ test('LQ plan preserves parser warnings, skips removals for missing ZIP and prio
   assert.equal(result.counts.removed, 0);
   assert.deepEqual(result.warnings.map(row => row.code), ['half_price_flag_unexpected', 'removals_skipped']);
   assert.equal(result.rejected[0].postalCode, null);
+});
+
+
+test('LQ-T11a plans dated and undated quotations as distinct keys', () => {
+  const undated = syntheticCells(); undated[19] = null;
+  const result = plan(parsed(undated, syntheticCells()));
+  assert.equal(result.counts.undated, 1);
+  assert.deepEqual(result.inserts.map(row => row.effective_from), ['2000-01-01', '2026-11-01']);
+  assert.deepEqual(result.rejected, []);
+});
+
+
+test('LQ-T19 compares missing price bands consistently', () => {
+  const row = syntheticCells(); row[12] = 1.075;
+  const p = parsed(row), existing = old();
+  delete existing.additional['0_1'];
+  assert.equal(plan(p, [existing]).result, 'unchanged');
+  existing.additional['0_1'] = null;
+  assert.equal(plan(p, [existing]).result, 'unchanged');
+  existing.additional['0_1'] = 1;
+  assert.equal(plan(p, [existing]).counts.replaced, 1);
+  delete existing.additional['0_1'];
+  assert.equal(plan(parsed(syntheticCells()), [existing]).counts.replaced, 1);
 });

@@ -22,6 +22,7 @@ export function createQuotationSyncStatus({ document: doc, root, get }) {
         + ` · 最近一次：${quotationSyncResults[attempt?.result] || '—'}`
         + (sheets.length ? ` · 工作表：${sheets.length - failures.length}/${sheets.length}` : '')
         + ` · 拒绝行数：${attempt?.rejected_count ?? 0}`
+        + (attempt?.counts?.undated > 0 ? ` · 未填生效日期：${attempt.counts.undated} 行` : '')
         + (failures.length ? ` · 失败：${failures.slice(0, 3).map(sheet => `${sheet.title || sheet.sheet_id}（${quotationSyncResults[sheet.result] || '失败'}）`).join('、')}${failures.length > 3 ? ` 等 ${failures.length - 3} 个` : ''}` : '');
     } catch { if (!disposed) line.textContent = '报价同步 · 状态获取失败'; }
     finally { busy = false; }

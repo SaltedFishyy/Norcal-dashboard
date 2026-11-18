@@ -2,6 +2,7 @@ import { loadBasemapLayers } from './basemap-layers.js';
 export { BASEMAP_FLAVOR, SERVICE_BOUNDS, serviceTile, basemaps } from './basemap-layers.js';
 import { palette } from './route-colors.js';
 import { difficultyColor } from './difficulty.js';
+import { PRICE_COLORS, priceCents, priceLegend } from './price-scale.js';
 import { formatPrice, formatNumber } from './format.js';
 import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
@@ -118,7 +119,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   modeControl.onAdd = () => {
     const container = doc.createElement('div'); container.className = 'leaflet-bar map-mode';
     container.setAttribute('role', 'group'); container.setAttribute('aria-label', t.colorMode);
-    for (const [mode, label] of [['route', t.byRoute], ['dsp', t.byDsp], ['station', t.byStation], ['difficulty', t.byDifficulty]]) {
+    for (const [mode, label] of [['route', t.byRoute], ['dsp', t.byDsp], ['station', t.byStation], ['difficulty', t.byDifficulty], ['price', t.byPrice]]) {
       const button = doc.createElement('button'); button.type = 'button'; button.textContent = label;
       button.setAttribute('aria-pressed', String(mode === colorMode));
       button.addEventListener('click', () => onColorMode(mode));
@@ -138,7 +139,26 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   legendControl.addTo(map);
   function updateLegend() {
     legend.hidden = layers.length === 0;
+    legend.classList.toggle('map-legend--price', colorMode === 'price');
     legend.replaceChildren(legendTitle);
+    if (colorMode === 'price') {
+      legendTitle.textContent = t.legendPrice;
+      const scale = groupColors?.price;
+      if (!scale || scale.empty) {
+        const message = doc.createElement('div'); message.textContent = t.legendPriceEmpty; legend.append(message);
+      } else {
+        const items = priceLegend(scale);
+        const grid = doc.createElement('div'); grid.className = 'map-legend-price'; legend.append(grid);
+        if (layers.some(layer => priceCents(layer.feature.properties.current_first_0_1lb_price) === null))
+          items.push({ color: PRICE_COLORS.none, label: t.legendNoPrice });
+        for (const item of items) {
+          const row = doc.createElement('div'), swatch = doc.createElement('span'), label = doc.createElement('span');
+          swatch.className = 'map-swatch'; swatch.style.backgroundColor = item.color;
+          label.textContent = item.label; row.append(swatch, label); grid.append(row);
+        }
+      }
+      return;
+    }
     if (colorMode === 'difficulty') {
       legendTitle.textContent = selection.route ? t.legendZip(selection.route.route_name) : t.legendRoute;
       ['S', 'A', 'B', 'C', 'D', null].forEach((level, index) => {

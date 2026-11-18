@@ -492,7 +492,7 @@ test('MVR-T5 group modes preserve route state hierarchy, outlines and hover', ()
 
 test('MVR-P4 polygon constants match the daytime basemap specification', () => {
   assert.deepEqual(POLYGON_STYLE, {
-    normal: { fillOpacity: .34, difficultyFillOpacity: .55, color: '#0A101E', opacity: .55, weight: .8 },
+    normal: { fillOpacity: .34, difficultyFillOpacity: .55, priceFillOpacity: .85, color: '#0A101E', opacity: .55, weight: .8 },
     focused: { fillOpacity: .6, color: '#0A101E', opacity: .6, weight: .8 },
     hover: { fillOpacityIncrease: .2, color: '#ffffff', opacity: 1, weight: 2 },
     selectedRoute: { fillOpacity: .85, color: '#0A101E', opacity: .9, weight: 1.2 },
@@ -515,5 +515,26 @@ test('MVR-T9 shared vertex index exactly preserves all legacy allocations', asyn
     assert.deepEqual(result.routeColors, assignRouteColors(input));
     assert.deepEqual(result.groupColors.dsp, assignGroupColors(input, p => dspColorKey(p.dsp_name)));
     assert.deepEqual(result.groupColors.station, assignGroupColors(input, p => p.station));
+  }
+});
+test('MPC price mode uses ZIP price, route maximum and state opacity', async () => {
+  const { assignAllColors, modeColor } = await import('../../web/map-state.js');
+  const { PRICE_COLORS, PRICE_RAMP } = await import('../../web/price-scale.js');
+  const p = { postal_code: '00001', route_id: 1, station: 'A', current_first_0_1lb_price: 1 };
+  const features = [{ properties: p }, { properties: { ...p, current_first_0_1lb_price: 2 } }];
+  const { groupColors } = assignAllColors(features);
+  assert.equal(modeColor(p, 'price', null, groupColors), PRICE_RAMP[0]);
+  assert.equal(modeColor({ current_first_0_1lb_price: null, current_first_0_1lb_price_max: 2 }, 'price', null, groupColors), PRICE_RAMP.at(-1));
+  assert.equal(modeColor({ ...p, current_first_0_1lb_price: null }, 'price', null, groupColors), PRICE_COLORS.none);
+  assert.equal(modeColor(p, 'price'), PRICE_COLORS.none);
+  for (const [selection, station, dsp] of [[clearSelection(), null, null], [selectRoute(1), null, null],
+    [selectZip(p), null, null], [selectRoute(2), null, null], [clearSelection(), 'B', null], [clearSelection(), null, 'B']]) {
+    const price = polygonStyle(p, selection, 'price', station, dsp, null, groupColors);
+    const difficulty = polygonStyle(p, selection, 'difficulty', station, dsp, null, groupColors);
+    assert.equal(price.fillColor, PRICE_RAMP[0]);
+    const normal = !selection.route && station === null && dsp === null;
+    assert.equal(price.fillOpacity, normal ? 0.85 : difficulty.fillOpacity);
+    if (normal) assert.equal(difficulty.fillOpacity, 0.55);
+    assert.equal(hoverStyle(price).fillOpacity, normal ? 0.9 : hoverStyle(difficulty).fillOpacity);
   }
 });

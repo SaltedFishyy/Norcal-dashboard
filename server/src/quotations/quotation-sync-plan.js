@@ -4,6 +4,9 @@ const key = row => JSON.stringify([String(row.route_id), row.postal_code, row.ef
 const pair = (route, zip) => JSON.stringify([route?.trim(), zip]);
 const identity = row => ({ sheetRow: row.sheetRow, routeName: row.routeName, postalCode: row.postalCode });
 const identifiable = row => Boolean(row.routeName?.trim()) && /^\d{5}$/.test(row.postalCode ?? '');
+const canonical = name => name.replace(/\s+/g, '').replace(/^WE-/i, '');
+const routeParts = name => /^(.*[A-Za-z])(\d+)-(\d+)$/.exec(name);
+const routePrefix = name => /^([A-Za-z]+(?:-[A-Za-z]+)*)/.exec(name)?.[1];
 const byLine = (a, b) => {
   const left = BigInt(a.line_id ?? a.voidLineId), right = BigInt(b.line_id ?? b.voidLineId);
   return left < right ? -1 : left > right ? 1 : 0;
@@ -12,21 +15,57 @@ const bySheet = (a, b) => (a.sheetRow ?? a.insert?.sheetRow) - (b.sheetRow ?? b.
 const sameContent = (a, b) => ['end_date', 'route_name', 'station_label_raw', 'fleet_name',
   'reference_postal_code', 'remarks', 'second_parcel_half_price_raw'].every(field => (a[field] ?? null) === (b[field] ?? null))
   && ['first', 'additional'].every(type => quotationBands.every(band =>
-    Math.round(Number(a[type][band]) * 100) === Math.round(Number(b[type][band]) * 100)));
+    a[type][band] == null || b[type][band] == null ? a[type][band] == null && b[type][band] == null
+      : Math.round(Number(a[type][band]) * 100) === Math.round(Number(b[type][band]) * 100)));
 
 export function planQuotationSync({ parsed, activeRoutes, scopeLines, otherSourceKeys, maxRemovalRatio = 0.2 }) {
   if (!parsed.ok) throw new TypeError('A valid parsed quotation sheet is required.');
   const rejected = parsed.rejected.map(row => ({ ...row })), warnings = parsed.warnings.map(row => ({ ...row }));
   let inserts = [], replacements = [], removals = [];
   const unchanged = [], matched = [], hits = new Set();
-  const routes = new Map();
+  const routes = new Map(), normalizedRoutes = new Map(), aliases = new Map(), prefixes = new Map();
   for (const route of activeRoutes) {
     const name = route.route_name.trim();
     if (!routes.has(name)) routes.set(name, []);
     routes.get(name).push(route);
+    const normalized = canonical(name);
+    if (!normalizedRoutes.has(normalized)) normalizedRoutes.set(normalized, []);
+    normalizedRoutes.get(normalized).push(route);
+    const prefix = routePrefix(normalized);
+    if (prefix) {
+      if (!prefixes.has(prefix)) prefixes.set(prefix, []);
+      prefixes.get(prefix).push(route);
+    }
+    const parts = routeParts(normalized);
+    if (parts) {
+      const aliasKey = JSON.stringify([parts[1], parts[3]]);
+      if (!aliases.has(aliasKey)) aliases.set(aliasKey, []);
+      aliases.get(aliasKey).push({ route, station: parts[2] });
+    }
   }
   for (const row of parsed.rows) {
-    const candidates = routes.get(row.routeName.trim()) ?? [];
+    let candidates = routes.get(row.routeName.trim()) ?? [];
+    if (!candidates.length) {
+      candidates = normalizedRoutes.get(canonical(row.routeName)) ?? [];
+      if (candidates.length === 1) warnings.push({ ...identity(row), code: 'route_name_normalized' });
+    }
+    if (!candidates.length) {
+      const parts = routeParts(canonical(row.routeName));
+      const matches = parts ? (aliases.get(JSON.stringify([parts[1], parts[3]])) ?? [])
+        .filter(alias => alias.station !== parts[2] && alias.route.postal_codes.includes(row.postalCode)) : [];
+      if (matches.length === 1) {
+        candidates = [matches[0].route];
+        warnings.push({ ...identity(row), code: 'route_alias_matched' });
+      }
+    }
+    if (!candidates.length) {
+      const matches = (prefixes.get(routePrefix(canonical(row.routeName))) ?? [])
+        .filter(route => route.postal_codes.includes(row.postalCode));
+      if (matches.length === 1) {
+        candidates = matches;
+        warnings.push({ ...identity(row), code: 'route_zip_matched' });
+      }
+    }
     if (candidates.length !== 1) {
       rejected.push({ ...identity(row), reason: candidates.length ? 'route_ambiguous' : 'route_not_found' });
       continue;
@@ -83,7 +122,7 @@ export function planQuotationSync({ parsed, activeRoutes, scopeLines, otherSourc
     return a.line_id != null ? -1 : b.line_id != null ? 1 : 0;
   });
   return { result, inserts, replacements, removals, unchanged, rejected, warnings,
-    counts: { dataRows: parsed.dataRowCount, blank: parsed.blankRowCount, inserted: inserts.length,
+    counts: { dataRows: parsed.dataRowCount, blank: parsed.blankRowCount, undated: parsed.undatedRowCount, inserted: inserts.length,
       replaced: replacements.length, unchanged: unchanged.length, removed: removals.length, plannedRemovals,
       protected: protectedCount, rejected: rejected.length, warnings: warnings.length } };
 }

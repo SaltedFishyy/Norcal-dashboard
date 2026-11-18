@@ -155,6 +155,12 @@
 - [ ] LQ-Q12 表格数据修正（由表格维护方处理，修正后定时同步自然生效）：Denver 有 5 行生效 / 结束日期单元格的内容就是文本 `########`（不是列宽导致，原始值相同），修正前按 `date_placeholder` 拒绝；BOI 有 21 行没有日期；IDA / BIL 共 24 行线路名为空（疑似合并单元格，不自动填充，LQ-D15）；IFP 表的线路名与 DMS IFP01 一条都对不上。（2026-11-06）
 - [ ] LQ-Q13 LQ-T7 后摸底发现的格式问题（详见 `docs/workflow/lark-quotation-handoff.md` 5.3）：(a) 是否接受 `YYYY-MM-DD` 日期（LAX01 17 行）？(b) 是否接受两位年份 `MM/DD/YY` 并按 20YY 解释（STG）？(c) 数字日期序列号（LAX02 / LAV 各 2 行）是否继续拒绝？(d) OAR 的 `40-999999(Ib)` 是否视为「40(lb)以上」？(e) 南加州 8 张表的生效日期大多为空、IFP 线路名带空格，需要表格维护方修正。（2026-11-06） → (e) 南加州部分：Product Owner 2026-11-17 决定空生效日期 = 现在有效（LQ-D24），不需要补日期，见 `docs/features/lark-quotation-sync.md` 第 15 节；IFP 仍待表格修正。
 
+- [ ] LQ-Q14 LAV 报价表（`3SFlo8`）的线路名是 LAV-001…，DMS 当前没有 LAV-xxx 线路；同样的 ZIP 在 DMS 属于 LAX02（90027 → LAX02-016，91201 → LAX02-013）。LAV 表是旧名字的表（应以 LAX02 表为准、不接入），还是线路改了名、表格要改成 LAX02 的线路名？另外南加卫星仓表有 SMX02-xxx、BKD-002 等 15 行 DMS 里没有。（2026-11-17，见 `docs/features/lark-quotation-sync.md` 第 15 节 LQ-T12）
+
+- [ ] LQ-Q15 LAS 报价表（`11nToa`）LQ-T14 后可以解析：53 行中 22 行（LAS01-xx）能导入，31 行写作 LAS02-xx（如 LAS02-01 / 89110），DMS 里同样的 ZIP 是 LAS01-xx（LAS01-01 / 89110），编号一一对应、ZIP 完全相同。SFO 表的 SFO02-002 ↔ DMS SFO01-002 是同样的情况（7 个 ZIP）。是让表格维护方把线路名改成 DMS 的名字，还是导入时允许「站点编号不同、线路序号和 ZIP 都相同」时按 DMS 线路导入？另外 LAS 表是否正式加入同步清单。（2026-11-17） → Product Owner 2026-11-17：按序号 + ZIP 匹配（LQ-D28–D30），LAS / OAR / STG 加入同步（LQ-T16）。
+
+- [ ] LQ-Q16 Claude 按 Product Owner 授权（2026-11-17“把剩下的都做了”）选的保守规则，请复核（`docs/features/lark-quotation-sync.md` 第 18 节）：`########` 日期按未注明（LQ-D34）；数字日期按序列号换算（LQ-D35）；续票三位小数段跳过不存（LQ-D36）；只有首票的表只存首票（LQ-D37）；同前缀按 ZIP 归属匹配（LQ-D39）。另：SEA01-024 / SEA01-016 / BOI01-005 的报价疑似已过结束日期、SEA01-012 / SEA01-014 / PDX 3 个 ZIP 在表里挂在别的线路、SCK01-009 两个 ZIP 写在 SMF 表，需要表格维护方修正。（2026-11-17）
+
 ## 地图 DSP 着色 / Map DSP Coloring
 
 - **（已按推断执行，待业务核实）DSP 名称后缀是否代表同一家公司？** `dsp_name` 形如 `SFO-AAS`、`SFO02-AAS`、`DEN-AAS`。Product Owner 2026-11-11 同意 Claude 的推断：最后一个 `-` 之后的公司代码相同 = 同一家公司，地图“按 DSP”着色按公司代码定色（`docs/features/map-visual-refresh.md` P2-1 D3）。如果以后发现不同站点的同名后缀其实是不同公司，改为按完整 `dsp_name` 定色，只需改 `dspColorKey`。

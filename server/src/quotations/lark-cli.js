@@ -41,7 +41,7 @@ export async function runLarkCommand({ check = false, args = [], env = process.e
           if (catalogError) throw catalogError;
           const { sheet, parsed } = await fetchQuotationSheet({ config: { ...config, sheetId }, larkClient, sheets: catalog });
           sheets.push({ connected: true, sheet, headerValid: parsed.ok, missingColumns: parsed.detail ?? [],
-            dataRows: parsed.dataRowCount ?? 0, blankRows: parsed.blankRowCount ?? 0,
+            dataRows: parsed.dataRowCount ?? 0, blankRows: parsed.blankRowCount ?? 0, undatedRows: parsed.undatedRowCount ?? 0,
             rejectedByReason: tally(parsed.rejected ?? [], 'reason'), warningsByCode: tally(parsed.warnings ?? [], 'code') });
         } catch (error) { sheets.push({ sheet: { sheetId }, connected: false, stage: error.stage, errorKind: error.kind }); }
       }

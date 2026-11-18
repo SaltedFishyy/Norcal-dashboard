@@ -363,6 +363,8 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 
 /* MVR-T5: group legends scroll independently of the map controls. */
 .map-page .map-legend-groups { max-height: 220px; overflow-y: auto; }
+.map-page .map-legend .map-legend-price { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; }
+.map-page .map-legend-price > div { display: flex; align-items: center; gap: 8px; }
 .map-page .map-legend-groups > div { display: flex; align-items: center; gap: 8px; min-height: 27px; }
 /* MVR-T6: only mode changes animate fills; hover removes the opt-in class. */
 .map-page .leaflet-overlay-pane path.mvr-mode-transition { transition: fill .2s, fill-opacity .2s; }
@@ -452,6 +454,7 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 .map-page .map-detail-card .map-zip-number { font-size: 22px; }
 .map-page .map-detail-card .map-summary-metrics dd:not(.difficulty), .map-page .map-detail-card .map-zip-metrics dd:not(.difficulty) { font-size: 16px; }
 .map-page .map-legend { max-height: 250px; overflow-y: auto; overscroll-behavior: contain; }
+.map-page .map-legend.map-legend--price { max-height: none; }
 @media (max-width: 750px) {
   .map-page { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .map-page .map-heading { gap: 8px; }

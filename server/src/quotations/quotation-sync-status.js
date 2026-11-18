@@ -5,7 +5,7 @@ const results = new Set(['partial_failure', 'failed', 'completed', 'partial', 'r
   'fetch_failed', 'aborted_mass_removal', 'config_invalid', 'write_role_missing', 'db_failed']);
 const stages = new Set(['config', 'database', 'client', 'parse', 'token', 'sheet_query', 'values']);
 const kinds = new Set(['timeout', 'network', 'unexpected', 'rate_limited', 'permission', 'not_found', 'credentials', 'sheet_too_large']);
-const countKeys = ['dataRows', 'blank', 'inserted', 'replaced', 'unchanged', 'removed', 'plannedRemovals', 'protected', 'rejected', 'warnings'];
+const countKeys = ['dataRows', 'blank', 'undated', 'inserted', 'replaced', 'unchanged', 'removed', 'plannedRemovals', 'protected', 'rejected', 'warnings'];
 const configKeys = new Set(['LARK_APP_ID', 'LARK_APP_SECRET', 'LARK_QUOTATION_SPREADSHEET_TOKEN',
   'LARK_QUOTATION_SHEET_IDS', 'LARK_QUOTATION_SHEET_ID', 'LARK_OPEN_API_BASE', 'LARK_QUOTATION_MAX_REMOVAL_RATIO', 'LARK_QUOTATION_SYNC_MINUTES']);
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;

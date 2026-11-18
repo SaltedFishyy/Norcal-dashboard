@@ -1,5 +1,6 @@
 import { palette, routeColor } from './route-colors.js';
 import { difficultyColor, difficultyLevel } from './difficulty.js';
+import { priceColor, priceScale } from './price-scale.js';
 
 export const clearSelection = (station = null) => ({ station, route: null, zip: null });
 export const selectRoute = (route, station = route?.station ?? null) => ({ station,
@@ -35,7 +36,7 @@ export function selectionOutlineStyles({ zip = false, uncovered = false } = {}) 
 }
 
 export const POLYGON_STYLE = Object.freeze({
-  normal: Object.freeze({ fillOpacity: 0.34, difficultyFillOpacity: 0.55, color: '#0A101E', opacity: 0.55, weight: 0.8 }),
+  normal: Object.freeze({ fillOpacity: 0.34, difficultyFillOpacity: 0.55, priceFillOpacity: 0.85, color: '#0A101E', opacity: 0.55, weight: 0.8 }),
   focused: Object.freeze({ fillOpacity: 0.6, color: '#0A101E', opacity: 0.6, weight: 0.8 }),
   hover: Object.freeze({ fillOpacityIncrease: 0.2, color: '#ffffff', opacity: 1, weight: 2 }),
   selectedRoute: Object.freeze({ fillOpacity: 0.85, color: '#0A101E', opacity: 0.9, weight: 1.2 }),
@@ -52,6 +53,7 @@ export function hoverStyle(baseStyle) {
 }
 
 export function polygonStyle(properties, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null, routeColors, groupColors) {
+  const scaleMode = colorMode === 'difficulty' || colorMode === 'price';
   const active = selection.route !== null;
   const selected = active && selection.route.route_id === properties.route_id;
   const faded = active ? !selected : (focusStation !== null && properties.station !== focusStation)
@@ -62,11 +64,11 @@ export function polygonStyle(properties, selection = clearSelection(), colorMode
   const outside = focusStation !== null && properties.station !== focusStation && !selected;
   const style = outside ? POLYGON_STYLE.outside : faded ? POLYGON_STYLE.dimmed : zip ? POLYGON_STYLE.selectedZip
     : selected ? POLYGON_STYLE.selectedRoute
-      : (focusStation !== null || dsp !== null || colorMode !== 'difficulty') ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
+      : (focusStation !== null || dsp !== null || !scaleMode) ? POLYGON_STYLE.focused : POLYGON_STYLE.normal;
   const vivid = vividRouteColor(modeColor(properties, colorMode, routeColors, groupColors, selection));
   const transform = style === POLYGON_STYLE.normal ? null : (style === POLYGON_STYLE.dimmed || style === POLYGON_STYLE.outside) ? ROUTE_FILL.dimmed : ROUTE_FILL.target;
-  return { fillColor: colorMode === 'difficulty' ? difficultyColor(level) : transform ? transformRouteColor(vivid, transform) : vivid,
-    fillOpacity: style === POLYGON_STYLE.normal && colorMode === 'difficulty' ? style.difficultyFillOpacity : style.fillOpacity,
+  return { fillColor: scaleMode ? (colorMode === 'difficulty' ? difficultyColor(level) : modeColor(properties, colorMode, routeColors, groupColors, selection)) : transform ? transformRouteColor(vivid, transform) : vivid,
+    fillOpacity: style === POLYGON_STYLE.normal && scaleMode ? (colorMode === 'price' ? style.priceFillOpacity : style.difficultyFillOpacity) : style.fillOpacity,
     color: style.color, weight: style.weight, opacity: style.opacity };
 }
 
@@ -346,6 +348,8 @@ export function assignGroupColors(features, keyOf, vertexIndex) {
 }
 
 export function modeColor(p, mode = 'route', routeColors, groupColors, selection = clearSelection()) {
+  if (mode === 'price') return priceColor(Object.hasOwn(p, 'postal_code')
+    ? p.current_first_0_1lb_price : p.current_first_0_1lb_price_max, groupColors?.price);
   if (mode === 'difficulty') {
     const selected = selection.route?.route_id === p.route_id;
     return difficultyColor(difficultyLevel(selected
@@ -373,5 +377,6 @@ export function assignAllColors(features) {
   return { routeColors: assignRouteColors(features, index), groupColors: {
     dsp: assignGroupColors(features, p => dspColorKey(p.dsp_name), index),
     station: assignGroupColors(features, p => p.station, index),
+    price: priceScale(features),
   } };
 }

@@ -61,9 +61,11 @@ export async function applyQuotationSync({ client, sourceRef, parsed, maxRemoval
       [importId, row.sheetRow, row.station_code, row.route_id, row.route_name, row.postal_code,
         row.station_label_raw, row.fleet_name, row.reference_postal_code, row.effective_from,
         row.end_date, row.remarks, row.second_parcel_half_price_raw])).rows[0].id;
-      for (const type of ['first', 'additional']) for (const band of quotationBands)
+      for (const type of ['first', 'additional']) for (const band of quotationBands) {
+        if (row[type][band] == null) continue;
         await client.query(`INSERT INTO route_quotation_prices (line_id,weight_band,parcel_type,price)
           VALUES ($1,$2,$3,$4)`, [lineId, band, type, row[type][band]]);
+      }
     }
     await client.query('COMMIT');
     return { result, plan, importId };

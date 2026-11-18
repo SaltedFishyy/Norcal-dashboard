@@ -88,3 +88,32 @@ test('status v2 projects per sheet whitelist and reads v1 as one sheet', () => {
   assert.equal(sheet.title.length, 80); assert.deepEqual(sheet.notes, ['end_date_column_missing']);
   assert.deepEqual(sheet.counts, { inserted: 2 }); assert.doesNotMatch(JSON.stringify(current), /SECRET|987/);
 });
+
+
+test('LQ-T11a status projects valid undated counts and discards invalid values', () => {
+  for (const value of [-1, 1.5, '2', null]) {
+    const status = projectQuotationSyncStatus({ schema_version: 2, last_attempt: { counts: { undated: value } } });
+    assert.deepEqual(status.last_attempt.counts, {});
+  }
+  const status = projectQuotationSyncStatus({ schema_version: 2, last_attempt: { counts: { undated: 2 },
+    sheets: [{ counts: { undated: 1 } }] } });
+  assert.equal(status.last_attempt.counts.undated, 2);
+  assert.equal(status.last_attempt.sheets[0].counts.undated, 1);
+});
+
+
+test('LQ-T19 does not insert missing price bands', async t => {
+  const f = await centralFixture(t), prices = [];
+  const row = syntheticCells(); row[12] = 1.075;
+  const result = await runScheduledQuotationSync({ env, runtimeDir: f.runtimeDir,
+    connect: async () => ({ end: async () => {}, query: async (sql, params) => {
+      if (sql.includes('v_active_routes')) return { rows: [{ route_id: 1, route_name: 'Mock Route', station_code: 'MOCK1', profile: { postal_codes: ['12345'] } }] };
+      if (sql.includes('INSERT INTO route_quotation_prices')) prices.push(params);
+      if (sql.includes('RETURNING id')) return { rows: [{ id: '42' }] };
+      return { rows: [], rowCount: 1 };
+    } }), larkClientFactory: () => fakeLark([...sfoHeader, row]) });
+  assert.equal(result.last_attempt.result, 'completed');
+  assert.equal(prices.length, 13);
+  assert.ok(!prices.some(([, band, type]) => band === '0_1' && type === 'additional'));
+  assert.ok(prices.every(([, , , value]) => value != null));
+});

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { UNDATED_EFFECTIVE_FROM } from '../src/quotations/lark-sheet-parse.js';
 import { buildPriceIndex, zipFirstPrice, routePriceSummary, buildRouteQuotation, quotationFields } from '../src/quotations/quotations.js';
 import { centralFixture } from './central-db-fixtures.js';
 import { createJsonDataSource } from '../src/store/data-source.js';
@@ -18,6 +19,14 @@ const line = (zip, overrides = {}) => ({ postal_code: zip, effective_from: '2026
   first_prices: Object.fromEntries(bands.map(code => [code, 1.75])),
   additional_prices: Object.fromEntries(bands.map(code => [code, 0.25])), ...overrides });
 const allNull = row => { for (const field of quotationFields) assert.equal(row[field], null, field); };
+
+test('LQ-T11b preserves date grouping while hiding the undated sentinel', () => {
+  const result = buildRouteQuotation({ route, station: 'MOCK', weightBands, upcoming: [],
+    current: [line('00123', { effective_from: UNDATED_EFFECTIVE_FROM }), line('00123')] });
+  assert.equal(result.groups.length, 2);
+  assert.deepEqual(result.groups.map(group => group.effective_from), [null, '2026-01-01']);
+  assert.deepEqual(result.groups.map(group => group.postal_codes), [['00123'], ['00123']]);
+});
 
 test('RQ-T2 summary distinguishes unavailable, empty, partial, uniform, range and moved ZIP', () => {
   allNull(routePriceSummary(null, route));

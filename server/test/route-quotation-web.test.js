@@ -81,6 +81,14 @@ test('RQ-T3 shared dialog renders API bands, metadata, highlights, notices and c
   dialog.listeners.click({ target: dialog, clientX: 0, clientY: 0 }); assert.equal(dialog.open, false);
 });
 
+test('LQ-T11b dialog describes an undated quotation', async t => {
+  const { doc } = fixture(t), quotation = data();
+  quotation.groups[0].effective_from = null;
+  globalThis.fetch = async () => reply(200, quotation);
+  await openPriceDetail(route, doc.createElement('button'));
+  assert.match(allText(doc.body), /未注明/);
+});
+
 test('RQ-T3 dialog empty/error/network/retry states and stale requests', async t => {
   const { doc } = fixture(t), source = doc.createElement('button');
   const empty = data(); empty.groups = [];

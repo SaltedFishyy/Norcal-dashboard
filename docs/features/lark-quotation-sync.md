@@ -380,7 +380,7 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
   - 镜像同步的键（route + ZIP + effective_from）稳定；以后表格补上日期，旧哨兵行作废、新行插入，符合现有镜像语义；
   - `one_quote_per_key_day` 唯一索引照旧生效：同一 Route + ZIP 有两行空日期时按现有重复规则处理。
 - 结束日期规则不变：空生效日期但有结束日期的行，有效到结束日期（`end_date >= 2000-01-01` 的检查自然满足）。
-- **显示：** 哨兵日期不能出现在页面上。`/api/route-quotations` 返回时把 `effective_from === '2000-01-01'` 显示为 `null`；价格详情生效日期显示“未填写（按现在有效）”。“下次生效”（upcoming）不受影响（哨兵日期永远不是未来）。
+- **显示：** 哨兵日期不能出现在页面上。`/api/route-quotations` 返回时把 `effective_from === '2000-01-01'` 显示为 `null`；价格详情生效日期显示“未注明”。“下次生效”（upcoming）不受影响（哨兵日期永远不是未来）。
 - 解析位置：`server/src/quotations/lark-sheet-parse.js` 约第 91–98 行。`text(get('effective_from')) === null` → 哨兵日期；有内容但 `date()` 失败 → 按现有规则拒绝（LQ-D27）。`end_before_effective` 检查用哨兵日期比较即可。
 - 同步结果 `notes` / 状态：每张表统计空生效日期行数（如 `undated_rows`），在 3100 状态里能看到，方便表格维护方知道哪些行没填日期。字段名由实现决定，需进入状态文件白名单。
 
@@ -389,7 +389,7 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 - **LQ-AC23** 生效日期为空、其余字段有效的行被导入，`effective_from` = 哨兵日期；在当前价视图里有效。
 - **LQ-AC24** 同一 Route + ZIP 有空日期行和一条今天已生效的带日期行时，当前价取带日期行；带日期行已结束（`end_date < 今天`）时回到空日期行；带日期行在未来时，当前价为空日期行，upcoming 显示带日期行。
 - **LQ-AC25** 生效日期为数字单元格 / `#` 占位 / 无法解析的文字时仍按原原因拒绝；SFO、LAX01、SMF、CNO、OAR 等现有 fixture 结果除“空日期行由拒绝变为导入”外不变（逐条列出变化的断言）。
-- **LQ-AC26** API 不暴露哨兵日期（返回 `null`）；价格详情显示“未填写（按现在有效）”；“下次生效”不显示哨兵日期。
+- **LQ-AC26** API 不暴露哨兵日期（返回 `null`）；价格详情显示“未注明”；“下次生效”不显示哨兵日期。
 - **LQ-AC27** 同步结果统计空生效日期行数，并通过状态文件白名单。
 - **LQ-AC28** 不新增 migration / schema / 依赖；`npm test`、`git diff --check` 通过。
 - **LQ-AC29**（Claude，只读）用新代码对 15.2 的 8 张表 dry-run（`npm run quotes:sync-lark -- --dry-run --sheet <id> …`，不写库、不改 `.env`），报告每张表可导入 / 拒绝（按原因）/ 空日期行数，以及能覆盖多少南加州 DMS 线路和 ZIP。
@@ -399,6 +399,182 @@ Lark Sheets API（应用身份 tenant_access_token，只读）
 
 | 任务 | 内容 | 执行者 | 状态 |
 |---|---|---|---|
-| LQ-T11 | 解析规则 LQ-D24 / D25 / D27 + 哨兵日期显示 + 空日期统计 + 测试（LQ-AC23–AC28） | Codex | 待实现授权 |
-| LQ-T12 | 8 张表只读 dry-run 并汇报（LQ-AC29）。要用本机 Lark 凭据读表，不读取 / 打印凭据 | Claude | 待实现授权，依赖 T11 |
-| LQ-T13 | 修改本机 `.env` 同步名单并核对（LQ-AC30）。改配置 + 正式库写入，**另行授权** | Claude | 另行授权 |
+| LQ-T11a | 解析规则 LQ-D24 / D25 / D27 + 空日期统计 + 测试（LQ-AC23、AC25、AC27） | Codex | In review（待提交） |
+| LQ-T11b | 哨兵日期显示（API / 价格详情 / 3100 状态行）+ 数据库视图测试（LQ-AC24、AC26） | Codex | In review（待提交） |
+| LQ-T12 | 8 张表只读 dry-run 并汇报（LQ-AC29）。要用本机 Lark 凭据读表，不读取 / 打印凭据 | Claude | Done（2026-11-17） |
+| LQ-T13 | 修改本机 `.env` 同步名单并核对（LQ-AC30）。改配置 + 正式库写入，**另行授权** | Claude | Done（7 张，2026-11-17；LAV 待 LQ-Q14） |
+
+（Product Owner 2026-11-17 授权实现后，Claude 把 T11 拆成 T11a / T11b 两个 Codex 任务。）
+
+### LQ-T11a 实现记录
+
+- 空生效日期写入哨兵值 `2000-01-01`（`UNDATED_EFFECTIVE_FROM`，`lark-sheet-parse.js` 导出），统计解析阶段接受的空日期行（`undatedRowCount`）；有内容但无法解析的日期继续按原原因拒绝。
+- 同步计划 `counts.undated`、状态文件白名单、CLI dry-run 输出 `undatedRows` 同步增加。
+- 改动的旧断言只有一项：生效日期为 `null` 的有效行由期望 `date_invalid` 拒绝改为验证被接受并使用哨兵日期。
+- Codex 环境无测试库，定向测试 47 项通过；Claude 用本机测试库复跑 `npm test` 943/943。修复轮次 0。（Codex 原记录中文写成了问号，Claude 按其总结重写。）
+
+### LQ-T11b 实现记录
+
+- API 按原始生效日期分组后，将空日期哨兵值输出为 `null`；价格详情显示“未填写（按现在有效）”。
+- Worker 状态行使用 `last_attempt.counts.undated` 汇总值，仅在大于零时显示；补充 API、页面和数据库视图测试。
+- Claude 复跑 `npm test` 947/947（含本机测试库上的 LQ-AC24 视图测试，skipped 0）。修复轮次 0。
+
+### Claude 验收 LQ-T11a / T11b（2026-11-17）
+
+- 代码审查：空日期判断只看单元格是否为空，非空无效日期仍拒绝（LQ-D27）；哨兵常量只定义一次，API 输出前转 `null`，分组仍按原值区分；未改 schema / 视图 / 同步键。
+- 3100 状态行每次都会显示“未填生效日期：N 行”（南加州接入后预计约 800 行），这是 LQ-AC27 要求的提示，不是错误。
+- LQ-AC23–AC28 通过；页面显示随 LQ-T13 接入后在 3200 核对。
+
+### LQ-T12 只读 dry-run（Claude 2026-11-17）
+
+命令：`npm run quotes:sync-lark -- --dry-run --sheet O2LRJs --sheet Xwb3cB --sheet ZKax98 --sheet 3SFlo8 --sheet XxMGq3 --sheet XMGqZP --sheet A3mUei --sheet yzdY0G`（新解析规则，不写库、不改 `.env`）。
+
+| 工作表 | 数据行 | 空生效日期 | 可导入 | 拒绝 | 说明 |
+|---|---|---|---|---|---|
+| LAX01（`O2LRJs`） | 122 | 105 | 122 | 0 | |
+| LAX02（`Xwb3cB`） | 145 | 143 | 143 | 2 | LAX02-026 两行（90210、90049）生效日期是数字单元格（`date_not_date_cell`）；4 条 `zip_not_in_route` 警告（LAX02-008 的 90220–90223） |
+| LAX03（`ZKax98`） | 110 | 110 | 110 | 0 | |
+| LAV（`3SFlo8`） | 356 | 341 | **0** | 356 | 354 行 `route_not_found`：表里是 LAV-001…，DMS 当前没有 LAV-xxx 线路；同样的 ZIP 在 DMS 挂在 LAX02 下（90027 → LAX02-016，91201 → LAX02-013）。另 2 行数字日期 |
+| CNO（`XxMGq3`） | 103 | 103 | 103 | 0 | 无结束日期列（LQ-D12） |
+| 南加卫星仓（`XMGqZP`） | 87 | 87 | 72 | 15 | 15 行 `route_not_found`：SMX02-xxx、BKD-002 等 DMS 没有（DMS 为 SMX01-xxx、BKD-001/004/005） |
+| FAT（`A3mUei`） | 67 | 67 | 67 | 0 | |
+| SAN（`yzdY0G`） | 150 | 150 | 150 | 0 | |
+
+合计可导入 767 行。LAV 表需要 Product Owner 决定（LQ-Q14）；加入同步名单前建议先不加 LAV，否则每次同步都会显示“LAV 全部拒绝”。
+
+### LQ-T13 接入 7 张南加州表（Claude 2026-11-17，Product Owner 授权“先接入 7 张”）
+
+- 本机 `.env` 的 `LARK_QUOTATION_SHEET_IDS` 由 26 个增加到 33 个：`O2LRJs`、`Xwb3cB`、`ZKax98`、`XxMGq3`、`XMGqZP`、`A3mUei`、`yzdY0G`。用脚本只改这一行，没有读取或打印其他内容。LAV（`3SFlo8`）按 LQ-Q14 暂不加入。
+- 手动执行 `npm run quotes:sync-lark -- --sheet …`（7 张）写入正式库，结果与 dry-run 一致：新增 767 行，拒绝 17 行（LAX02-026 两行数字日期；卫星仓 15 行 `route_not_found`）。
+- 3200 核对：南加州有价 ZIP 0 → 621 / 742；90027（LAX02-016）首票 $2.10，与 Product Owner 截图一致；价格详情生效日期显示“未填写（按现在有效）”（重启 3200 后；之前 3200 进程是 T11b 前启动的旧 API）。
+- 仍无价格的 121 个 ZIP：SFV01 / SFV02 共 66 个（LQ-Q11，两个生效日期列）、HNL01 38 个（结构不同，LQ-D17）、SMX01-002 / 005 与 BKD-004 / 005 共 15 个（卫星仓表里写作 SMX02-xxx / BKD-002，LQ-Q14）、LAX02-026 2 个（日期是数字单元格）。
+- **注意：** 3000（正式版）和 3100（Worker）仍是旧代码。3000 的价格详情对南加州会显示 `2000-01-01`，直到提交并发布；3100 要重启后才会每小时同步这 7 张表（重启前这 7 张表的数据停在本次手动同步）。
+
+LQ-T11c：文案改为“未注明”（Product Owner 2026-11-17）。
+
+LQ-T14：收紧邮编表头识别，忽略「邮编难易度」，并增加 LAS 风格表头解析回归测试。 Claude 验收：npm test 948/948；lark-check 33 张表表头仍全部有效；LAS（`11nToa`）试导入 53 行，22 行可导入、31 行 LAS02-xx route_not_found（LQ-Q15）。
+
+## 16. 线路名站点编号不同时按序号 + ZIP 匹配（LQ-P3，Product Owner 2026-11-17）
+
+### 16.1 背景
+
+LQ-T14 后 LAS 表（`11nToa`）可以解析，但 31 行写作 `LAS02-xx`，DMS 里同样的 ZIP 是 `LAS01-xx`（例：表 `LAS02-01 / 89110`，DMS `LAS01-01` 含 89110），序号一一对应、ZIP 完全相同。SFO 表 `SFO02-002`（7 个 ZIP）↔ DMS `SFO01-002` 同理。Product Owner 2026-11-17 选择“按序号 + ZIP 匹配”（LQ-Q15），不等表格改名。
+
+### 16.2 决定
+
+| 编号 | 决定 |
+|---|---|
+| LQ-D28 | 表格线路名按原规则精确匹配 DMS 线路；**精确匹配找不到**（原 `route_not_found`）时，尝试别名匹配：把线路名拆成「前缀 + 站点编号 - 序号」（如 `LAS` `02` `01`、`WE-RDG` `01` `004`）；候选 = 当前 DMS 线路中前缀相同、序号字符串相同、站点编号不同，**且该线路的 ZIP 列表包含这一行的 ZIP**。恰好 1 个候选时按该 DMS 线路导入，并记 warning `route_alias_matched`；0 个或多个候选仍按 `route_not_found` 拒绝。 |
+| LQ-D29 | 别名匹配不放宽其他规则：序号不同（如表 `BKD-002` ↔ DMS `BKD-004`）、ZIP 不在候选线路里（如 `SMX02-002 / 93442`，DMS 中 93442 属于 `SMX01-005`）仍拒绝；精确匹配成功的行（含 `zip_not_in_route` 情况）行为不变。 **（2026-11-17 部分被 LQ-D39 取代：同字母前缀、ZIP 唯一归属时按 ZIP 匹配。）** |
+| LQ-D30 | 导入记录的 `route_name` 保持表格原文（便于追溯），`route_id` 用匹配到的 DMS 线路。 |
+
+### 16.3 验收标准
+
+- LQ-AC31：`LAS02-01 / 89110` 在 DMS 有 `LAS01-01`（含 89110）时导入到 `LAS01-01` 的 `route_id`，记 `route_alias_matched`；`SFO02-002` 7 行导入到 `SFO01-002`。
+- LQ-AC32：候选线路不含该 ZIP、序号不同、前缀不同、或有多个候选时，仍为 `route_not_found`。 **（序号不同 / ZIP 不在别名候选中的同前缀情况已被 LQ-D39 取代。）**
+- LQ-AC33：精确匹配的行、`route_ambiguous`、`zip_not_in_route` 行为不变；已接入表的 dry-run 除 SFO 外结果不变。
+- LQ-AC34：`npm test`、`git diff --check` 通过；Claude dry-run LAS（`11nToa`）与 SFO（`uAaPvG`）核对。
+
+### 16.4 任务
+
+| 任务 | 内容 | 主要文件 | 状态 |
+|---|---|---|---|
+| LQ-T15 | 别名匹配 + warning + 测试 | `server/src/quotations/quotation-sync-plan.js`、`server/test/quotation-sync-plan.test.js` | Done（Claude 验收：npm test 949/949；dry-run：LAS 53 行全部可导入（31 行别名）、SFO 新增 8 行（SFO02-002 → SFO01-002）、卫星仓新增 5 行、仍拒 10 行（BKD-002/003、SMX02-002/93442），其他 31 张表结果不变） |
+| LQ-T16 | LAS、OAR（`iPxkec`）、STG（`cUq2GC`）加入同步清单（Product Owner 2026-11-17“三张都接”），同步一次 | `.env`（Claude） | Done |
+
+### 16.5 实现记录
+
+LQ-T15 在规划同步时一次建立别名索引，仅在精确匹配无候选时按前缀、序号、不同站点编号和 ZIP 筛选；唯一候选产生 `route_alias_matched` warning，并保留表格原始线路名。单元测试覆盖匹配、拒绝和精确匹配优先。未读取 `.env`；不加载该文件运行完整 Node 测试时，数据库配置缺失导致两项必须连接测试数据库的测试失败，59 项跳过。LAS / SFO 实际表 dry-run 已由 Claude 核对通过。
+
+LQ-T16（Claude，2026-11-17）：`.env` `LARK_QUOTATION_SHEET_IDS` 33 → 36（加 `11nToa` LAS、`iPxkec` OAR、`cUq2GC` STG；只改这一行）。正式同步：LAS 新增 53 行（31 行别名）、OAR 11、STG 11、SFO 8（别名）、南加卫星仓 5（别名），其余 31 张表 unchanged。3200 核对：无报价 ZIP 265 → 180，新增有价格 85（LAS01 53、OAR01 11、STG01 9、SFO01-002 7、SMX01 5）。3100 仍是旧代码 + 旧清单，重启前每小时同步只覆盖原 33 张表；旧代码遇到 SFO02-002 / SMX02 行会按 `route_not_found` 拒绝并保护（`protected_by_rejected_row`），不会删除本次导入的行。
+
+## 17. 灰色区域补价格（LQ-P4，Product Owner 2026-11-17）
+
+### 17.1 背景
+
+LQ-T16 后地图“按价格”仍有 180 个灰色 ZIP。Product Owner 运行只读扫描脚本（2026-11-17，机器人读全部分表）：176 个 ZIP 在表里有、4 个任何表都没有（85123、89086、87402、98207）。Product Owner：“先做这些，没问题的话把剩下的都做了”。第一批（LQ-T17）是读表容错，不改业务规则：
+
+| 表 | ZIP | 现象 |
+|---|---|---|
+| SFV（`sZuGSc`） | 66 | 两行表头；T 列「报价生效日期」与 X 列「生效日期」两个生效日期列 → `effective_from` 重复 → 表头无效；两列日期都为空 |
+| IFP（`88QsOy`） | 9 | 线路名 `IFP01 - 001`，DMS 为 `IFP01-001` |
+| CGZ+FLG（`vlXZud`） | 8 | 表头单元格是富文本（接口返回分段数组），解析成 `[object Object]` → 几乎全部列缺失；线路名 `WE - CGZ01 - 001`，DMS 为 `CGZ01-001`（DMS 里 RDG 线路则是 `WE-RDG01-004`） |
+
+### 17.2 决定
+
+| 编号 | 决定 |
+|---|---|
+| LQ-D31 | 单元格是富文本分段数组时，把各段 `text` 拼接成字符串再解析（表头和数据都适用）。 |
+| LQ-D32 | 同一表头同时有「报价生效日期」和不带“报价”的「生效日期」时，以「报价生效日期」为 `effective_from`，另一列忽略；只有一种时行为不变。日期为空按 LQ-D24（现在有效）。 |
+| LQ-D33 | 线路名精确匹配失败时，先做规范化匹配：去掉所有空白，并忽略开头的 `WE-`（两边都规范化后比较）；唯一命中则导入，记 warning `route_name_normalized`；之后才做 LQ-D28 别名匹配（别名匹配也基于规范化后的名字）。`route_name` 仍存表格原文。 |
+
+### 17.3 验收标准
+
+- LQ-AC35：富文本表头 / 单元格能解析；CGZ+FLG 表头有效。
+- LQ-AC36：SFV 表头有效，`effective_from` 取「报价生效日期」列；空日期行按未注明导入。
+- LQ-AC37：`IFP01 - 001` → `IFP01-001`、`WE - CGZ01 - 001` → `CGZ01-001`、`RDG01-004` ↔ `WE-RDG01-004` 规范化匹配；多个候选时仍拒绝。
+- LQ-AC38：已接入 36 张表 dry-run 结果不变；`npm test`、`git diff --check` 通过。
+- LQ-AC39：SFV / IFP / CGZ+FLG dry-run 后接入同步，3200 灰色 ZIP 减少约 83 个。
+
+### 17.4 任务
+
+| 任务 | 内容 | 主要文件 | 状态 |
+|---|---|---|---|
+| LQ-T17 | 富文本、生效日期列优先、线路名规范化匹配 + 测试 | `lark-sheet-parse.js`、`quotation-sync-plan.js`、对应测试 | In review |
+| LQ-T18 | SFV / IFP / CGZ+FLG 加入同步清单，同步一次 | `.env`（Claude） | Done（36 → 39 张；SFV 83、IFP 9、CGZ+FLG 8 行导入；3200 灰色 ZIP 180 → 97） |
+
+### 17.5 实现记录
+
+- LQ-T17：解析富文本分段并优先选择报价生效日期；精确匹配后依次尝试规范化匹配和基于规范化名称的别名匹配。原线路名称仍保留在导入记录中。
+
+## 18. 剩余灰色区域（LQ-P5，Product Owner 2026-11-17“没问题的话把剩下的都做了”）
+
+### 18.1 背景
+
+LQ-T18 后剩 97 个灰色 ZIP。除 4 个任何表都没有、3 个明天生效（ABQ01-002，`2026-11-18`）、8 个已导入但不在当前有效期（SEA01-024 / SEA01-016 / BOI01-005，推断结束日期已过，待表格维护方更新）、7 个 ZIP 在表里挂在另一条存在的线路下（SEA01-012 / SEA01-014 / PDX，LQ-D29 不覆盖）、2 个写在 SMF 表 `SMF01-002`（DMS 为 `SCK01-009`，前缀不同）外，其余按下面的规则处理。规则是 Claude 按 Product Owner 授权选的保守做法，Product Owner 可推翻（LQ-Q16）。
+
+| 表 / 线路 | ZIP | 现象 |
+|---|---|---|
+| DEN01-006 | 5 | 生效 / 结束日期单元格内容就是 `########`（`date_placeholder`） |
+| LAX02-026 | 2 | 日期是数字单元格（`date_not_date_cell`） |
+| RDG01-004 / FMN01-001 | 2 + 3 | 续票价格三位小数（1.075 / 1.125 / 1.225，首票的一半），首票正常（`price_precision`） |
+| PRC（`joCLhH`） | 7 | 分组价格表头，只有首票、没有续票列；线路名 `WE - PRC01 - 001` |
+| SAF（`ySnTv7`） | 6 | 线路列叫「格口对应」，价格分组表头叫「价格」（无“按重量段”），只有首票，「生效时间」 |
+| HNL（`U5E6B2`） | 38 | 线路列叫「线路编号」，「预期价格+开半价」列 + 分组「价格」，只有首票，「生效时间」，三行表头 |
+| 南加卫星仓 BKD / SMX | 9 + 1 | 表 `BKD-002/003`、`SMX02-002 / 93442`，DMS 中这些 ZIP 属于 `BKD-004/005`、`SMX01-005`（序号不同） |
+
+### 18.2 决定（Claude 按授权选择，LQ-Q16 待 Product Owner 复核）
+
+| 编号 | 决定 |
+|---|---|
+| LQ-D34 | 生效 / 结束日期为 `########` 占位符时按“未注明”处理（生效 = 现在有效；结束 = 无），与 LQ-D24 一致。 |
+| LQ-D35 | 日期是数字单元格时按飞书 / Excel 日期序列号（自 1899-12-30 起的天数）换算成日期。 |
+| LQ-D36 | 续票某个重量段价格超过两位小数时，**只跳过该续票段**（不保存、不四舍五入），记 warning `additional_price_precision_skipped`；首票超过两位小数仍整行拒绝。 |
+| LQ-D37 | 只有首票、没有任何续票列的表可以导入（只保存首票各段），记 note `additional_columns_missing`；续票列只有一部分时仍按表头无效处理。价格详情里缺失的续票段显示为空（“—”）。 |
+| LQ-D38 | 表头别名：「线路编号」「格口对应」→ 线路；「生效时间」→ 生效日期；表头单元格恰好为「价格」视为分组价格表头（同“按重量段”）。「预期价格…」等不带重量段的列忽略。 |
+| LQ-D39 | 精确 / 规范化 / 别名匹配都失败时，若该行 ZIP 恰好属于**一条**同字母前缀（规范化后，如 `BKD`、`SMX`）的 DMS 线路，则按该线路导入，记 warning `route_zip_matched`；否则仍 `route_not_found`。不跨前缀（`SMF01-002` → `SCK01-009` 不匹配）。 |
+
+### 18.3 验收标准
+
+- LQ-AC40：DEN01-006 5 行、LAX02-026 2 行导入；RDG / FMN 5 行导入首票和其余续票段，三位小数段跳过并 warning。
+- LQ-AC41：PRC / SAF / HNL 表头有效，只导入首票；重复同步结果 unchanged（缺失段不会被当作变化）。
+- LQ-AC42：BKD 9 行、`SMX02-002 / 93442` 按 ZIP 匹配导入；跨前缀、ZIP 属于多条线路时仍拒绝。
+- LQ-AC43：已接入表 dry-run 除上述行外不变；`npm test`、`git diff --check` 通过；价格详情缺失续票显示“—”。
+
+### 18.4 任务
+
+| 任务 | 内容 | 主要文件 | 状态 |
+|---|---|---|---|
+| LQ-T19 | `########`、数字日期、续票三位小数跳过；缺失价格段的写入 / 比较 | `lark-sheet-parse.js`、`quotation-sync-plan.js`、`quotation-sync-db.js`、测试 | Done |
+| LQ-T20 | 表头别名 + 只有首票的表 | `lark-sheet-parse.js`、测试 | Done |
+| LQ-T21 | 同前缀按 ZIP 匹配 | `quotation-sync-plan.js`、测试 | Done |
+| LQ-T22 | PRC / SAF / HNL 加入同步，同步一次，3200 核对 | `.env`（Claude） | Done |
+
+### 18.5 实现记录
+
+- LQ-T21：在现有精确、规范化和别名匹配之后，按规范化字母前缀索引查找包含 ZIP 的唯一线路；匹配时保留表格线路名并记录 `route_zip_matched`。零条或多条候选仍拒绝，既有精确 / 规范化歧义仍不进入回退匹配。
+
+LQ-T19–T22 实现与验收（Claude，2026-11-17）：
+- LQ-T19（`########` / 数字日期 / 续票三位小数段跳过 / 缺失段写入与比较）、LQ-T20（表头别名 + 只有首票的表）、LQ-T21（同前缀按 ZIP 匹配；r1：按 LQ-D39 更新 LQ-T15 的两个旧断言）均 Done。`npm test` 955/955。
+- LQ-T22：`.env` `LARK_QUOTATION_SHEET_IDS` 39 → 43（加 `joCLhH` PRC、`ySnTv7` SAF、`U5E6B2` HNL、`gO6qvO` FMN）。正式同步新增：DEN 5、LAX02 2、RDG 2、FMN 3、南加卫星仓 10（ZIP 匹配）、PRC 7、SAF 6、HNL 69；其余表 unchanged。一次全表 dry-run 中 9 张表 `fetch_failed`（飞书读取临时失败），单独重试全部正常。
+- 3200 核对：灰色 ZIP 97 → 24；南加州 0。剩余：ABQ01-002 3（明天 2026-11-18 生效）；SEA01-024 / SEA01-016 / BOI01-005 8（已导入但不在有效期，推断结束日期已过）；SEA01-012 / SEA01-014 / PDX 7（表里挂在别的线路）；SCK01-009 2（写在 SMF 表，跨前缀）；任何表都没有 4（85123、89086、87402、98207）。见 LQ-Q16。

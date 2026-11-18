@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { UNDATED_EFFECTIVE_FROM } from '../src/quotations/lark-sheet-parse.js';
 import { createTestDb, dbSkip } from './db-helpers.js';
 
 const bands = ['0_1', '1_5', '5_10', '10_20', '20_30', '30_40', '40_plus'];
@@ -89,6 +90,24 @@ test('RQ-T1 current and upcoming honor LA dates, replacement, expiry, fallback a
   const boundary = (await db.owner.query(`SELECT
     (($1::date+1)::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles')::date=$1::date AS correct`, [db.today])).rows[0];
   assert.equal(boundary.correct, true);
+});
+
+test('LQ-AC24 dated quotation takes priority and falls back to undated', { skip: dbSkip }, async t => {
+  const db = await fixture(t), importId = await db.importRow();
+  const base = (await db.owner.query(`INSERT INTO route_quotation_lines
+    (import_id,station_code,route_id,route_name,postal_code,effective_from)
+    VALUES ($1,'ZZZ01',1,'Synthetic route','01234',$2) RETURNING id`, [importId, UNDATED_EFFECTIVE_FROM])).rows[0].id;
+  const dated = await db.line(1, -2);
+  const current = async () => (await db.reader.query('SELECT line_id FROM v_route_quotation_current WHERE route_id=1')).rows[0].line_id;
+  assert.equal(await current(), dated);
+  await db.owner.query('UPDATE route_quotation_lines SET end_date=$2::date-1 WHERE id=$1', [dated, db.today]);
+  assert.equal(await current(), base);
+  await db.owner.query('UPDATE route_quotation_lines SET effective_from=$2::date+1,end_date=NULL WHERE id=$1', [dated, db.today]);
+  assert.equal(await current(), base);
+  const upcoming = (await db.reader.query('SELECT effective_from::text FROM v_route_quotation_upcoming WHERE route_id=1')).rows;
+  const tomorrow = (await db.owner.query('SELECT ($1::date+1)::text AS date', [db.today])).rows[0].date;
+  assert.deepEqual(upcoming, [{ effective_from: tomorrow }]);
+  assert.ok(upcoming.every(row => row.effective_from !== UNDATED_EFFECTIVE_FROM));
 });
 
 test('RQ-T1 database rejects conflicting keys and invalid quotation values', { skip: dbSkip }, async t => {

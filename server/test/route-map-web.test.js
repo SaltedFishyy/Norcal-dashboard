@@ -145,6 +145,15 @@ test('ZIP errors are separate from no-boundary results and stale replies cannot 
 
 export class Element {
   constructor(tag = 'div') { this.tagName = tag; this.children = []; this.textContent = ''; this.listeners = {}; this.attributes = {}; this.style = {}; }
+  get classList() {
+    if (this._classList) return this._classList;
+    return { toggle: (name, force) => {
+      const classes = new Set((this.className || '').split(/\s+/).filter(Boolean));
+      if (force) classes.add(name); else classes.delete(name);
+      this.className = [...classes].join(' ');
+    } };
+  }
+  set classList(value) { this._classList = value; }
   append(...children) {
     for (const child of children) {
       if (child.parentNode) child.parentNode.children = child.parentNode.children.filter(node => node !== child);
@@ -661,9 +670,9 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
   const mode = controls[1], legend = controls[2];
   assert.equal(mode.attributes.role, 'group'); assert.equal(mode.attributes['aria-label'], '地图颜色模式');
-  assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按 DSP', '按站点', '按难易度']);
+  assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按 DSP', '按站点', '按难易度', '按价格']);
   assert.ok(mode.children.every(button => button.type === 'button')); // Native buttons support Enter and Space.
-  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['true', 'false', 'false', 'false']);
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['true', 'false', 'false', 'false', 'false']);
   assert.equal(legend.hidden, false);
   const fits = map.fits.length, calls = requests.length, count = groups.length;
   mode.children[3].listeners.click();
@@ -692,7 +701,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   mode.children[3].listeners.click();
   assert.equal(allText(e['map-selection']), selected); assert.equal(map.fits.length, selectedFits);
   assert.equal(requests.length, calls); assert.equal(groups.length, selectedGroups);
-  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'false', 'false', 'true']);
+  assert.deepEqual(mode.children.map(node => node.attributes['aria-pressed']), ['false', 'false', 'false', 'true', 'false']);
   groups[0].layers[0].listeners.mouseover(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.hover.color);
   groups[0].layers[0].listeners.mouseout(); assert.equal(groups[0].layers[0].styles.at(-1).color, POLYGON_STYLE.selectedZip.color);
   doc.listeners.keydown({ key: 'Escape' }); assert.equal(legend.children[0].textContent, '颜色：线路难度');
@@ -2373,4 +2382,28 @@ test('MVR-T14 superseded startup still schedules basemaps once', async t => {
   assert.equal(f.baselayers.length, basemaps.length);
   t.mock.timers.tick(4000);
   assert.equal(f.baselayers.length, basemaps.length);
+});
+test('MPC price legend shows occupied bins, missing prices and empty districts', async () => {
+  const { assignAllColors } = await import('../../web/map-state.js');
+  const { view, data, controls } = await labelFixture();
+  const features = data.features.features;
+  features[0].properties.current_first_0_1lb_price = 1;
+  features[1].properties.current_first_0_1lb_price = 2;
+  const legend = controls.at(-1);
+  legend.className += ' leaflet-control';
+  view.render(data, assignAllColors(features)); view.setColorMode('price');
+  assert.ok(legend.className.split(' ').includes('map-legend--price'));
+  assert.ok(legend.className.split(' ').includes('leaflet-control'));
+  assert.equal(legend.children[0].textContent, '按价格（首票 0–1 lb）');
+  assert.deepEqual(legend.children[1].children.map(row => row.children[1].textContent), ['$1.00', '$2.00']);
+  features[1].properties.current_first_0_1lb_price = null;
+  view.render(data, assignAllColors(features));
+  assert.deepEqual(legend.children[1].children.map(row => row.children[1].textContent), ['$1.00', '无报价']);
+  features[0].properties.current_first_0_1lb_price = null;
+  view.render(data, assignAllColors(features));
+  assert.equal(legend.children[1].textContent, '该片区暂无报价');
+  assert.equal(legend.children.length, 2);
+  view.setColorMode('difficulty');
+  assert.ok(!legend.className.split(' ').includes('map-legend--price'));
+  assert.ok(legend.className.split(' ').includes('leaflet-control'));
 });

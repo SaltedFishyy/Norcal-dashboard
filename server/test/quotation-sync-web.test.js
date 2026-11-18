@@ -61,3 +61,14 @@ test('multi sheet status displays totals, three failed names and remaining count
   assert.match(root.textContent, /A.*B.*C.*\u7b49 1 \u4e2a/);
   assert.doesNotMatch(root.textContent, /D/);
 });
+
+test('LQ-T11b status shows positive undated total only', async () => {
+  for (const count of [3, 0, undefined]) {
+    const root = new Element('section');
+    const page = createQuotationSyncStatus({ root, document: { createElement: tag => new Element(tag) },
+      get: async () => ({ status: { last_attempt: { rejected_count: 2, counts: { undated: count } } } }) });
+    await page.start({ quotation_sync: true });
+    if (count) assert.match(root.textContent, /拒绝行数：2 · 未填生效日期：3 行/);
+    else assert.doesNotMatch(root.textContent, /未填生效日期/);
+  }
+});
