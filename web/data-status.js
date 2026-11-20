@@ -39,7 +39,7 @@ const pacificTime = value => value ? (pacificFormatter ??= new Intl.DateTimeForm
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })).format(new Date(value)) : '—';
 
 export function createDataStatus({ document: doc = globalThis.document, fetch: request = globalThis.fetch,
-  setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
+  setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout, showLoginNotice = true,
   reload = () => {
     if (new URLSearchParams(globalThis.location.search).has('date')) globalThis.location.assign(withViewDate(globalThis.location.href, null));
     else globalThis.location.reload();
@@ -149,6 +149,7 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
     renderLogin();
   }
   function renderLogin() {
+    if (!showLoginNotice) { login.textContent = ''; return; }
     const reason = statusData?.progress?.stop_reason ?? statusData?.last_run?.stop_reason;
     const lastReason = freshness?.source !== 'json' ? freshness?.run?.last?.stop_reason : null;
     if (languageError(reason) || languageError(lastReason)) { login.textContent = languageNotice; return; }
@@ -312,6 +313,6 @@ export function createDataStatus({ document: doc = globalThis.document, fetch: r
 }
 
 if (globalThis.document?.getElementById('data-status')) {
-  const status = createDataStatus(); status.start();
+  const status = createDataStatus({ showLoginNotice: !globalThis.document.getElementById('data-status').hasAttribute('data-hide-login-notice') }); status.start();
   globalThis.addEventListener('pagehide', () => status.dispose(), { once: true });
 }

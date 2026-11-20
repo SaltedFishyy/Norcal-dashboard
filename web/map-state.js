@@ -239,6 +239,25 @@ export function routeLabelAnchors(features) {
 }
 
 
+export function zipLabelAnchors(features) {
+  const anchors = [];
+  for (const feature of features) {
+    const p = feature.properties;
+    if (!p?.postal_code) continue;
+    const parts = geometryParts(feature.geometry).filter(rings => Array.isArray(rings) && rings.length
+      && rings.every(ring => Array.isArray(ring) && ring.length >= 3
+        && ring.every(point => Array.isArray(point) && point.length >= 2 && point.slice(0, 2).every(Number.isFinite))));
+    const largest = parts.map(rings => ({ rings, ...polygonMoments(rings) }))
+      .filter(part => part.area > 0).sort((a, b) => b.area - a.area)[0];
+    if (!largest) continue;
+    let point = largest.point;
+    if (!inPolygon(point, largest.rings) || boundaryDistanceSquared(point, largest.rings) <= 0) point = interiorPoint([largest.rings]);
+    if (point) anchors.push({ postal_code: p.postal_code, route_id: p.route_id, station: p.station,
+      text: String(p.postal_code), latlng: [point[1], point[0]], area: largest.area });
+  }
+  return anchors;
+}
+
 export const ROUTE_COLOR_ASSIGN = Object.freeze({ minDeltaE: 30, sharedVertices: 2, coordinatePrecision: 5 });
 
 // sRGB D65 to CIE Lab; distances are measured after the ordinary vivid transform.

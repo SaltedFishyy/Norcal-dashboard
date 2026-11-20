@@ -5,6 +5,7 @@ import { createDataStatus } from '../../web/data-status.js';
 import { formatUpdated } from '../../web/format.js';
 import { createStaticReader, isStaticPath } from '../src/api/static-files.js';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 
 // Synthetic DOM and API doubles: no runtime data, Worker or DMS access.
 class Element {
@@ -23,6 +24,26 @@ class Element {
 const nodes = root => [root, ...root.children.flatMap(nodes)];
 const find = (root, text) => nodes(root).find(n => n.tag === 'button' && n.textContent === text);
 const iso = '2026-10-08T12:00:00Z';
+test('MZL-AC8 map status has no empty banner and history dialog remains visible', async () => {
+  const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<main class="map-page"><div class="map-banners"><section id="data-status" class="data-status"><div class="data-status-details"></div><p></p><dialog>更新记录</dialog></section></div><button>更新记录</button></main>');
+    await page.addStyleTag({ content: css });
+    const status = page.locator('#data-status');
+    assert.equal(await status.evaluate(el => getComputedStyle(el).display), 'contents');
+    assert.equal(await status.evaluate(el => el.getClientRects().length), 0);
+    await page.locator('#data-status > p').evaluate(el => { el.textContent = '自动更新失败'; });
+    assert.notEqual(await status.evaluate(el => getComputedStyle(el).display), 'contents');
+    assert.ok(await status.evaluate(el => el.getBoundingClientRect().height > 0));
+    await page.locator('#data-status > p').evaluate(el => { el.textContent = ''; });
+    await page.locator('button').evaluate(el => el.addEventListener('click', () => document.querySelector('dialog').showModal()));
+    await page.locator('button').click();
+    assert.equal(await page.locator('dialog').evaluate(el => el.matches(':modal')), true);
+    assert.equal(await page.locator('dialog').isVisible(), true);
+  } finally { await browser.close(); }
+});
 test('DV default refresh reload removes date and preserves other URL context', async t => {
   const previous = globalThis.location;
   t.after(() => { if (previous === undefined) delete globalThis.location; else globalThis.location = previous; });
@@ -110,7 +131,7 @@ function fixture({ capability = false, autoCapability = false, failCapability = 
   const actions = new Element('div'), summary = new Element('div');
   const doc = { getElementById: id => id === 'data-status' ? root : id === 'profile-data-summary' && profilePage ? summary : id === 'map-data-actions' && (mapPage || profilePage) ? actions : nodes(root).find(n => n.id === id),
     createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) };
-  const page = createDataStatus({ document: doc, fetch: request,
+  const page = createDataStatus({ document: doc, fetch: request, showLoginNotice: !mapPage,
     setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), reload: defaultReload ? undefined : () => reloads++ });
   const click = async text => { const el = find(root, text); assert.ok(el, `button ${text}`); await el.listeners.click(); return el; };
   const tick = async delay => { const entry = [...timers].find(([, t]) => t.delay === delay); assert.ok(entry); timers.delete(entry[0]); await entry[1].fn(); };
@@ -132,7 +153,7 @@ test('RM13b Station times live in history while refresh warnings remain outside 
   h.data.freshness.run = { running: false, last: { status: 'stopped', finished_at: iso, needs_login: true } };
   await h.page.loadFreshness();
   assert.ok(nodes(h.root).some(n => n.tag === 'p' && /最近一次更新失败/.test(n.textContent) && !nodes(details).includes(n)));
-  assert.ok(h.root.children.some(n => n.tag === 'p' && /npm run dms:login/.test(n.textContent)));
+  assert.ok(!h.root.children.some(n => n.tag === 'p' && /npm run dms:login/.test(n.textContent)));
   assert.ok(nodes(h.root).some(n => n.id === 'map-station-times' && n.textContent === 'MOCK1 snapshot'));
   const history = find(h.actions, '更新记录'); assert.ok(history);
   await history.listeners.click(); assert.equal(nodes(h.root).find(n => n.tag === 'dialog').open, true);
@@ -297,4 +318,23 @@ test('SC4 progress renders runtime missing station reason without static configu
   const h = fixture({ capability: true });
   h.data.state = { state: 'running', progress: { ...progress(), skipped: [{ code: 'LAX03', district: 'mock', reason: 'not_in_dms_menu' }] } };
   await h.page.start(); assert.match(h.root.textContent, /LAX03（DMS 中无此站点）/); h.page.dispose();
+});
+
+test('MZL-T3 hides main map login and language notices while preserving profile and refresh notices', async () => {
+  for (const mapPage of [false, true]) {
+    const h = fixture({ mapPage, capability: true });
+    h.data.state = { state: 'stopped', needs_login: true, progress: { ...progress(), stop_reason: 'capture:NeedsLoginError' } };
+    await h.page.start();
+    const main = () => h.root.children.filter(n => n.tag === 'p').map(n => n.textContent).join(' ');
+    assert.equal(main().includes('DMS \u767b\u5f55\u5df2\u8fc7\u671f'), !mapPage);
+    const refreshButton = find(mapPage ? h.actions : h.root, '\u67e5\u770b\u66f4\u65b0\u8fdb\u5ea6');
+    await refreshButton.listeners.click();
+    assert.match(h.root.textContent, /DMS \u767b\u5f55\u5df2\u8fc7\u671f/);
+    h.data.state = { state: 'stopped', needs_login: false, progress: { ...progress(), stop_reason: 'capture:DmsLanguageError' } };
+    await h.page.loadStatus();
+    assert.equal(main().includes('DMS \u754c\u9762\u662f\u82f1\u6587'), !mapPage);
+    h.page.dispose();
+  }
+  const html = await readFile(new URL('../../web/map.html', import.meta.url), 'utf8');
+  assert.match(html, /id="data-status"[^>]*data-hide-login-notice/);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assignRouteColors, ROUTE_COLOR_ASSIGN, POLYGON_STYLE, hoverStyle, polygonStyle, searchRoutes, selectRoute, selectZip, clearSelection, classifyQuery, switchStation, uncoveredZipStyle, vividRouteColor, ROUTE_FILL, routeLabelText, routeLabelAnchors } from '../../web/map-state.js';
+import { assignRouteColors, ROUTE_COLOR_ASSIGN, POLYGON_STYLE, hoverStyle, polygonStyle, searchRoutes, selectRoute, selectZip, clearSelection, classifyQuery, switchStation, uncoveredZipStyle, vividRouteColor, ROUTE_FILL, routeLabelText, routeLabelAnchors, zipLabelAnchors } from '../../web/map-state.js';
 import { palette, routeColor } from '../../web/route-colors.js';
 import { BASEMAP_FLAVOR } from '../../web/map-view.js';
 
@@ -537,4 +537,19 @@ test('MPC price mode uses ZIP price, route maximum and state opacity', async () 
     if (normal) assert.equal(difficulty.fillOpacity, 0.55);
     assert.equal(hoverStyle(price).fillOpacity, normal ? 0.9 : hoverStyle(difficulty).fillOpacity);
   }
+});
+
+
+test('MZL-T2 ZIP anchors choose the largest part and fall back inside concave polygons', () => {
+  const square = (x, n) => [[[x, 0], [x+n, 0], [x+n, n], [x, n], [x, 0]]];
+  const concave = [[[0,0], [4,0], [4,1], [1,1], [1,4], [0,4], [0,0]]];
+  const features = [
+    { properties: { postal_code: '00001', route_id: 1, station: 'A' }, geometry: { type: 'MultiPolygon', coordinates: [square(0, 1), square(10, 4)] } },
+    { properties: { postal_code: '00002' }, geometry: { type: 'Polygon', coordinates: concave } },
+    { properties: { postal_code: '00003' }, geometry: null },
+    { properties: {}, geometry: { type: 'Polygon', coordinates: square(0, 1) } },
+  ];
+  const anchors = zipLabelAnchors(features);
+  assert.equal(anchors.length, 2); assert.deepEqual(anchors[0].latlng, [2, 12]); assert.equal(anchors[0].area, 16);
+  const [y, x] = anchors[1].latlng; assert.ok(x > 0 && y > 0 && x < 4 && y < 4 && (x < 1 || y < 1));
 });

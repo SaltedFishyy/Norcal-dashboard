@@ -306,7 +306,7 @@ button { background: #202c42; border: 1px solid #8592ad; border-radius: 4px; pad
 }
 
 /* RM13b: artwork overrides apply only to the warehouse legend. */
-.map-page .warehouse-legend { background: #102238; color: #f1f6ff; border: 1px solid #49627b; border-radius: 12px; padding: 7px 10px; gap: 8px; box-shadow: 0 2px 8px #0003; }
+.map-page .warehouse-legend { margin-left: 46px; background: #102238; color: #f1f6ff; border: 1px solid #49627b; border-radius: 12px; padding: 7px 10px; gap: 8px; box-shadow: 0 2px 8px #0003; }
 .map-page .warehouse-legend-icon svg path { fill: none; stroke: #fff; }
 .map-page .data-status-details:empty { display: none; }
 .data-history-times { overflow-wrap: anywhere; margin-bottom: 16px; }
@@ -352,8 +352,8 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 .map-page .leaflet-tile-pane { filter: none; }
 .map-page #route-map { background: #f5f3f0; }
 
-.map-page .map-legend { box-sizing: border-box; width: 230px; max-width: calc(100vw - 64px); padding: 10px 12px; background: rgba(10,16,30,.86); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(4px); }
-.map-page .map-legend strong { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
+.map-page .map-legend, .map-page .map-display { box-sizing: border-box; width: 230px; max-width: calc(100vw - 64px); padding: 10px 12px; background: rgba(10,16,30,.86); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; backdrop-filter: blur(4px); }
+.map-page .map-legend strong, .map-page .map-display strong { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
 .map-page .map-legend .map-swatch { box-sizing: border-box; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
 .map-page .map-legend-sample { display: flex; align-items: center; justify-content: center; width: 18px; height: 12px; flex: 0 0 18px; background: #f5f3f0; border: 1px solid rgba(0,0,0,.12); border-radius: 3px; }
 @media (max-width: 450px) {
@@ -441,13 +441,15 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 .map-page .map-banners { position: absolute; z-index: 1000; top: 10px; left: 60px; right: 365px; width: auto; max-width: 640px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .map-page .map-banners > :not(.sr-only) { margin: 0; padding: 8px 12px; border-radius: 7px; background: rgba(10,16,30,.86); overflow-wrap: anywhere; pointer-events: auto; }
 .map-page .map-banners > :empty { display: none; }
+.map-page .map-banners > .data-status:not(:has(> p:not(:empty), > div:not(:empty))) { display: contents; }
 .map-page [hidden] { display: none !important; }
 /* ML-E/G/H: independent map overlays. */
 .map-page .map-detail-card, .map-page #map-coverage-panel { position: absolute; z-index: 1000; box-sizing: border-box; width: 350px; max-width: calc(50% - 20px); overflow-y: auto; overflow-wrap: anywhere; padding: 12px; background: rgba(10,16,30,.9); border: 1px solid rgba(255,255,255,.16); border-radius: 12px; overscroll-behavior: contain; }
 .map-page .map-detail-card { right: 10px; bottom: 30px; max-height: min(60%, calc(100% - 360px)); }
 .map-page .map-detail-card .panel, .map-page #map-coverage-panel .panel { margin: 0 0 10px; padding: 0; background: transparent; border: 0; }
-.map-page .map-coverage-control { position: absolute; z-index: 1000; left: 10px; bottom: 54px; width: 350px; max-width: calc(50% - 20px); }
-.map-page #map-coverage-toggle { max-width: 100%; background: rgba(10,16,30,.9); font-size: 13px; }
+.map-page .map-coverage-control { position: absolute; z-index: 1000; left: 10px; bottom: 10px; width: 350px; max-width: calc(50% - 20px); }
+.map-page #map-coverage-toggle { position: relative; display: grid; place-items: center; box-sizing: border-box; width: 36px; height: 36px; padding: 6px; background: rgba(10,16,30,.9); }
+.map-page #map-coverage-dot { position: absolute; top: -5px; right: -2px; font-size: 12px; }
 .map-page #map-coverage-panel { left: 0; bottom: calc(100% + 8px); width: 350px; max-width: 100%; max-height: min(70cqh, calc(100cqh - 230px)); }
 .map-page .map-detail-card h2, .map-page #map-coverage-panel h2 { font-size: 16px; font-weight: 600; }
 .map-page #map-coverage-panel #map-coverage { font-size: 22px; margin: 0; }
@@ -469,6 +471,7 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
   .map-page .map-detail-card { position: static; order: 1; width: 100%; max-width: none; max-height: none; }
   .map-page .map-sidebar { order: 2; }
   .map-page .map-coverage-control { position: static; order: 3; max-width: none; }
+  .map-page .warehouse-legend { margin-left: 0; }
   .map-page #map-coverage-toggle { display: none; }
   .map-page #map-coverage-panel[hidden], .map-page #map-coverage-panel { display: block !important; position: static; width: 100%; max-width: none; max-height: none; }
   .map-page .map-legend { width: 200px; }
@@ -576,5 +579,14 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 
 /* ML-P2: hide labels without changing cached markers or collision rules. */
 .route-labels--disabled { visibility: hidden; }
-.map-page .map-route-label-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer; }
-.map-page .map-route-label-toggle input { width: auto; margin: 0; }
+.map-page .map-display-option { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.map-page .map-display-option input { width: auto; margin: 0; }
+
+.map-page .map-controls { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; max-width: calc(100vw - 64px); }
+.map-page .map-display { width: max-content; color: #e9eef9; font-size: 14px; }
+@media (max-width: 768px) { .map-page .map-controls { flex-direction: column; align-items: flex-end; } .map-page .map-display { font-size: 12px; } }
+
+.zip-label { background: transparent; border: 0; pointer-events: none; color: white; font-size: 12px; font-weight: 600; }
+.zip-label > span { display: block; width: max-content; line-height: 18px; transform: translate(-50%, -50%); background: rgba(10,16,30,.62); padding: 0 6px; border-radius: 999px; }
+.zip-label--hidden { display: none; }
+.zip-labels--disabled { visibility: hidden; }

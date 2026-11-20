@@ -38,7 +38,8 @@ export function createMapPanel({ document: doc, onRoute, onClear, onSearch }) {
   function syncCoverageControl() {
     if (!coverageToggle) return;
     const value = element('coverage').textContent;
-    element('coverage-label').textContent = (!value || value === '—') ? t.coverageToggle : t.coverageToggleValue(value);
+    const label = (!value || value === '—') ? t.coverageToggle : t.coverageToggleValue(value);
+    coverageToggle.setAttribute('aria-label', label); coverageToggle.setAttribute('title', label);
     element('coverage-dot').hidden = element('conflicts-details').hidden;
   }
   // These overlays live outside Leaflet; keep wheel and pointer events local.

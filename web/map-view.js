@@ -4,7 +4,7 @@ import { palette } from './route-colors.js';
 import { difficultyColor } from './difficulty.js';
 import { PRICE_COLORS, priceCents, priceLegend } from './price-scale.js';
 import { formatPrice, formatNumber } from './format.js';
-import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, POLYGON_STYLE } from './map-state.js';
+import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, zipLabelAnchors, POLYGON_STYLE } from './map-state.js';
 import { mapText as t } from './map-text.js';
 
 export const MAP_RENDER = Object.freeze({
@@ -18,6 +18,8 @@ export const ROUTE_LABEL = Object.freeze({ sameRouteDistance: 160, widthPadding:
     Object.freeze({ name: 'mid', maxZoom: 12, characterWidth: 9, height: 20, padding: 5, selectedCharacterWidth: 10.5, selectedHeight: 26 }),
     Object.freeze({ name: 'near', maxZoom: Infinity, characterWidth: 9.5, height: 22, padding: 2, selectedCharacterWidth: 11, selectedHeight: 26 }),
   ]) });
+
+export const ZIP_LABEL = Object.freeze({ minZoom: 10, characterWidth: 7.5, height: 18, padding: 3 });
 
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
@@ -60,7 +62,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   let labelsEnabled = true;
   try { labelsEnabled = storage()?.getItem(labelsKey) !== 'false'; } catch { /* Storage unavailable: default on. */ }
   const labelToggle = doc.createElement('label'), labelCheckbox = doc.createElement('input'), labelCaption = doc.createElement('span');
-  labelToggle.className = 'map-route-label-toggle';
+  labelToggle.className = 'map-display-option';
   labelCheckbox.type = 'checkbox'; labelCheckbox.checked = labelsEnabled;
   labelCaption.textContent = t.showRouteLabels;
   labelToggle.append(labelCheckbox, labelCaption);
@@ -72,7 +74,22 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     labelsEnabled = labelCheckbox.checked;
     try { storage()?.setItem(labelsKey, String(labelsEnabled)); } catch { /* Keep the in-memory preference. */ }
     syncLabelVisibility();
-    if (labelsEnabled) layoutRouteLabels();
+    layoutRouteLabels();
+  });
+  const zipPane = map.createPane('zip-labels');
+  zipPane.style.zIndex = '605'; zipPane.style.pointerEvents = 'none';
+  const zipLabels = [], zipKey = 'nc-ops-map-zip-labels';
+  let zipEnabled = false;
+  try { zipEnabled = storage()?.getItem(zipKey) === 'true'; } catch { /* Storage unavailable: default off. */ }
+  const zipToggle = doc.createElement('label'), zipCheckbox = doc.createElement('input'), zipCaption = doc.createElement('span');
+  zipToggle.className = 'map-display-option'; zipCheckbox.type = 'checkbox'; zipCheckbox.checked = zipEnabled;
+  zipCaption.textContent = t.showZipLabels; zipToggle.append(zipCheckbox, zipCaption);
+  const syncZipVisibility = () => zipPane.classList[zipEnabled ? 'remove' : 'add']('zip-labels--disabled');
+  syncZipVisibility();
+  zipCheckbox.addEventListener('change', () => {
+    zipEnabled = zipCheckbox.checked;
+    try { storage()?.setItem(zipKey, String(zipEnabled)); } catch { /* Keep the in-memory preference. */ }
+    syncZipVisibility(); if (zipEnabled) buildZipLabels(); layoutRouteLabels();
   });
   let zooming = false, dragging = false, labelTier = null;
   const renderer = L.svg({ padding: MAP_RENDER.svgPadding });
@@ -125,16 +142,21 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       button.addEventListener('click', () => onColorMode(mode));
       modeButtons.push({ mode, button }); container.append(button);
     }
-    L.DomEvent.disableClickPropagation(container); return container;
+    L.DomEvent.disableClickPropagation(container);
+    container.addEventListener('wheel', event => event.stopPropagation());
+    return container;
   };
   modeControl.addTo(map);
   const legend = doc.createElement('div'), legendTitle = doc.createElement('strong');
   legend.className = 'map-legend'; legend.hidden = true; legend.append(legendTitle);
   const legendControl = L.control({ position: 'topright' });
   legendControl.onAdd = () => {
-    L.DomEvent.disableClickPropagation(legend);
-    legend.addEventListener('wheel', event => event.stopPropagation());
-    return legend;
+    const wrapper = doc.createElement('div'), panel = doc.createElement('div'), title = doc.createElement('strong');
+    wrapper.className = 'map-controls'; panel.className = 'map-display'; title.textContent = t.displayPanel;
+    panel.append(title, labelToggle, zipToggle); wrapper.append(panel, legend);
+    L.DomEvent.disableClickPropagation(wrapper);
+    wrapper.addEventListener('wheel', event => event.stopPropagation());
+    return wrapper;
   };
   legendControl.addTo(map);
   function updateLegend() {
@@ -218,15 +240,15 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       sample.append(swatch);
       label.textContent = t.legendRouteStates[index]; row.append(sample, label); legend.append(row);
     });
-    legend.append(labelToggle);
   }
   const tooltip = properties => zipDetails(doc, properties, selection, colorMode, routeDetails.get(properties.route_id), modeColor(properties, colorMode, routeColors, groupColors, selection));
   function labelPriority(label) {
     if (selection.route?.route_id === label.anchor.route_id) return 0;
-    const styles = label.members.map(p => polygonStyle(p, selection, colorMode, focusStation, dsp, routeColors, groupColors));
-    if (styles.every(style => style.fillOpacity === POLYGON_STYLE.outside.fillOpacity)) return 4;
-    if (styles.some(style => style.fillOpacity === POLYGON_STYLE.focused.fillOpacity)) return 1;
-    return styles.every(style => style.fillOpacity === POLYGON_STYLE.dimmed.fillOpacity) ? 3 : 2;
+    const outside = p => focusStation !== null && p.station !== focusStation;
+    const faded = p => selection.route !== null || outside(p) || (dsp !== null && p.dsp_name !== dsp);
+    if (label.members.every(outside)) return 4;
+    if (label.members.some(p => !faded(p))) return 1;
+    return label.members.every(faded) ? 3 : 2;
   }
   function labelRectangle(label, container, tier) {
     const point = map.latLngToContainerPoint(label.anchor.latlng);
@@ -238,11 +260,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       top: container.top + point.y - height / 2, bottom: container.top + point.y + height / 2 };
   }
   function layoutRouteLabels() {
-    if (colorMode !== 'route') {
-      routeLabels.forEach(label => label.marker.getElement().classList.add('route-label--hidden'));
-      return;
-    }
-    if (zooming || !routeLabels.length) return;
+    if (zooming) return;
     const container = map.getContainer().getBoundingClientRect(), zoom = map.getZoom();
     const tier = ROUTE_LABEL.tiers.find(candidate => zoom < candidate.maxZoom);
     if (labelTier !== tier.name) {
@@ -274,10 +292,34 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       }
       node.classList.toggle('route-label--hidden', !visible);
     }
+    if (!zipEnabled) return;
+    const zipPlaced = labelsEnabled ? placed.slice() : [];
+    for (const label of zipLabels.toSorted((a, b) => b.anchor.area - a.anchor.area)) {
+      const node = label.marker.getElement(), point = map.latLngToContainerPoint(label.anchor.latlng);
+      const width = label.anchor.text.length * ZIP_LABEL.characterWidth + 12, height = ZIP_LABEL.height;
+      const rect = { left: container.left + point.x - width / 2, right: container.left + point.x + width / 2,
+        top: container.top + point.y - height / 2, bottom: container.top + point.y + height / 2 };
+      const collision = { left: rect.left - ZIP_LABEL.padding, right: rect.right + ZIP_LABEL.padding,
+        top: rect.top - ZIP_LABEL.padding, bottom: rect.bottom + ZIP_LABEL.padding };
+      const visible = zoom >= ZIP_LABEL.minZoom && labelPriority(label) < 3
+        && (!selection.route || selection.route.route_id === label.anchor.route_id)
+        && rect.left >= container.left && rect.right <= container.right && rect.top >= container.top && rect.bottom <= container.bottom
+        && ![...warehouses, ...zipPlaced].some(other => overlaps(collision, other));
+      if (visible) zipPlaced.push(collision);
+      node.classList.toggle('zip-label--hidden', !visible);
+    }
   }
   function clearRouteLabels() {
     routeLabels.forEach(label => map.removeLayer(label.marker));
     routeLabels.length = 0;
+  }
+  function buildZipLabels() {
+    for (const label of zipLabels) {
+      if (label.marker) continue;
+      const text = doc.createElement('span'); text.textContent = label.anchor.text;
+      label.marker = L.marker(label.anchor.latlng, { pane: 'zip-labels', interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'zip-label zip-label--hidden', html: text, iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(map);
+    }
   }
   function buildRouteLabels(features) {
     const members = new Map();
@@ -407,6 +449,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     hoveredLayers.clear();
     blockedTooltips.clear();
     clearRouteLabels();
+    zipLabels.forEach(label => { if (label.marker) map.removeLayer(label.marker); }); zipLabels.length = 0;
     clearOutlines();
     if (highlight) map.removeLayer(highlight);
     highlight = null; highlightLayers.length = 0;
@@ -446,6 +489,11 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     }).addTo(map);
     updateLegend();
     buildRouteLabels(data.features.features);
+    const properties = new Map(data.features.features.map(feature => [JSON.stringify([feature.properties.postal_code, feature.properties.route_id, feature.properties.station]), feature.properties]));
+    for (const anchor of zipLabelAnchors(data.features.features)) {
+      zipLabels.push({ anchor, members: [properties.get(JSON.stringify([anchor.postal_code, anchor.route_id, anchor.station]))] });
+    }
+    if (zipEnabled) buildZipLabels();
     if (fitToStation) fitStation();
     layoutRouteLabels();
   }

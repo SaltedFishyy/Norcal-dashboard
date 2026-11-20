@@ -668,7 +668,7 @@ test('RM5 mode controls and legend preserve selection, bounds, layer identity an
   source.stations.MOCKA.rows.find(row => row.route_id === 2).route_difficulty = 'D级 极易';
   const data = buildRouteMap({ profiles: source, boundaries: boundaries(), station: 'MOCKA', details: details() });
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data)); await page.start();
-  const mode = controls[1], legend = controls[2];
+  const mode = controls[1], legend = controls[2].children[1];
   assert.equal(mode.attributes.role, 'group'); assert.equal(mode.attributes['aria-label'], '地图颜色模式');
   assert.deepEqual(mode.children.map(node => node.textContent), ['按线路', '按 DSP', '按站点', '按难易度', '按价格']);
   assert.ok(mode.children.every(button => button.type === 'button')); // Native buttons support Enter and Space.
@@ -1091,6 +1091,25 @@ test('RM10d label dimming matches polygons for station focus, DSP filtering and 
   }
 });
 
+
+test('MZL-T1 label states match route mode across color modes', async () => {
+  const { view, map, data, routeMarkers } = await labelFixture();
+  map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 });
+  const snapshot = () => routeMarkers.slice(-2).map(marker => ['selected', 'focused', 'dimmed', 'hidden']
+    .map(state => marker.node.classList.contains(`route-label--${state}`)));
+  const compare = () => {
+    view.setColorMode('route'); const expected = snapshot();
+    for (const mode of ['price', 'difficulty', 'dsp', 'station']) {
+      view.setColorMode(mode); assert.deepEqual(snapshot(), expected, mode);
+    }
+  };
+  view.render(data, { fitToStation: false }); compare();
+  view.setDsp('Alpha'); compare();
+  view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null }); compare();
+  view.applySelection({ station: null, route: null, zip: null }); view.setDsp(null);
+  view.render(data, { fitToStation: false, focusStation: 'A' }); compare();
+});
+
 test('RM10b labels at all zoom levels, classes, safe DOM content, viewport culling and pane preserve interactions', async () => {
   const f = await labelFixture(), { view, map, data, routeMarkers } = f;
   data.features.features[1].properties.route_name = 'X-<img src=x onerror=alert(1)>';
@@ -1108,7 +1127,7 @@ test('RM10b labels at all zoom levels, classes, safe DOM content, viewport culli
   }
   assert.equal(routeMarkers[1].options.icon.html.textContent, '<img src=x onerror=alert(1)>');
   map.zoom = 11; map.listeners.zoomend(); assert.ok(routeMarkers.every(labelVisible));
-  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(labelVisible));
   view.setColorMode('route'); assert.ok(routeMarkers.every(labelVisible));
   map.zoom = 9; view.applySelection({ station: 'A', route: { route_id: 1 }, zip: null });
   assert.equal(labelVisible(routeMarkers[0]), true); assert.match(routeMarkers[0].node.className, /route-label--selected/);
@@ -1191,7 +1210,7 @@ test('RM10b secondary tiers and same-route distance use placed centers with a st
   assert.deepEqual(routeMarkers.map(labelVisible), [true, true]);
   map.zoom = 10; map.listeners.zoomend();
   assert.deepEqual(routeMarkers.map(labelVisible), [true, true]);
-  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+  view.setColorMode('difficulty'); assert.ok(routeMarkers.every(labelVisible));
   view.setColorMode('route'); assert.ok(routeMarkers.every(labelVisible));
 });
 
@@ -1218,7 +1237,7 @@ test('RM10b tiers use exclusive boundaries, padded collisions and unpadded viewp
     map.zoom = zoom; map.listeners.zoomend();
     for (const candidate of ROUTE_LABEL.tiers) assert.equal(map.panes['route-labels'].classList.contains(`route-labels--${candidate.name}`), candidate.name === tier);
     assert.deepEqual(routeMarkers.map(labelVisible), visible);
-    view.setColorMode('difficulty'); assert.ok(routeMarkers.every(m => !labelVisible(m)));
+    view.setColorMode('difficulty'); assert.deepEqual(routeMarkers.map(labelVisible), visible);
     view.setColorMode('route'); assert.deepEqual(routeMarkers.map(labelVisible), visible);
   }
   map.zoom = 7; edge = true; map.listeners.zoomend();
@@ -1353,7 +1372,7 @@ test('MVR-T3 route legend counts mapped routes by station and DSP, deduplicates 
   assert.equal(t.legendRouteCount(2), '2 条线路 · 颜色对应左侧列表');
   assert.deepEqual(t.legendRouteStates, ['选中', '当前范围', '其他']);
   const { view, data, controls } = await labelFixture();
-  const legend = controls.at(-1);
+  const legend = controls.at(-1).children[1];
   assert.equal(legend.hidden, true);
   view.setColorMode('difficulty'); assert.equal(legend.hidden, true);
   view.setColorMode('route');
@@ -1392,7 +1411,7 @@ test('MVR-T3 sidebar search does not change route legend count', async () => {
   const { page, controls, elements: e, replies, reply } = await fixture();
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, payload()));
   await page.start();
-  const legend = controls[2], count = legend.children[1].textContent;
+  const legend = controls[2].children[1], count = legend.children[1].textContent;
   e['map-search'].value = 'no matching route'; await e['map-search'].listeners.input();
   assert.equal(e['map-no-match'].hidden, false);
   assert.equal(legend.children[1].textContent, count);
@@ -1412,7 +1431,7 @@ test('MVR-T3 legend CSS scopes the translucent panel and compacts states on narr
 });
 
 
-test('MVR-T5 group modes share map, tooltip, list and legend colors and hide labels', async () => {
+test('MVR-T5 group modes share map, tooltip, list and legend colors and show labels', async () => {
   const { assignGroupColors, dspColorKey, modeColor } = await import('../../web/map-state.js');
   const { view, data, groups, controls, routeMarkers } = await labelFixture();
   const features = data.features.features;
@@ -1425,10 +1444,10 @@ test('MVR-T5 group modes share map, tooltip, list and legend colors and hide lab
   const panelData = { ...payload(), routes };
   panel.render(panelData, { groupColors });
   view.render(data, { groupColors });
-  const legend = controls.at(-1);
+  const legend = controls.at(-1).children[1];
   for (const mode of ['dsp', 'station']) {
     view.setColorMode(mode); panel.setColorMode(mode);
-    assert.ok(routeMarkers.every(marker => !labelVisible(marker)));
+    assert.ok(routeMarkers.some(labelVisible));
     for (const layer of groups.at(-1).layers) {
       const p = layer.feature.properties, color = modeColor(p, mode, undefined, groupColors);
       assert.equal(layer.styles.at(-1).fillColor, color);
@@ -1457,7 +1476,7 @@ test('MVR-T6 legend shares DSP dropdown changes, toggles, retains alternatives a
   data.features.features.push({ ...data.features.features[0], properties: { ...data.features.features[0].properties, ...data.routes[1], postal_code: '99999' } });
   replies.push(reply(200, { stations: ['MOCKA'] }), reply(200, data));
   await page.start(); controls[1].children[1].listeners.click();
-  const rows = () => controls[2].children[1].children;
+  const rows = () => controls[2].children[1].children[1].children;
   const row = key => rows().find(row => row.children[1].textContent.startsWith(key));
   const count = rows().length;
   assert.equal(row('AAA').tagName, 'button');
@@ -1478,12 +1497,12 @@ test('MVR-T6 legend shares DSP dropdown changes, toggles, retains alternatives a
   const changes = [];
   const view = createMapView({ leaflet: f.leaflet, document: f.doc, onDsp: value => changes.push(value) });
   view.render(f.data); view.setColorMode('dsp');
-  const ambiguous = f.controls.at(-1).children[1].children[0];
+  const ambiguous = f.controls.at(-1).children[1].children[1].children[0];
   assert.equal(ambiguous.attributes['aria-disabled'], 'true');
   assert.equal(ambiguous.title, '该公司在多个站点，请先选择站点');
   ambiguous.listeners.click(); assert.deepEqual(changes, []);
   view.render(f.data, { focusStation: 'A' });
-  const unique = f.controls.at(-1).children[1].children[0];
+  const unique = f.controls.at(-1).children[1].children[1].children[0];
   assert.equal(unique.attributes['aria-disabled'], 'false'); unique.listeners.click();
   assert.deepEqual(changes, ['A-AAA']);
 });
@@ -1960,7 +1979,8 @@ test('ML-T3 coverage toggle, Escape, warning dot and detail visibility preserve 
   assert.equal(e['map-detail-card'].hidden, true);
   assert.equal(e['map-coverage-dot'].hidden, false);
   const { mapText: t } = await import('../../web/map-text.js');
-  assert.equal(e['map-coverage-label'].textContent, t.coverageToggleValue(e['map-coverage'].textContent));
+  assert.equal(e['map-coverage-toggle'].getAttribute('aria-label'), t.coverageToggleValue(e['map-coverage'].textContent));
+  assert.equal(e['map-coverage-toggle'].getAttribute('title'), t.coverageToggleValue(e['map-coverage'].textContent));
   e['map-routes'].children.find(row => row.tagName === 'button').listeners.click();
   groups[0].layers[0].listeners.click({});
   assert.equal(e['map-detail-card'].hidden, false);
@@ -2007,11 +2027,13 @@ test('ML-T3 coverage label uses default before loading and for zero total', asyn
   const panel = createMapPanel({ document: doc, onRoute() {}, onClear() {}, onSearch() {} });
   panel.clear();
   assert.equal(e['map-coverage'].textContent.codePointAt(0), 0x2014);
-  assert.equal(e['map-coverage-label'].textContent, t.coverageToggle);
+  assert.equal(e['map-coverage-toggle'].getAttribute('aria-label'), t.coverageToggle);
+  assert.equal(e['map-coverage-toggle'].getAttribute('title'), t.coverageToggle);
   const data = payload(); data.coverage.total = 0;
   panel.render(data);
   assert.equal(e['map-coverage'].textContent, '—');
-  assert.equal(e['map-coverage-label'].textContent, t.coverageToggle);
+  assert.equal(e['map-coverage-toggle'].getAttribute('aria-label'), t.coverageToggle);
+  assert.equal(e['map-coverage-toggle'].getAttribute('title'), t.coverageToggle);
 });
 
 test('ML-T3 floating panels use compact typography without changing difficulty badges', async () => {
@@ -2035,15 +2057,19 @@ test('ML-T4 ZIP daily pickup formats integers, zero and missing values', () => {
 test('ML-T4 label preference persists without requests, marker rebuilds or selection changes', async () => {
   for (const initial of [null, 'false', 'true', 'broken', 'throws']) {
     const f = await labelFixture(), writes = [];
-    let readKey;
-    const storage = { getItem(key) { readKey = key; if (initial === 'throws') throw Error('blocked'); return initial; },
+    const readKeys = [];
+    const storage = { getItem(key) { readKeys.push(key); if (initial === 'throws') throw Error('blocked'); return initial; },
       setItem(key, value) { writes.push([key, value]); if (initial === 'throws') throw Error('blocked'); } };
     let requests = 0, selections = 0;
     const view = createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => storage,
       fetch() { requests++; }, onZip() { selections++; }, onClear() { selections++; } });
     view.render(f.data, { fitToStation: false });
-    const legend = f.controls.at(-1), toggle = legend.children.at(-1), input = toggle.children[0];
-    assert.equal(readKey, 'nc-ops-map-route-labels');
+    const wrapper = f.controls.at(-1), legend = wrapper.children[1], panel = wrapper.children[0], toggle = panel.children[1], input = toggle.children[0];
+    assert.equal(wrapper.className, 'map-controls'); assert.equal(f.controls.at(-2).className, 'leaflet-bar map-mode');
+    assert.equal(panel.className, 'map-display'); assert.equal(panel.children[0].textContent, '\u663e\u793a');
+    assert.equal(toggle.children[1].textContent, '\u7ebf\u8def\u7f16\u53f7');
+    let stopped = false; wrapper.listeners.wheel({ stopPropagation() { stopped = true; } }); assert.ok(stopped);
+    assert.ok(readKeys.includes('nc-ops-map-route-labels'));
     assert.equal(input.type, 'checkbox'); assert.equal(input.checked, initial !== 'false');
     const pane = f.map.panes['route-labels'], markers = [...f.routeMarkers];
     input.checked = false; input.listeners.change();
@@ -2052,8 +2078,9 @@ test('ML-T4 label preference persists without requests, marker rebuilds or selec
     view.applySelection(selectRoute(f.data.features.features[0].properties));
     assert.equal(pane.classList.contains('route-labels--disabled'), true);
     assert.deepEqual(f.routeMarkers, markers);
-    for (const mode of ['dsp', 'station', 'difficulty']) { view.setColorMode(mode); assert.ok(!legend.children.includes(toggle)); }
-    view.setColorMode('route'); assert.ok(legend.children.includes(toggle));
+    for (const mode of ['route', 'dsp', 'station', 'difficulty', 'price']) {
+      view.setColorMode(mode); assert.ok(!legend.children.includes(toggle)); assert.ok(panel.children.includes(toggle));
+    }
     view.render(f.data, { fitToStation: false, focusStation: 'B' });
     assert.equal(pane.classList.contains('route-labels--disabled'), true);
     input.checked = true; input.listeners.change();
@@ -2389,7 +2416,7 @@ test('MPC price legend shows occupied bins, missing prices and empty districts',
   const features = data.features.features;
   features[0].properties.current_first_0_1lb_price = 1;
   features[1].properties.current_first_0_1lb_price = 2;
-  const legend = controls.at(-1);
+  const legend = controls.at(-1).children[1];
   legend.className += ' leaflet-control';
   view.render(data, assignAllColors(features)); view.setColorMode('price');
   assert.ok(legend.className.split(' ').includes('map-legend--price'));
@@ -2406,4 +2433,70 @@ test('MPC price legend shows occupied bins, missing prices and empty districts',
   view.setColorMode('difficulty');
   assert.ok(!legend.className.split(' ').includes('map-legend--price'));
   assert.ok(legend.className.split(' ').includes('leaflet-control'));
+});
+
+
+test('MZL-T2 ZIP preferences, filtering, collision and cleanup', async () => {
+  for (const initial of [null, 'false', 'true', 'broken', 'throws']) {
+    const f = await labelFixture(), writes = [];
+    const storage = { getItem(key) { if (initial === 'throws') throw Error(); return key.endsWith('zip-labels') ? initial : 'false'; },
+      setItem(key, value) { writes.push([key, value]); if (initial === 'throws') throw Error(); } };
+    const view = createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => storage, onZip() {}, onClear() {}, onColorMode() {} });
+    f.data.features.features.forEach((feature, i) => { feature.properties.postal_code = `0000${i + 1}`; });
+    f.map.zoom = 11; f.map.latLngToContainerPoint = ([lat, lng]) => ({ x: 200 + lng * 30, y: 200 });
+    view.render(f.data, { fitToStation: false });
+    const zipToggle = f.controls.at(-1).children[0].children[2], input = zipToggle.children[0], pane = f.map.panes['zip-labels'];
+    assert.equal(zipToggle.children[1].textContent, '\u90ae\u7f16');
+    assert.equal(f.markers.filter(marker => marker.options.pane === 'zip-labels').length, initial === 'true' ? 2 : 0);
+    assert.equal(input.checked, initial === 'true'); assert.equal(pane.classList.contains('zip-labels--disabled'), initial !== 'true');
+    const routeInput = f.controls.at(-1).children[0].children[1].children[0]; routeInput.checked = false; routeInput.listeners.change();
+    input.checked = true; input.listeners.change();
+    const labels = f.markers.filter(marker => marker.options.pane === 'zip-labels');
+    assert.equal(labels.length, 2);
+    const visible = () => labels.map(marker => !marker.node.classList.contains('zip-label--hidden'));
+    assert.deepEqual(visible(), [true, true]);
+    assert.deepEqual(writes.at(-1), ['nc-ops-map-zip-labels', 'true']);
+    f.map.zoom = 9; f.map.listeners.zoomend(); assert.deepEqual(visible(), [false, false]);
+    f.map.zoom = 11; f.map.listeners.zoomend();
+    view.setColorMode('price'); assert.deepEqual(visible(), [true, true]);
+    view.setDsp('Alpha'); assert.deepEqual(visible(), [true, false]);
+    view.setDsp(null); view.setFocusStation('A', { fit: false }); assert.deepEqual(visible(), [true, false]);
+    view.setFocusStation(null, { fit: false }); view.applySelection(selectRoute(f.data.features.features[1].properties));
+    assert.deepEqual(visible(), [false, true]);
+    view.applySelection({ station: null, route: null, zip: null });
+    f.map.latLngToContainerPoint = () => ({ x: 200, y: 200 }); f.map.listeners.moveend();
+    assert.equal(visible().filter(Boolean).length, 1);
+    f.elements['route-map'].querySelectorAll = () => [{ getBoundingClientRect: () => ({ left: 190, right: 210, top: 190, bottom: 210, width: 20, height: 20 }) }];
+    f.map.listeners.moveend(); assert.deepEqual(visible(), [false, false]);
+    input.checked = false; input.listeners.change(); assert.ok(pane.classList.contains('zip-labels--disabled'));
+    view.render(f.data, { fitToStation: false }); assert.ok(labels.every(marker => f.map.removed.includes(marker)));
+    assert.equal(f.markers.filter(marker => marker.options.pane === 'zip-labels' && !f.map.removed.includes(marker)).length, 0);
+  }
+});
+
+test('MZL-T2 ZIP labels yield to visible route labels', async () => {
+  const f = await labelFixture();
+  f.data.features.features.forEach((feature, i) => { feature.properties.postal_code = `0000${i + 1}`; });
+  f.map.zoom = 11; f.map.latLngToContainerPoint = () => ({ x: 200, y: 200 });
+  f.view.render(f.data, { fitToStation: false });
+  const panel = f.controls.at(-1).children[0], zip = panel.children[2].children[0]; zip.checked = true; zip.listeners.change();
+  const labels = f.markers.filter(marker => marker.options.pane === 'zip-labels');
+  assert.ok(labels.every(marker => marker.node.classList.contains('zip-label--hidden')));
+  const route = panel.children[1].children[0]; route.checked = false; route.listeners.change();
+  assert.equal(labels.filter(marker => !marker.node.classList.contains('zip-label--hidden')).length, 1);
+});
+
+test('MZL-T4 display and legend share a top-aligned responsive row below separate modes', async () => {
+  const f = await labelFixture();
+  createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => null });
+  const mode = f.controls.at(-2), row = f.controls.at(-1);
+  assert.equal(mode.className, 'leaflet-bar map-mode');
+  assert.equal(row.className, 'map-controls');
+  assert.equal(row.children[0].className, 'map-display');
+  assert.equal(row.children[1].className, 'map-legend');
+  assert.equal(row.children[1].hidden, true);
+  const css = await fs.readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.map-page \.map-controls \{ display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px;/);
+  assert.match(css, /\.map-page \.map-display \{ width: max-content;/);
+  assert.match(css, /@media \(max-width: 768px\) \{ \.map-page \.map-controls \{ flex-direction: column; align-items: flex-end;/);
 });
