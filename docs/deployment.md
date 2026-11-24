@@ -72,6 +72,8 @@ PostgreSQL 和 Worker 只接受本机连接。其他电脑只访问 `http://<公
    .\scripts\services\register-tasks.ps1
    ```
 
+   另有一个手动注册的提醒任务 `NC Ops Console Open Worker Page`（Product Owner 2026-11-23）：每天 16:50（本机时区 PT）用 `explorer.exe http://127.0.0.1:3100/` 在默认浏览器打开 Worker 页面，方便在 17:00 自动更新前看到抓取进度和 DMS 登录状态。它只打开页面，不启动服务、不触发抓取；需要当前用户已登录。取消：`Unregister-ScheduledTask -TaskName 'NC Ops Console Open Worker Page'`。
+
    脚本用 `Get-Command node` 保存 Node 绝对路径。任务名为 `NC Ops Console Services`，触发器为当前用户登录时 + 独立 5 分钟时间触发器（从注册时刻开始，无限期重复），`Interactive` / `Limited`，隐藏窗口，不需要保存 Windows 密码或管理员权限。现有同名任务先显示配置，再覆盖；其他用户的任务拒绝覆盖。配置为忽略重复实例、失败后每分钟重启（最多 999 次）、无执行时间限制、允许电池运行、可用时启动。权限失败时明确报错，不尝试提权。Node 安装位置或 repo 移动后需重新注册。
 6. 管理员 PowerShell 添加下述防火墙规则。
 7. 只对可信办公网络设置 Private，方法见下文。
