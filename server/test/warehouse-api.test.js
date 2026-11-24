@@ -10,7 +10,7 @@ import { SnapshotNotFoundError } from '../src/store/route-profiles-file.js';
 import { RouteZipConflictError } from '../src/route-map/route-map.js';
 import { setupWarehouses } from '../src/warehouses/warehouse-setup.js';
 
-const input = { warehouse_name: 'Mock warehouse', address: '1 Mock Street', district_id: 'mock' };
+const input = { address: '1 Mock Street', district_id: 'mock' };
 export async function warehouseFixture(t, options = {}) {
   const f = await centralFixture(t), rows = [], logs = [], calls = [];
   let version = 0;
@@ -18,7 +18,6 @@ export async function warehouseFixture(t, options = {}) {
   const store = {
     get: async id => rows.find(row => row.id === id) ?? null,
     findByAddressKey: async (key, { excludeId }) => rows.filter(row => row.address_key === key && row.id !== excludeId),
-    findByName: async (name, { excludeId }) => rows.filter(row => row.warehouse_name === name && row.id !== excludeId),
     insert: async values => { const row = { ...values, id: randomUUID(), created_at: stamp(), updated_at: stamp(), raw: 'private' }; rows.push(row); return row; },
     update: async (id, values, expected) => {
       const row = rows.find(r => r.id === id);
@@ -58,11 +57,14 @@ test('WH CRUD reader GET, PATCH unchanged address, warning, stale version, inval
   const w = added.body.warehouse;
   assert.equal(w.station_id, null); assert.equal(w.station_known, true);
   assert.equal((await f.request('/api/warehouses?district=mock')).body.warehouses.length, 1);
-  const edited = await f.request(`/api/warehouses?id=${w.id}`, 'PATCH', { ...input, warehouse_name: 'Changed', expected_updated_at: w.updated_at });
+  const edited = await f.request(`/api/warehouses?id=${w.id}`, 'PATCH', { ...input, expected_updated_at: w.updated_at });
   assert.equal(edited.status, 200); assert.equal(edited.body.geocode, null); assert.equal(f.calls.length, 1);
   assert.equal((await f.request(`/api/warehouses?id=${w.id}`, 'PATCH', { ...input, expected_updated_at: w.updated_at })).body.error, 'warehouse_changed');
-  const duplicateName = await f.request(undefined, 'POST', { ...input, warehouse_name: 'Changed', address: '2 Mock Street' });
-  assert.deepEqual(duplicateName.body.warnings, ['duplicate_name']);
+  const another = await f.request(undefined, 'POST', { ...input, address: '2 Mock Street' });
+  assert.deepEqual(another.body.warnings, []);
+  assert.equal(Object.hasOwn(w, 'warehouse_name'), false);
+  assert.equal((await f.request(undefined, 'POST', { ...input, warehouse_name: 'old' })).status, 400);
+  assert.equal((await f.request(`/api/warehouses?id=${w.id}`, 'PATCH', { ...input, warehouse_name: 'old', expected_updated_at: w.updated_at })).status, 400);
   assert.equal((await f.request(`/api/warehouses?id=${randomUUID()}`, 'PATCH', { ...input, expected_updated_at: w.updated_at })).status, 404);
   for (const method of ['PATCH', 'DELETE']) assert.equal((await f.request('/api/warehouses?id=bad', method, method === 'PATCH' ? input : undefined)).body.error, 'invalid_warehouse_id');
   assert.equal((await f.request(`/api/warehouses?id=${w.id}`, 'DELETE')).status, 204);
@@ -78,7 +80,7 @@ test('WH duplicate address and far district confirmations; PATCH district change
   assert.equal(saved.status, 201);
   const duplicate = await f.request(undefined, 'POST', { ...input, address: '1 Mock St.', confirm: ['far_from_district'] });
   assert.deepEqual(duplicate.body.reasons, ['duplicate_address']);
-  assert.deepEqual(Object.keys(duplicate.body.duplicates[0]).sort(), ['address', 'district_id', 'warehouse_name']);
+  assert.deepEqual(Object.keys(duplicate.body.duplicates[0]).sort(), ['address', 'district_id', 'station_id']);
   assert.equal((await f.request(undefined, 'POST', { ...input, confirm: ['duplicate_address', 'far_from_district'] })).status, 201);
   const w = saved.body.warehouse, count = extents, calls = f.calls.length;
   assert.equal((await f.request(`/api/warehouses?id=${w.id}`, 'PATCH', { ...input, expected_updated_at: w.updated_at })).status, 200);
@@ -157,8 +159,8 @@ test('WH PATCH retains atomic store conflict after successful preflight; GET is 
   f.store.update = async () => ({ error: 'warehouse_changed' });
   assert.equal((await f.request(`/api/warehouses?id=${added.body.warehouse.id}`, 'PATCH', {
     ...input, expected_updated_at: added.body.warehouse.updated_at })).body.error, 'warehouse_changed');
-  await f.request(undefined, 'POST', { ...input, warehouse_name: 'A Mock', address: '2 Mock St' });
-  assert.deepEqual((await f.request()).body.warehouses.map(w => w.warehouse_name), ['A Mock', 'Mock warehouse']);
+  await f.request(undefined, 'POST', { ...input, address: '2 Mock St' });
+  assert.deepEqual((await f.request()).body.warehouses.map(w => w.address), ['1 Mock Street', '2 Mock St']);
 });
 
 test('WH extent data errors skip distance checks, while DB and unknown errors propagate', async t => {
@@ -221,10 +223,19 @@ test('T4 worker CRUD and capabilities remain writable; non-loopback Host is reje
   assert.equal((await f.request('/api/capabilities')).body.warehouse_write, true);
   const added = await f.request(undefined, 'POST', input); assert.equal(added.status, 201);
   const row = added.body.warehouse;
-  assert.equal((await f.request('/api/warehouses?id=' + row.id, 'PATCH', { ...input, warehouse_name: 'Edited', expected_updated_at: row.updated_at })).status, 200);
+  assert.equal((await f.request('/api/warehouses?id=' + row.id, 'PATCH', { ...input, expected_updated_at: row.updated_at })).status, 200);
   for (const method of ['POST', 'PATCH', 'DELETE']) {
     const r = await f.request('/api/warehouses?id=' + row.id, method, input, { Host: 'kenny:3100', Origin: 'http://kenny:3100' });
     assert.equal(r.status, 403); assert.equal(r.body.error, 'forbidden_host');
   }
   assert.equal((await f.request('/api/warehouses?id=' + row.id, 'DELETE')).status, 204);
+});
+
+test('WH-T10 legacy NOT NULL create failure returns a controlled service error', async t => {
+  const f = await warehouseFixture(t);
+  f.store.insert = async () => { throw new DataSourceUnavailableError(); };
+  const response = await f.request(undefined, 'POST', input);
+  assert.equal(response.status, 503);
+  assert.equal(response.body.error, 'data_source_unavailable');
+  assert.equal((await f.request()).status, 200);
 });

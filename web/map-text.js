@@ -72,8 +72,8 @@ export function localizeMap(doc) {
 export const routeDifficultyText = value => difficultyLevel(value) ? value : '—';
 
 export const warehouseText = {
-  manage: '管理仓库', legend: '仓库', markerTitle: name => `仓库：${name}`,
-  name: 'Name', address: 'Address', district: 'District', station: 'Station',
+  manage: '管理仓库', legend: '仓库', markerTitle: (station, address) => `仓库：${station || address}`,
+  address: 'Address', district: 'District', station: 'Station',
   close: '关闭', current: '当前片区', all: '全部仓库', add: '添加仓库', edit: '编辑', delete: '删除',
   save: '保存', cancel: '取消', unspecified: '不指定', chooseDistrict: '请选择片区',
   readonly: '当前服务未开启仓库编辑', empty: '暂无仓库', loading: '正在加载仓库…',
@@ -82,9 +82,9 @@ export const warehouseText = {
   manual: '手动输入坐标', latitude: '纬度', longitude: '经度',
   duplicate: '可能重复：', far: km => `位置距离所选片区约 ${km} km，请确认地址是否正确`,
   matched: address => `识别地址：${address}`, located: address => `已定位：${address}`,
-  confirmSave: '确认保存', back: '返回修改', duplicateName: '已有同名仓库',
+  confirmSave: '确认保存', back: '返回修改',
   savedTo: district => `已保存到 ${district}`, view: '查看仓库',
-  deleteConfirm: (name, address) => `确定删除 ${name}？\n${address}`,
+  deleteConfirm: (station, address) => `确定删除${station ? ` ${station} 仓库` : '这个仓库'}？\n${address}`,
   invalid: fields => `请检查字段：${fields.join('、')}`,
   errors: {
     geocode_failed: '地址无法识别', geocode_ambiguous: '地址无法识别',

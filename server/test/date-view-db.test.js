@@ -189,7 +189,7 @@ test('DV-T1: daily selection, version projections, 008 parity and privileges', {
   }
   const results = [];
   await migrate(db.owner, { ...db.options, onResult: r => results.push(r) });
-  assert.deepEqual(results.at(-1), { version: '009', result: 'skipped' });
+  assert.deepEqual(results.at(-1), { version: '010', result: 'skipped' });
   assert.ok(results.every(r => r.result === 'skipped'));
   for (const view of ['v_daily_snapshots', 'v_daily_snapshot_routes', 'v_route_detail_versions', 'v_route_detail_version_zips', 'v_route_history_daily']) {
     assert.ok((await db.reader.query(`SELECT * FROM ${view}`)).rowCount > 0);

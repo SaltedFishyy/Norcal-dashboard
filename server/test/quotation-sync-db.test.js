@@ -43,7 +43,7 @@ test('LQ-T6 quotation writer has only required object and column privileges', { 
       await assert.rejects(writer.query(sql), { code: '42501' });
   }
   for (const sql of ['UPDATE known_stations SET code=code', 'UPDATE snapshot_routes SET route_name=route_name',
-    'UPDATE warehouses SET warehouse_name=warehouse_name', 'UPDATE districts SET name_zh=name_zh'])
+    'UPDATE warehouses SET address=address', 'UPDATE districts SET name_zh=name_zh'])
     await assert.rejects(writer.query(sql), { code: '42501' });
   const sequence = (await db.owner.query("SELECT pg_get_serial_sequence('route_quotation_lines','id') AS name")).rows[0].name;
   assert.equal(sequence, `${db.schema}.route_quotation_lines_id_seq`);

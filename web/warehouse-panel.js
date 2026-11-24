@@ -19,7 +19,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
   const readonly = make('p', text.readonly), notice = make('div', null, 'warehouse-notice'); notice.setAttribute('role', 'status');
   const listStatus = make('p'); listStatus.setAttribute('role', 'status');
   const list = make('table', null, 'warehouse-list'), head = make('thead'), headRow = make('tr'), body = make('tbody');
-  for (const label of [text.name, text.district, text.station, text.address, text.edit, text.delete]) headRow.append(make('th', label));
+  for (const label of [text.district, text.station, text.address, text.edit, text.delete]) headRow.append(make('th', label));
   head.append(headRow); list.append(head, body);
   const add = button(text.add, () => edit()); add.hidden = true;
   const form = make('form', null, 'warehouse-form'); form.hidden = true;
@@ -28,10 +28,9 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
     const wrapper = make('label', label), node = make(tag); node.name = key;
     wrapper.append(node); parent.append(wrapper); fields[key] = node; return node;
   }
-  field('warehouse_name', text.name).maxLength = 120;
   field('address', text.address).maxLength = 300;
   field('district_id', text.district, 'select'); field('station_id', text.station, 'select');
-  for (const key of ['warehouse_name', 'address', 'district_id']) fields[key].required = true;
+  for (const key of ['address', 'district_id']) fields[key].required = true;
   const manual = make('details'); manual.hidden = true; manual.append(make('summary', text.manual));
   for (const [key, label, min, max] of [['latitude', text.latitude, -90, 90], ['longitude', text.longitude, -180, 180]]) {
     const node = field(key, label, 'input', manual); node.type = 'number'; node.step = 'any'; node.min = min; node.max = max;
@@ -58,11 +57,11 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
     if (!writable || busy) return;
     editing = row; pending = null; form.hidden = false; error.textContent = ''; confirmation.hidden = true;
     manual.hidden = true; manual.open = false; fields.latitude.value = ''; fields.longitude.value = '';
-    fields.warehouse_name.value = row?.warehouse_name || ''; fields.address.value = row?.address || '';
+    fields.address.value = row?.address || '';
     fields.district_id.replaceChildren(); option(fields.district_id, '', text.chooseDistrict);
     for (const district of getDistricts()) option(fields.district_id, district.id, district.name_zh);
     fields.district_id.value = row ? (row.district_known === false ? '' : row.district_id) : getCurrentDistrict();
-    stations(row?.station_known === false ? '' : row?.station_id || ''); fields.warehouse_name.focus();
+    stations(row?.station_known === false ? '' : row?.station_id || ''); fields.address.focus();
   }
   async function load() {
     const current = ++sequence; listStatus.textContent = text.loading;
@@ -73,7 +72,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
       body.replaceChildren();
       for (const row of data.warehouses) {
         const tr = make('tr');
-        const values = [row.warehouse_name, row.district_known === false ? text.unknownDistrict : row.district_name_zh,
+        const values = [row.district_known === false ? text.unknownDistrict : row.district_name_zh,
           row.station_known === false ? text.unknownStation : row.station_id || '—', row.address];
         for (let i = 0; i < values.length; i++) {
           const cell = make('td'), label = make('span', headRow.children[i].textContent, 'warehouse-cell-label');
@@ -84,7 +83,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
         }
         body.append(tr);
       }
-      headRow.children[4].hidden = headRow.children[5].hidden = !writable;
+      headRow.children[3].hidden = headRow.children[4].hidden = !writable;
       listStatus.textContent = data.warehouses.length ? '' : text.empty;
     } catch { if (current === sequence) { body.replaceChildren(); listStatus.textContent = text.loadError; } }
   }
@@ -115,7 +114,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
     if (data.reasons.includes('duplicate_address')) {
       confirmation.append(make('p', text.duplicate));
       for (const duplicate of data.duplicates || []) confirmation.append(make('p',
-        [duplicate.warehouse_name, duplicate.address, getDistricts().find(d => d.id === duplicate.district_id)?.name_zh || text.unknownDistrict].join(' · ')));
+        [duplicate.station_id, duplicate.address, getDistricts().find(d => d.id === duplicate.district_id)?.name_zh || text.unknownDistrict].filter(Boolean).join(' · ')));
     }
     if (data.reasons.includes('far_from_district')) confirmation.append(make('p', text.far(data.distance_km)));
     if (data.geocode?.matched_address) confirmation.append(make('p', text.matched(data.geocode.matched_address)));
@@ -146,7 +145,6 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
       const resultNotice = inCurrentDistrict ? pageNotice : notice;
       resultNotice.replaceChildren();
       if (data.geocode?.matched_address) resultNotice.append(make('p', text.located(data.geocode.matched_address)));
-      if (data.warnings?.includes('duplicate_name')) resultNotice.append(make('p', text.duplicateName));
       if (warehouse.district_id !== getCurrentDistrict()) {
         const district = getDistricts().find(d => d.id === warehouse.district_id);
         notice.append(make('p', text.savedTo(district?.name_zh || text.unknownDistrict)));
@@ -160,7 +158,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
   }
   form.addEventListener('submit', event => {
     event.preventDefault();
-    const payload = Object.fromEntries(['warehouse_name', 'address', 'district_id', 'station_id'].map(key => [key, fields[key].value]));
+    const payload = Object.fromEntries(['address', 'district_id', 'station_id'].map(key => [key, fields[key].value]));
     payload.station_id ||= null;
     if (editing) payload.expected_updated_at = editing.updated_at;
     const lat = fields.latitude.value, lng = fields.longitude.value;
@@ -169,7 +167,7 @@ export function createWarehousePanel({ document: doc, fetch: request, text = def
     return submit(payload);
   });
   async function remove(row) {
-    if (!writable || busy || !confirm(text.deleteConfirm(row.warehouse_name, row.address))) return;
+    if (!writable || busy || !confirm(text.deleteConfirm(row.station_id, row.address))) return;
     busy = true;
     try {
       const response = await request(`/api/warehouses?id=${encodeURIComponent(row.id)}`, { method: 'DELETE', headers: { 'X-NC-Warehouse': '1' } });

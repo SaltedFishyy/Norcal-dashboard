@@ -419,6 +419,12 @@ GRANT UPDATE (warehouse_name, address, address_key, district_id, station_id, lat
 
 ## 13. 实现记录
 
+### WH-T11 — 2026-11-24（Codex）
+
+- 面板移除名称字段、列表列及同名提示；保存不再发送名称，重复与删除确认使用 Station 和地址。地图标题使用 Station 或地址，popup 不再显示名称。
+- 旧测试断言调整：移除同名警告断言（API 不再返回该警告）；删除确认由名称改为 Station / 地址；popup 行数减少一行，安全文本测试改用地址；只读和可写 popup 断言改为地址，因名称不再返回。测试 fixture 和表单填充也移除名称。
+- 验证：仓库前端测试 136 项、地图前端测试 98 项通过；未启动或停止服务，实际 3000 页面和产品预览待验证。
+
 ### WH-FIX1 — 2026-10-09（Codex）
 
 - `map.js` 移除仓库静态 import，使用可注入的动态模块加载器和初始 no-op 适配对象。模块及构造失败只隐藏仓库入口并显示“仓库信息暂时无法加载”，不改变主地图状态；入口在模块就绪前禁用。
@@ -530,3 +536,50 @@ GRANT UPDATE (warehouse_name, address, address_key, district_id, station_id, lat
   - 浏览器中没有点击删除按钮（会弹出原生 confirm），删除已在 API 层验证。
 - 两条测试仓库都已删除，正式库 `warehouses` 为 0 行。没有运行 DMS。
 - **待完成：** Product Owner 预览签字（WH-T3 前端交互、390 宽度）。
+
+## 14. WH-P2：删除仓库名称字段（Product Owner 2026-11-24）
+
+状态：**Approved**（PO：“把 name 这一个去掉，就不用填……把之前的 name 都给删掉”；选择“彻底删掉这个字段”）。
+
+现状：正式库 20 个仓库的 `warehouse_name` 全部是 `1`，没有业务含义。
+
+### 14.1 决定
+
+| 编号 | 规则 |
+|---|---|
+| WH-D20 | 删除 `warehouses.warehouse_name` 列；`v_warehouses` 不再含该字段。不可恢复（现有值都是 `1`）。 |
+| WH-D21 | 新增 / 编辑表单去掉“Name”；API 不再接受、不再返回 `warehouse_name`（请求里带了该字段按未知字段拒绝，与其他未知字段一致）。 |
+| WH-D22 | 去掉 `duplicate_name` 提示；地址重复确认（`duplicates`）保留，返回 `address`、`district_id`（及 `station_id`）。 |
+| WH-D23 | 显示：地图 marker 标题 `仓库：{station_id}`，没有 Station 时 `仓库：{address}`；popup 去掉 Name 行；管理列表与删除确认用“Station · 地址”。列表 / API 排序按 `district_id, station_id NULLS LAST, address`。 |
+| WH-D24 | 上线顺序：**先**发布不读写 `warehouse_name` 的代码（3000 发布 + 3100 重启），**再**在正式库运行 migration `010`。新代码在 migration 前后都必须能正常工作（权限检查允许 `warehouse_name` 列暂时存在）。正式库 migration 需 PO 单独确认。 |
+
+### 14.2 Migration `010_drop_warehouse_name.sql`
+
+```sql
+SET LOCAL search_path TO {{schema}};
+DROP VIEW v_warehouses;
+ALTER TABLE warehouses DROP COLUMN warehouse_name;
+CREATE VIEW v_warehouses AS
+  SELECT id, address, district_id, station_id, latitude, longitude, created_at, updated_at FROM warehouses;
+REVOKE ALL ON v_warehouses FROM PUBLIC;
+GRANT SELECT ON v_warehouses TO {{reader_role}}, {{warehouse_role}};
+```
+
+列级 UPDATE 授权随列一起删除。`warehouse-privileges.js` 的 `updateColumns` 去掉 `warehouse_name`，但把它当作过渡期允许存在的列（不报 `extra_warehouse_privilege`），保证 D24 的顺序可行。
+
+### 14.3 验收标准
+
+| 编号 | 标准 |
+|---|---|
+| WH-AC30 | migration 010 在测试库通过；之后 `warehouses` / `v_warehouses` 都没有 `warehouse_name`，reader 只能读 `v_warehouses`，warehouse 角色权限检查通过。 |
+| WH-AC31 | migration 前（列仍存在）新代码的 list / update / delete 和权限检查都正常；**create 在 migration 前可以失败**（旧列 NOT NULL 无默认值），失败时返回明确的服务端错误、不崩溃。Claude 2026-11-24 决定：发布后立即运行 010，只影响 3100 管理员在这几分钟内新增仓库，不改旧表约束。 |
+| WH-AC32 | API：创建 / 更新不需要名称；带 `warehouse_name` 时 400（未知字段）；返回字段白名单不含它；不再有 `duplicate_name`。 |
+| WH-AC33 | 前端：表单没有 Name；marker 标题、popup、列表、删除确认、重复确认按 D22/D23 显示；3000 只读页面正常。 |
+| WH-AC34 | 全套测试通过。 |
+
+### 14.4 任务
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| WH-T10 | 服务端：migration 010、store / rules / api / privileges / db-data-source、测试（AC30–AC32、AC34） | Done（r1：AC31 过渡期 create 允许受控失败；r2：更新 migration 版本断言）；正式库 010 待 PO 确认后运行 |
+| WH-T11 | 前端：`warehouse-panel.js`、`warehouse-layer.js`、`map-text.js`、测试（AC33） | Done（全套 965 项测试通过） |

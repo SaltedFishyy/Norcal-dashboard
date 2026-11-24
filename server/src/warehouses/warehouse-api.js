@@ -18,7 +18,7 @@ export function createWarehouseHandlers({ dataSource, store, geocoder = createCe
       const rows = await dataSource.readWarehouses({ districtId: ids[0] });
       const warehouses = rows.map(row => projectWarehouse(row, config))
         .filter(row => !ids.length || row.district_known && row.district_id === ids[0])
-        .sort((a, b) => a.warehouse_name.localeCompare(b.warehouse_name));
+        .sort((a, b) => a.district_id.localeCompare(b.district_id) || (a.station_id === null ? (b.station_id === null ? 0 : 1) : b.station_id === null ? -1 : a.station_id.localeCompare(b.station_id)) || a.address.localeCompare(b.address));
       return respond(200, { warehouses });
     }
     const host = req.headers.host?.toLowerCase();
@@ -76,14 +76,13 @@ export function createWarehouseHandlers({ dataSource, store, geocoder = createCe
     if (duplicates.length && !values.confirm?.includes('duplicate_address')) reasons.push('duplicate_address');
     if (distance > FAR_FROM_DISTRICT_KM && !values.confirm?.includes('far_from_district')) reasons.push('far_from_district');
     if (reasons.length) return fail(409, 'confirmation_required', { reasons,
-      duplicates: duplicates.map(({ warehouse_name, address, district_id }) => ({ warehouse_name, address, district_id })),
+      duplicates: duplicates.map(({ address, district_id, station_id }) => ({ address, district_id, station_id })),
       geocode: geocode ?? { matched_address: null, latitude: point.latitude, longitude: point.longitude }, distance_km: distance });
-    const names = await store.findByName(values.warehouse_name, { excludeId: id });
     const saved = { ...values, address_key: key, latitude: point.latitude, longitude: point.longitude };
     const result = patch ? await store.update(id, saved, values.expected_updated_at) : { row: await store.insert(saved) };
     if (result.error) return fail(result.error === 'warehouse_changed' ? 409 : 404, result.error);
     return respond(patch ? 200 : 201, { warehouse: projectWarehouse(result.row, config), geocode,
-      warnings: names.length ? ['duplicate_name'] : [] });
+      warnings: [] });
   };
   handler.methods = writeEnabled ? ['GET', 'POST', 'PATCH', 'DELETE'] : ['GET'];
   return new Map([['/api/warehouses', handler]]);

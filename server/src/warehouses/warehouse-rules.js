@@ -1,12 +1,12 @@
 export const FAR_FROM_DISTRICT_KM = 50;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 export function validateWarehouse(body, { patch = false } = {}) {
-  const allowed = ['warehouse_name', 'address', 'district_id', 'station_id', 'manual_coordinates', 'confirm',
+  const allowed = ['address', 'district_id', 'station_id', 'manual_coordinates', 'confirm',
     ...(patch ? ['expected_updated_at'] : [])];
   if (!object(body) || Object.keys(body).some(key => !allowed.includes(key)))
     return { error: 'invalid_body', fields: Object.keys(body ?? {}).filter(key => !allowed.includes(key)) };
   const values = { ...body }, fields = [];
-  for (const [key, max] of [['warehouse_name', 120], ['address', 300]]) {
+  for (const [key, max] of [['address', 300]]) {
     if (typeof values[key] === 'string') values[key] = values[key].trim();
     if (typeof values[key] !== 'string' || !values[key] || [...values[key]].length > max) fields.push(key);
   }
@@ -51,7 +51,7 @@ export function distanceToExtentKm(point, [[south, west], [north, east]]) {
     longitude: Math.max(west, Math.min(east, point.longitude)) });
 }
 export function projectWarehouse(row, config) {
-  const keys = ['id', 'warehouse_name', 'address', 'district_id', 'station_id', 'latitude', 'longitude', 'created_at', 'updated_at'];
+  const keys = ['id', 'address', 'district_id', 'station_id', 'latitude', 'longitude', 'created_at', 'updated_at'];
   const district = config.districts.find(d => d.id === row.district_id);
   return { ...Object.fromEntries(keys.map(key => [key, row[key]])), district_known: Boolean(district),
     district_name_zh: district?.name_zh ?? null, district_name_en: district?.name_en ?? null,

@@ -12,23 +12,18 @@ test('WH store CRUD, atomic stale protection, reader view and privileges', { ski
   const store = createWarehouseStore({ schema: db.schema, connectionString: process.env.NC_TEST_DB_WAREHOUSE_URL });
   const source = createDbDataSource({ schema: db.schema, env: { NC_DB_READER_URL: process.env.NC_TEST_DB_READER_URL } });
   t.after(async () => { await store.close(); await source.close(); });
-  const values = { warehouse_name: 'Mock', address: '1 Mock St', address_key: '1 mock st', district_id: 'mock', station_id: null, latitude: 38, longitude: -122 };
+  const values = { address: '1 Mock St', address_key: '1 mock st', district_id: 'mock', station_id: null, latitude: 38, longitude: -122 };
   assert.equal((await store.checkPrivileges()).ok, true);
   const row = await store.insert(values);
-  assert.equal((await store.get(row.id)).warehouse_name, 'Mock');
+  assert.equal((await store.get(row.id)).address, '1 Mock St');
   assert.equal((await store.list({ districtId: 'mock' })).length, 1);
   assert.equal((await store.list({ districtId: 'other' })).length, 0);
   assert.equal((await store.findByAddressKey(values.address_key)).length, 1);
   assert.equal((await store.findByAddressKey(values.address_key, { excludeId: row.id })).length, 0);
-  assert.equal((await store.findByName('Mock')).length, 1);
-  assert.equal((await store.findByName('  mOcK  ')).length, 1);
-  assert.equal((await store.findByName('mock', { excludeId: row.id })).length, 0);
-  await db.owner.query('UPDATE warehouses SET warehouse_name=$1 WHERE id=$2', ['  Mock  ', row.id]);
-  assert.equal((await store.findByName('MOCK')).length, 1);
   const read = (await source.readWarehouses({ districtId: 'mock' }))[0];
   assert.equal(Object.hasOwn(read, 'address_key'), false);
-  const updated = await store.update(row.id, { ...values, warehouse_name: 'Updated' }, row.updated_at.toISOString());
-  assert.equal(updated.row.warehouse_name, 'Updated');
+  const updated = await store.update(row.id, { ...values, station_id: 'AAA01' }, row.updated_at.toISOString());
+  assert.equal(updated.row.station_id, 'AAA01');
   assert.equal((await store.update(row.id, values, '2000-01-01T00:00:00Z')).error, 'warehouse_changed');
   assert.equal(await store.remove(row.id), true); assert.equal(await store.remove(row.id), false);
   assert.equal((await store.update(row.id, values, row.updated_at.toISOString())).error, 'warehouse_not_found');
@@ -44,7 +39,7 @@ test('WH owner microsecond timestamp survives real reader GET to atomic PATCH', 
   const store = createWarehouseStore({ schema: db.schema, connectionString: process.env.NC_TEST_DB_WAREHOUSE_URL });
   const dataSource = createDbDataSource({ schema: db.schema, env: { NC_DB_READER_URL: process.env.NC_TEST_DB_READER_URL } });
   t.after(async () => { await store.close(); await dataSource.close(); });
-  const input = { warehouse_name: 'Mock', address: '1 Mock St', district_id: 'mock', station_id: null };
+  const input = { address: '1 Mock St', district_id: 'mock', station_id: null };
   const row = await store.insert({ ...input, address_key: '1 mock st', latitude: 38, longitude: -122 });
   await db.owner.query('UPDATE warehouses SET updated_at=$1 WHERE id=$2', ['2026-01-01T00:00:00.123456Z', row.id]);
   let server;
@@ -58,6 +53,22 @@ test('WH owner microsecond timestamp survives real reader GET to atomic PATCH', 
   assert.equal(get.warehouses[0].updated_at, '2026-01-01T00:00:00.123Z');
   const res = await fetch(`${url}/api/warehouses?id=${row.id}`, { method: 'PATCH',
     headers: { Origin: url, 'X-NC-Warehouse': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...input, warehouse_name: 'Changed', expected_updated_at: get.warehouses[0].updated_at }) });
-  assert.equal(res.status, 200); assert.equal((await res.json()).warehouse.warehouse_name, 'Changed');
+    body: JSON.stringify({ ...input, expected_updated_at: get.warehouses[0].updated_at }) });
+  assert.equal(res.status, 200); assert.equal((await res.json()).warehouse.address, '1 Mock St');
+});
+
+test('WH-T10 legacy column permits list, update, delete and privileges; create fails safely', { skip: dbSkip }, async t => {
+  const db = await createTestDb(t);
+  const store = createWarehouseStore({ schema: db.schema, connectionString: process.env.NC_TEST_DB_WAREHOUSE_URL });
+  t.after(() => store.close());
+  const values = { address: '1 Mock St', address_key: '1 mock st', district_id: 'mock', station_id: null, latitude: 38, longitude: -122 };
+  const row = await store.insert(values);
+  await db.owner.query("ALTER TABLE warehouses ADD COLUMN warehouse_name text NOT NULL DEFAULT 'legacy'");
+  await db.owner.query('ALTER TABLE warehouses ALTER COLUMN warehouse_name DROP DEFAULT');
+  await db.owner.query('GRANT UPDATE (warehouse_name) ON warehouses TO nc_test_warehouse');
+  assert.equal((await store.checkPrivileges()).ok, true);
+  assert.equal((await store.list()).length, 1);
+  assert.ok((await store.update(row.id, values, row.updated_at.toISOString())).row);
+  await assert.rejects(store.insert(values), { name: 'DataSourceUnavailableError' });
+  assert.equal(await store.remove(row.id), true);
 });

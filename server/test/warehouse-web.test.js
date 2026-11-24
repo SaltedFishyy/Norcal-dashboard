@@ -10,7 +10,7 @@ import { createApiServer } from '../src/api/server.js';
 import { isStaticPath } from '../src/api/static-files.js';
 
 const response = (status, data) => ({ status, ok: status >= 200 && status < 300, json: async () => data });
-const warehouse = overrides => ({ id: 'mock-warehouse', warehouse_name: 'Mock Warehouse', address: 'Mock Address',
+const warehouse = overrides => ({ id: 'mock-warehouse', address: 'Mock Address',
   district_id: 'mock', district_name_zh: '测试片区', district_known: true, station_id: null, station_known: true,
   latitude: 37, longitude: -122, updated_at: '2026-10-09T00:00:00Z', ...overrides });
 const nodes = node => [node, ...node.children.flatMap(nodes)];
@@ -18,7 +18,7 @@ const text = node => nodes(node).map(n => n.textContent).join(' ');
 const find = (node, tag, label) => nodes(node).find(n => n.tagName === tag && (label === undefined || n.textContent === label));
 const click = (node, label) => find(node, 'button', label).listeners.click();
 const fill = (dialog, values = {}) => {
-  for (const [key, value] of Object.entries({ warehouse_name: 'Mock Warehouse', address: 'Mock Address', district_id: 'mock', station_id: '', ...values }))
+  for (const [key, value] of Object.entries({ address: 'Mock Address', district_id: 'mock', station_id: '', ...values }))
     nodes(dialog).find(n => n.name === key).value = value;
 };
 const save = dialog => find(dialog, 'form').listeners.submit({ preventDefault() {} });
@@ -73,27 +73,29 @@ test('WH-AC5: failed warehouse load retries on Station change, then successful l
 test('WH-AC1/2: POST and PATCH refresh markers, focus/highlight and carry concurrency version', async () => {
   const f = await started(); await f.elements['map-warehouses'].listeners.click();
   const dialog = f.doc.body.children[0]; click(dialog, '添加仓库'); fill(dialog);
-  f.warehouseReplies.push(response(201, { warehouse: warehouse(), geocode: { matched_address: 'Matched Mock' }, warnings: ['duplicate_name'] }),
+  f.warehouseReplies.push(response(201, { warehouse: warehouse(), geocode: { matched_address: 'Matched Mock' }, warnings: [] }),
     response(200, { warehouses: [warehouse()] }), response(200, { warehouses: [warehouse()] }));
   await save(dialog);
   assert.equal(find(dialog, 'form').hidden, true); assert.equal(dialog.open, false);
   assert.match(text(f.elements['map-warehouse-notice']), /已定位：Matched Mock/);
-  assert.match(text(f.elements['map-warehouse-notice']), /已有同名仓库/);
   assert.equal(f.elements['map-warehouse-message'].textContent, '');
   assert.deepEqual(f.map.flight, { point: [37, -122], zoom: 13 });
   assert.equal(f.markers.at(-1).node.classList.contains('warehouse-marker--highlight'), true);
   assert.equal(f.markers.at(-1).popupOpen, true);
   const post = f.warehouseRequests.find(r => r.options?.method === 'POST');
+  assert.equal('warehouse_name' in JSON.parse(post.options.body), false);
   assert.equal(post.options.headers['X-NC-Warehouse'], '1'); assert.equal(post.options.headers['Content-Type'], 'application/json');
   assert.equal(post.options.headers.Origin, undefined);
   f.warehouseReplies.push(response(200, { warehouse_write: true }), response(200, { warehouses: [warehouse()] }));
   await f.elements['map-warehouses'].listeners.click();
   assert.equal(text(f.elements['map-warehouse-notice']), '');
   click(dialog, '编辑'); fill(dialog, { address: 'Changed Mock Address' });
+  assert.equal(nodes(dialog).find(n => n.name === 'address').focused, true);
   f.warehouseReplies.push(response(200, { warehouse: warehouse({ latitude: 38 }), geocode: { matched_address: 'Changed Matched Mock' }, warnings: [] }),
     response(200, { warehouses: [warehouse({ latitude: 38 })] }), response(200, { warehouses: [warehouse({ latitude: 38 })] }));
   await save(dialog);
   assert.equal(JSON.parse(f.warehouseRequests.find(r => r.options?.method === 'PATCH').options.body).expected_updated_at, warehouse().updated_at);
+  assert.equal('warehouse_name' in JSON.parse(f.warehouseRequests.find(r => r.options?.method === 'PATCH').options.body), false);
   assert.deepEqual(f.map.flight.point, [38, -122]);
   assert.equal(dialog.open, false);
   assert.equal(f.markers.at(-1).node.classList.contains('warehouse-marker--highlight'), true);
@@ -118,6 +120,20 @@ function panelFixture({ writable = true, confirm = () => true } = {}) {
   return { panel, entry, dialog: doc.body.children[0], calls, replies, saved, deleted, viewed };
 }
 
+test('WH-AC33: form and responsive list omit name; delete confirmation uses Station when present', async () => {
+  let message;
+  const p = panelFixture({ confirm: value => { message = value; return false; } });
+  p.replies.push(response(200, { warehouse_write: true }), response(200, { warehouses: [warehouse({ station_id: 'MOCKA' })] }));
+  await p.panel.open();
+  const table = find(p.dialog, 'table'), header = find(table, 'thead').children[0], row = find(table, 'tbody').children[0];
+  assert.deepEqual(header.children.map(n => n.textContent), ['District', 'Station', 'Address', '编辑', '删除']);
+  assert.equal(row.children.length, 5);
+  assert.deepEqual(row.children.slice(0, 3).map(n => n.children[0].textContent), ['District', 'Station', 'Address']);
+  await click(p.dialog, '删除'); assert.equal(message, '确定删除 MOCKA 仓库？\nMock Address');
+  click(p.dialog, '添加仓库');
+  assert.equal(nodes(find(p.dialog, 'form')).some(n => n.name === 'warehouse_name' || n.textContent === 'Name'), false);
+});
+
 test('WH-AC1/2: current District POST and PATCH close panel before onSaved', async () => {
   const p = panelFixture();
   await p.panel.open(); click(p.dialog, '添加仓库'); fill(p.dialog);
@@ -129,12 +145,12 @@ test('WH-AC1/2: current District POST and PATCH close panel before onSaved', asy
   await save(p.dialog); assert.equal(p.panel.isOpen(), false); assert.equal(p.saved.length, 2);
 });
 
-test('WH-AC3: delete cancel sends nothing; confirmed DELETE includes name/address and refreshes markers', async () => {
+test('WH-AC3: delete cancel sends nothing; confirmed DELETE identifies warehouse and refreshes markers', async () => {
   let approved = false, message;
   const p = panelFixture({ confirm: value => { message = value; return approved; } });
   p.replies.push(response(200, { warehouse_write: true }), response(200, { warehouses: [warehouse()] })); await p.panel.open();
   const before = p.calls.length; await click(p.dialog, '删除'); assert.equal(p.calls.length, before);
-  assert.match(message, /Mock Warehouse/); assert.match(message, /Mock Address/);
+  assert.equal(message, '确定删除这个仓库？\nMock Address');
   approved = true; p.replies.push(response(204)); await click(p.dialog, '删除');
   assert.equal(p.calls.at(-2).options.method, 'DELETE'); assert.deepEqual(p.deleted, ['mock-warehouse']);
   assert.equal(p.panel.isOpen(), true);
@@ -201,15 +217,17 @@ test('WH-AC4/6/15: stale district replies ignored, DOM popup safe, optional Stat
   const f = await fixture(), fake = layerFake(f); let resolve, errors = [], calls = [];
   const layer = createWarehouseLayer({ leaflet: fake.L, map: f.map, document: f.doc, onError: v => errors.push(v),
     fetch: async url => { calls.push(url); if (url.endsWith('old')) return new Promise(r => { resolve = r; });
-      return response(200, { warehouses: [warehouse({ warehouse_name: '<img src=x onerror=alert(1)>', station_id: 'MOCKA' })] }); } });
+      return response(200, { warehouses: [warehouse({ address: '<img src=x onerror=alert(1)>', station_id: 'MOCKA' })] }); } });
   const old = layer.load('old'); await layer.load('mock'); resolve(response(200, { warehouses: [warehouse({ id: 'old' })] })); await old;
   assert.deepEqual(calls, ['/api/warehouses?district=old', '/api/warehouses?district=mock']); assert.equal(fake.created.length, 1);
-  assert.equal(fake.created[0].popup.children.length, 4); assert.match(text(fake.created[0].popup), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(fake.created[0].popup.children.length, 3); assert.match(text(fake.created[0].popup), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(fake.created[0].options.title, '仓库：MOCKA'); assert.doesNotMatch(text(fake.created[0].popup), /Name/);
   assert.equal(find(fake.created[0].popup, 'img'), undefined); assert.equal(fake.created[0].options.bubblingMouseEvents, false);
   assert.equal(fake.created[0].options.pane, 'warehouse'); assert.equal(f.map.panes.warehouse.style.zIndex, '620');
   layer.clear(); assert.ok(f.map.removed.includes(fake.created[0]));
   const emptyLayer = createWarehouseLayer({ leaflet: fake.L, map: f.map, document: f.doc, fetch: async () => response(200, { warehouses: [warehouse()] }) });
-  await emptyLayer.load('mock'); assert.equal(fake.created.at(-1).popup.children.length, 3);
+  await emptyLayer.load('mock'); assert.equal(fake.created.at(-1).popup.children.length, 2);
+  assert.equal(fake.created.at(-1).options.title, '仓库：Mock Address'); assert.doesNotMatch(text(fake.created.at(-1).popup), /Name|Station/);
   const broken = createWarehouseLayer({ leaflet: fake.L, map: f.map, document: f.doc, onError: v => errors.push(v), fetch: async () => { throw new Error(); } });
   await broken.load('mock'); assert.match(errors.at(-1), /仓库信息暂时无法加载/); assert.equal(f.elements['map-message'].textContent, '');
 });
@@ -228,9 +246,11 @@ for (const code of ['geocode_failed', 'geocode_ambiguous', 'geocode_unavailable'
 test('confirmation includes duplicate/distance/matched address; return retains input and confirm re-submits reasons', async () => {
   const p = panelFixture(); await p.panel.open(); click(p.dialog, '添加仓库'); fill(p.dialog);
   const conflict = response(409, { error: 'confirmation_required', reasons: ['duplicate_address', 'far_from_district'],
-    duplicates: [warehouse()], distance_km: 70, geocode: { matched_address: 'Matched Mock' } });
+    duplicates: [warehouse({ station_id: 'MOCKA' }), warehouse()], distance_km: 70, geocode: { matched_address: 'Matched Mock' } });
   p.replies.push(conflict); await save(p.dialog);
   assert.match(text(p.dialog), /可能重复/); assert.match(text(p.dialog), /约 70 km/); assert.match(text(p.dialog), /识别地址：Matched Mock/);
+  assert.ok(nodes(p.dialog).some(n => n.textContent === 'MOCKA · Mock Address · 测试片区'));
+  assert.ok(nodes(p.dialog).some(n => n.textContent === 'Mock Address · 测试片区'));
   click(p.dialog, '返回修改'); assert.equal(nodes(p.dialog).find(n => n.name === 'address').value, 'Mock Address');
   p.replies.push(conflict); await save(p.dialog);
   p.replies.push(response(201, { warehouse: warehouse(), warnings: [] })); await click(p.dialog, '确认保存');
@@ -397,13 +417,13 @@ for (const [name, capabilityReply] of [
   assert.equal(f.doc.body.children.length, 0);
   assert.equal(f.elements['map-warehouse-message'].textContent, '');
   assert.equal(f.markers.length, 1);
-  assert.match(text(f.markers[0].popup), /Mock Warehouse.*Mock Address/);
+  assert.match(text(f.markers[0].popup), /Mock Address/);
 });
 
 test('T4 writable capabilities reveal management entry and open panel with markers', async () => {
   const f = await mainFixture(); f.warehouseReplies.push(response(200, { warehouses: [warehouse()] }));
   await f.page.start(); await settle(); assertMain(f);
-  assert.equal(f.markers.length, 1); assert.match(text(f.markers[0].popup), /Mock Warehouse/);
+  assert.equal(f.markers.length, 1); assert.match(text(f.markers[0].popup), /Mock Address/);
   assert.equal(f.elements['map-warehouses'].hidden, false); assert.equal(f.elements['map-warehouses'].disabled, false);
   await f.elements['map-warehouses'].listeners.click(); assert.equal(f.doc.body.children[0].open, true);
 });

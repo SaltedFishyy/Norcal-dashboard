@@ -1,4 +1,4 @@
-const updateColumns = ['warehouse_name', 'address', 'address_key', 'district_id', 'station_id',
+const updateColumns = ['address', 'address_key', 'district_id', 'station_id',
   'latitude', 'longitude', 'updated_at'];
 const writes = ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'];
 
@@ -57,7 +57,8 @@ export async function checkWarehousePrivileges(client, { schema }) {
         if (!await tablePrivilege(client, relation.oid, privilege)) problems.add('missing_warehouse_privilege');
       for (const name of updateColumns)
         if (!cols.some(c => c.attname === name && c.upd)) problems.add('missing_warehouse_privilege');
-      if (cols.some(c => c.upd && !updateColumns.includes(c.attname))) problems.add('extra_warehouse_privilege');
+      // The legacy column grant is allowed until migration 010 has been applied.
+      if (cols.some(c => c.upd && c.attname !== 'warehouse_name' && !updateColumns.includes(c.attname))) problems.add('extra_warehouse_privilege');
       for (const privilege of ['TRUNCATE', 'REFERENCES', 'TRIGGER'])
         if (await tablePrivilege(client, relation.oid, privilege)) problems.add('extra_warehouse_privilege');
     } else {

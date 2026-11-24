@@ -85,7 +85,7 @@ export function createDbDataSource({ env = process.env, schema = 'nc' } = {}) {
     }),
     checkReaderWarehouseIsolation: () => read(client => checkReaderWarehouseIsolation(client)),
     readWarehouses: ({ districtId } = {}) => read(async client => (await client.query(
-      'SELECT * FROM v_warehouses WHERE ($1::text IS NULL OR district_id=$1) ORDER BY warehouse_name', [districtId ?? null])).rows),
+      'SELECT * FROM v_warehouses WHERE ($1::text IS NULL OR district_id=$1) ORDER BY district_id, station_id NULLS LAST, address', [districtId ?? null])).rows),
     readRuns: ({ limit }) => read(async client =>
       (await client.query('SELECT * FROM v_runs ORDER BY started_at DESC,id DESC LIMIT $1', [limit])).rows),
     readScheduleRuns: ({ since }) => read(async client =>

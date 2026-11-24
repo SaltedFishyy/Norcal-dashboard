@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { validateWarehouse, validateAssignment, addressKey, distanceToExtentKm, projectWarehouse,
   FAR_FROM_DISTRICT_KM } from '../src/warehouses/warehouse-rules.js';
 
-const body = { warehouse_name: ' Mock ', address: ' 1 Mock Street ', district_id: 'mock' };
+const body = { address: ' 1 Mock Street ', district_id: 'mock' };
 const config = { districts: [{ id: 'mock', name_zh: '模拟', name_en: 'Mock', stations: ['AAA01'], scrape_disabled: { AAA01: 'disabled' } }] };
 test('WH rules trim, required fields, lengths, unknown fields, optional station and PATCH version', () => {
   for (const station_id of [null, undefined, '']) {
     const result = validateWarehouse({ ...body, station_id });
-    assert.equal(result.values.warehouse_name, 'Mock'); assert.equal(result.values.address, '1 Mock Street');
+    assert.equal(result.values.address, '1 Mock Street');
     assert.equal(result.values.station_id, null);
   }
-  for (const [key, value] of [['warehouse_name', ' '], ['warehouse_name', 'a'.repeat(121)], ['address', 'a'.repeat(301)],
+  for (const [key, value] of [['address', 'a'.repeat(301)],
     ['address', 4], ['district_id', 'Bad'], ['station_id', 'BAD'], ['manual_coordinates', null],
     ['manual_coordinates', { latitude: 91, longitude: 0 }], ['manual_coordinates', { latitude: 0, longitude: Infinity }],
     ['manual_coordinates', { latitude: '1', longitude: 0 }], ['manual_coordinates', { latitude: 0, longitude: 0, extra: 1 }],
@@ -19,6 +19,7 @@ test('WH rules trim, required fields, lengths, unknown fields, optional station 
     assert.deepEqual(validateWarehouse({ ...body, [key]: value }).fields, [key]);
   }
   assert.equal(validateWarehouse({ ...body, extra: 1 }).error, 'invalid_body');
+  assert.equal(validateWarehouse({ ...body, warehouse_name: 'old' }).error, 'invalid_body');
   assert.equal(validateWarehouse({ ...body, expected_updated_at: '2026-01-01T00:00:00Z' }).error, 'invalid_body');
   assert.deepEqual(validateWarehouse(body, { patch: true }).fields, ['expected_updated_at']);
   assert.ok(validateWarehouse({ ...body, expected_updated_at: '2026-01-01T00:00:00.123456Z' }, { patch: true }).values);
@@ -34,6 +35,7 @@ test('WH assignment uses config including disabled stations; projection uses whi
   const projected = projectWarehouse({ ...row, district_id: 'deleted', station_id: 'AAA01' }, config);
   assert.equal(projected.district_known, false); assert.equal(projected.district_name_en, null);
   assert.equal(projected.district_name_zh, null); assert.equal(projected.station_known, false);
+  assert.equal(Object.hasOwn(projectWarehouse({ ...row, warehouse_name: 'old' }, config), 'warehouse_name'), false);
   assert.equal(Object.hasOwn(projected, 'address_key'), false); assert.equal(Object.hasOwn(projected, 'raw'), false);
 });
 test('WH address normalization follows NFKC, punctuation, whitespace and whole word abbreviations', () => {

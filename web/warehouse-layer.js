@@ -30,7 +30,7 @@ export function createWarehouseLayer({ leaflet: L, map, document: doc, fetch: re
       if (!response.ok || !Array.isArray(data.warehouses)) throw new Error('warehouse_load');
       for (const warehouse of data.warehouses) {
         const popup = doc.createElement('dl'); popup.className = 'warehouse-popup';
-        const rows = [[text.name, warehouse.warehouse_name], [text.address, warehouse.address],
+        const rows = [[text.address, warehouse.address],
           [text.district, warehouse.district_name_zh]];
         if (warehouse.station_id) rows.push([text.station, warehouse.station_id]);
         for (const [name, value] of rows) {
@@ -39,7 +39,7 @@ export function createWarehouseLayer({ leaflet: L, map, document: doc, fetch: re
         }
         const marker = L.marker([warehouse.latitude, warehouse.longitude], { pane: 'warehouse',
           icon: L.divIcon({ className: 'warehouse-marker', html: warehouseIcon, iconSize: [28, 28], iconAnchor: [14, 28] }),
-          title: text.markerTitle(warehouse.warehouse_name), bubblingMouseEvents: false });
+          title: text.markerTitle(warehouse.station_id, warehouse.address), bubblingMouseEvents: false });
         marker.bindPopup(popup).addTo(map); markers.set(warehouse.id, marker);
       }
       legend.hidden = markers.size === 0; onError(''); return true;
