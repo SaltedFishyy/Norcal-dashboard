@@ -581,5 +581,5 @@ GRANT SELECT ON v_warehouses TO {{reader_role}}, {{warehouse_role}};
 
 | 任务 | 内容 | 状态 |
 |---|---|---|
-| WH-T10 | 服务端：migration 010、store / rules / api / privileges / db-data-source、测试（AC30–AC32、AC34） | Done（r1：AC31 过渡期 create 允许受控失败；r2：更新 migration 版本断言）；正式库 010 待 PO 确认后运行 |
+| WH-T10 | 服务端：migration 010、store / rules / api / privileges / db-data-source、测试（AC30–AC32、AC34） | Done（r1：AC31 过渡期 create 允许受控失败；r2：更新 migration 版本断言）；2026-11-24 PO 确认后已上线：commit `a772371`，3000 发布、3100 重启，正式库 `010: applied`；3000 / 3100 均返回 20 个仓库且无名称字段，`warehouse_write: true` |
 | WH-T11 | 前端：`warehouse-panel.js`、`warehouse-layer.js`、`map-text.js`、测试（AC33） | Done（全套 965 项测试通过） |
