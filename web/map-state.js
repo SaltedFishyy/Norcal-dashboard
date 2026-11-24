@@ -45,6 +45,14 @@ export const POLYGON_STYLE = Object.freeze({
   outside: Object.freeze({ fillOpacity: 0.05, color: '#0A101E', opacity: 0.12, weight: 0.5 }),
 });
 
+export const FILL_SCALE = Object.freeze({ min: 0, max: 100, step: 5, default: 100 });
+export function parseFillScale(raw) {
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return FILL_SCALE.default;
+  const value = Number(raw);
+  return Number.isInteger(value) && value <= FILL_SCALE.max ? value : FILL_SCALE.default;
+}
+export const scaleFill = (style, scale) => ({ ...style, fillOpacity: style.fillOpacity * scale });
+
 export function hoverStyle(baseStyle) {
   const c = POLYGON_STYLE;
   return { ...baseStyle, color: c.hover.color, opacity: c.hover.opacity,

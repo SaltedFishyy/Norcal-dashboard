@@ -4,7 +4,7 @@ import { palette } from './route-colors.js';
 import { difficultyColor } from './difficulty.js';
 import { PRICE_COLORS, priceCents, priceLegend } from './price-scale.js';
 import { formatPrice, formatNumber } from './format.js';
-import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, zipLabelAnchors, POLYGON_STYLE } from './map-state.js';
+import { modeColor, dspColorKey, polygonStyle, clearSelection, uncoveredZipStyle, selectionOutlineStyles, hoverStyle, routeLabelAnchors, zipLabelAnchors, POLYGON_STYLE, FILL_SCALE, parseFillScale, scaleFill } from './map-state.js';
 import { mapText as t } from './map-text.js';
 
 export const MAP_RENDER = Object.freeze({
@@ -91,6 +91,27 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     try { storage()?.setItem(zipKey, String(zipEnabled)); } catch { /* Keep the in-memory preference. */ }
     syncZipVisibility(); if (zipEnabled) buildZipLabels(); layoutRouteLabels();
   });
+  const fillKey = 'nc-ops-map-fill-opacity';
+  let fillPercent = FILL_SCALE.default;
+  try { fillPercent = parseFillScale(storage()?.getItem(fillKey)); } catch { /* Storage unavailable: use the default. */ }
+  const fillRow = doc.createElement('label'), fillCaption = doc.createElement('span');
+  const fillInput = doc.createElement('input'), fillOutput = doc.createElement('output');
+  fillRow.className = 'map-display-fill'; fillCaption.textContent = t.fillOpacity;
+  fillInput.type = 'range'; fillInput.min = String(FILL_SCALE.min); fillInput.max = String(FILL_SCALE.max);
+  fillInput.step = String(FILL_SCALE.step); fillInput.value = String(fillPercent);
+  fillInput.setAttribute('aria-label', t.fillOpacity); fillOutput.textContent = `${fillPercent}%`;
+  fillRow.append(fillCaption, fillInput, fillOutput);
+  let fillFramePending = false;
+  fillInput.addEventListener('input', () => {
+    fillPercent = parseFillScale(fillInput.value); fillOutput.textContent = `${fillPercent}%`;
+    if (fillFramePending) return;
+    const update = () => { fillFramePending = false; refreshFillStyles(); };
+    const raf = doc.defaultView?.requestAnimationFrame;
+    if (raf) { fillFramePending = true; raf.call(doc.defaultView, update); } else update();
+  });
+  fillInput.addEventListener('change', () => {
+    try { storage()?.setItem(fillKey, String(fillPercent)); } catch { /* Keep the in-memory preference. */ }
+  });
   let zooming = false, dragging = false, labelTier = null;
   const renderer = L.svg({ padding: MAP_RENDER.svgPadding });
   const outlineRenderer = L.svg({ pane: 'selection-outline', padding: MAP_RENDER.svgPadding });
@@ -153,13 +174,18 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   legendControl.onAdd = () => {
     const wrapper = doc.createElement('div'), panel = doc.createElement('div'), title = doc.createElement('strong');
     wrapper.className = 'map-controls'; panel.className = 'map-display'; title.textContent = t.displayPanel;
-    panel.append(title, labelToggle, zipToggle); wrapper.append(panel, legend);
+    panel.append(title, labelToggle, zipToggle, fillRow); wrapper.append(panel, legend);
     L.DomEvent.disableClickPropagation(wrapper);
     wrapper.addEventListener('wheel', event => event.stopPropagation());
     return wrapper;
   };
   legendControl.addTo(map);
+  const legendStates = [];
+  function updateLegendFills() {
+    for (const { swatch, rgb, opacity } of legendStates) swatch.style.backgroundColor = `rgba(${rgb.join(', ')}, ${opacity * fillPercent / 100})`;
+  }
   function updateLegend() {
+    legendStates.length = 0;
     legend.hidden = layers.length === 0;
     legend.classList.toggle('map-legend--price', colorMode === 'price');
     legend.replaceChildren(legendTitle);
@@ -234,7 +260,8 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       row.className = 'map-legend-state'; swatch.className = 'map-swatch';
       // Separate fill and stroke alpha, as Leaflet does for the operational polygons.
       const fillRgb = palette[0].slice(1).match(/../g).map(value => parseInt(value, 16));
-      swatch.style.backgroundColor = `rgba(${fillRgb.join(', ')}, ${style.fillOpacity})`;
+      legendStates.push({ swatch, rgb: fillRgb, opacity: style.fillOpacity });
+      updateLegendFills();
       const rgb = style.color.slice(1).match(/../g).map(value => parseInt(value, 16));
       swatch.style.border = `${style.weight}px solid rgba(${rgb.join(', ')}, ${style.opacity})`;
       sample.append(swatch);
@@ -337,7 +364,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   }
   function clearHover(layer) {
     hoveredLayers.delete(layer);
-    layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors));
+    layer.setStyle(scaledLayerStyle(layer));
   }
   function clearInteraction() {
     for (const layer of [...layers, ...highlightLayers]) layer.closeTooltip();
@@ -374,13 +401,17 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     });
     observer.observe(map.getContainer(), { childList: true, subtree: true });
   }
+  function scaledLayerStyle(layer) {
+    const base = highlightLayers.includes(layer) && selection.zip?.status === 'uncovered'
+      ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors);
+    return scaleFill(hoveredLayers.has(layer) ? hoverStyle(base) : base, fillPercent / 100);
+  }
+  function refreshFillStyles() {
+    [...layers, ...highlightLayers].forEach(layer => layer.setStyle(scaledLayerStyle(layer)));
+    updateLegendFills();
+  }
   function refreshStyles() {
-    layers.forEach(layer => {
-      layer.setStyle(polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors));
-    });
-    highlightLayers.forEach(layer => {
-      layer.setStyle(selection.zip?.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(layer.feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors));
-    });
+    refreshFillStyles();
     updateLegend();
     layoutRouteLabels();
   }
@@ -411,7 +442,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       const properties = { ...feature?.properties, ...zip, route_id: selection.route?.route_id ?? feature?.properties.route_id };
       highlight = L.geoJSON({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties }] }, {
         renderer,
-        style: () => zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation, dsp, routeColors, groupColors),
+        style: () => scaleFill(zip.status === 'uncovered' ? uncoveredZipStyle() : polygonStyle(properties, selection, colorMode, focusStation, dsp, routeColors, groupColors), fillPercent / 100),
         onEachFeature(_, layer) {
           highlightLayers.push(layer);
           layer.options.bubblingMouseEvents = false;
@@ -463,7 +494,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     routeDetails = new Map(data.routes.map(route => [route.route_id, route.zip_detail]));
     polygons = L.geoJSON(data.features, {
       renderer,
-      style: feature => polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors),
+      style: feature => scaleFill(polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors), fillPercent / 100),
       onEachFeature(feature, layer) {
         layers.push(layer);
         layer.bindTooltip(() => tooltip(feature.properties), { direction: 'auto', sticky: true });
@@ -477,7 +508,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
             hoveredLayers.add(layer);
             layer.getElement?.()?.classList.remove('mvr-mode-transition');
             const style = polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors);
-            layer.setStyle(hoverStyle(style));
+            layer.setStyle(scaleFill(hoverStyle(style), fillPercent / 100));
           },
           mouseout: () => clearHover(layer),
           click: event => {

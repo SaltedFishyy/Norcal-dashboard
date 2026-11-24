@@ -553,3 +553,13 @@ test('MZL-T2 ZIP anchors choose the largest part and fall back inside concave po
   assert.equal(anchors.length, 2); assert.deepEqual(anchors[0].latlng, [2, 12]); assert.equal(anchors[0].area, 16);
   const [y, x] = anchors[1].latlng; assert.ok(x > 0 && y > 0 && x < 4 && y < 4 && (x < 1 || y < 1));
 });
+
+test('MZL-T5 fill scale validates stored percentages and preserves other style fields', async () => {
+  const { parseFillScale, scaleFill } = await import('../../web/map-state.js');
+  for (const value of [null, '', '-1', '101', '1.5', ' 50', 'NaN']) assert.equal(parseFillScale(value), 100);
+  for (const value of ['0', '50', '100', '53']) assert.equal(parseFillScale(value), Number(value));
+  const style = { fillOpacity: 0.6, opacity: 0.4, weight: 2 };
+  assert.deepEqual(scaleFill(style, 0.5), { ...style, fillOpacity: 0.3 });
+  assert.deepEqual(scaleFill(style, 0), { ...style, fillOpacity: 0 });
+  assert.deepEqual(scaleFill(style, 1), style);
+});

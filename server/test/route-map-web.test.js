@@ -2500,3 +2500,45 @@ test('MZL-T4 display and legend share a top-aligned responsive row below separat
   assert.match(css, /\.map-page \.map-display \{ width: max-content;/);
   assert.match(css, /@media \(max-width: 768px\) \{ \.map-page \.map-controls \{ flex-direction: column; align-items: flex-end;/);
 });
+
+test('MZL-T5 slider persists and rescales existing layers without rebuilding or relayout', async () => {
+  const f = await labelFixture(), writes = [], frames = [];
+  f.doc.defaultView = { requestAnimationFrame: callback => frames.push(callback) };
+  const storage = { getItem: key => key.endsWith('fill-opacity') ? '50' : null, setItem: (key, value) => writes.push([key, value]) };
+  const view = createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => storage, onZip() {}, onClear() {}, onColorMode() {} });
+  f.data.features.features.forEach((feature, i) => { feature.properties.postal_code = `0000${i + 1}`; });
+  view.render(f.data, { fitToStation: false });
+  const row = f.controls.at(-1).children[0].children[3], input = row.children[1], output = row.children[2];
+  assert.equal(input.type, 'range'); assert.equal(input.attributes['aria-label'], '\u533a\u5757\u6df1\u6d45');
+  assert.equal(input.value, '50'); assert.equal(output.textContent, '50%');
+  const layers = f.groups.at(-1).layers, first = layers[0], groups = f.groups.length, projections = f.map.projections;
+  assert.equal(first.styles[0].fillOpacity, POLYGON_STYLE.focused.fillOpacity * 0.5);
+  first.listeners.mouseover({});
+  input.value = '0'; input.listeners.input(); input.value = '50'; input.listeners.input();
+  assert.equal(frames.length, 1); frames.shift()();
+  assert.equal(first.styles.at(-1).fillOpacity, (POLYGON_STYLE.focused.fillOpacity + POLYGON_STYLE.hover.fillOpacityIncrease) * 0.5);
+  assert.equal(f.groups.length, groups); assert.equal(f.map.projections, projections);
+  input.listeners.change(); assert.deepEqual(writes.at(-1), ['nc-ops-map-fill-opacity', '50']);
+  first.listeners.mouseout();
+  for (const mode of ['route', 'dsp', 'station', 'difficulty', 'price']) {
+    view.setColorMode(mode);
+    assert.equal(first.styles.at(-1).fillOpacity, (mode === 'difficulty' ? 0.55 : mode === 'price' ? 0.85 : 0.6) * 0.5);
+  }
+  view.applySelection(selectRoute(f.data.features.features[0].properties));
+  assert.equal(first.styles.at(-1).fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity * 0.5);
+  assert.equal(layers[1].styles.at(-1).fillOpacity, POLYGON_STYLE.dimmed.fillOpacity * 0.5);
+  view.render(f.data, { fitToStation: false });
+  assert.equal(f.groups.at(-1).layers[0].styles[0].fillOpacity, 0.85 * 0.5);
+  input.value = '0'; input.listeners.input(); frames.shift()();
+  assert.equal(f.groups.at(-1).layers[0].styles.at(-1).fillOpacity, 0);
+  assert.ok(f.groups.at(-1).layers[0].listeners.click);
+});
+
+test('MZL-T5 invalid or unavailable storage defaults to 100 percent', async () => {
+  for (const initial of ['bad', '101', 'throws']) {
+    const f = await labelFixture();
+    createMapView({ leaflet: f.leaflet, document: f.doc, storage: () => ({ getItem() { if (initial === 'throws') throw Error(); return initial; }, setItem() { throw Error(); } }) });
+    const input = f.controls.at(-1).children[0].children[3].children[1];
+    assert.equal(input.value, '100'); input.value = '50'; input.listeners.input(); input.listeners.change();
+  }
+});

@@ -5,6 +5,7 @@ export const mapText = {
   coverageToggle: '地图覆盖率 · 缺少边界的邮编',
   coverageToggleValue: value => `覆盖率 ${value} · 缺少边界的邮编`,
   displayPanel: '显示',
+  fillOpacity: '区块深浅',
   showZipLabels: '邮编',
   showRouteLabels: '线路编号',
   pieceUnit: '件', routePickupVolume: '领件量',

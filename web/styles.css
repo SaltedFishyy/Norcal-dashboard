@@ -581,6 +581,10 @@ button, input, select { font-family: inherit; font-size: var(--fs-15); font-vari
 .route-labels--disabled { visibility: hidden; }
 .map-page .map-display-option { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .map-page .map-display-option input { width: auto; margin: 0; }
+.map-page .map-display-fill { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.map-page .map-display-fill input { width: 110px; min-width: 0; margin: 0; }
+.map-page .map-display-fill output { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+
 
 .map-page .map-controls { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; max-width: calc(100vw - 64px); }
 .map-page .map-display { width: max-content; color: #e9eef9; font-size: 14px; }
