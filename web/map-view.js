@@ -119,7 +119,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
   let polygons, highlight, selection = clearSelection(), colorMode = 'route', focusStation = null, dsp = null;
   let routeDetails = new Map(), routeColors, groupColors;
   const highlightLayers = [];
-  const layers = [];
+  const layers = [], allLayers = [];
   const hoveredLayers = new Set();
   const blockedTooltips = new Set();
   let transitionTimer;
@@ -485,7 +485,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     if (highlight) map.removeLayer(highlight);
     highlight = null; highlightLayers.length = 0;
     if (polygons) map.removeLayer(polygons);
-    polygons = null; layers.length = 0; selection = clearSelection(); routeDetails = new Map(); updateLegend();
+    polygons = null; layers.length = 0; allLayers.length = 0; selection = clearSelection(); routeDetails = new Map(); updateLegend();
   }
   function render(data, { fitToStation = true, focusStation: focus = null, routeColors: colors, groupColors: groups } = {}) {
     routeColors = colors; groupColors = groups;
@@ -496,7 +496,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
       renderer,
       style: feature => scaleFill(polygonStyle(feature.properties, selection, colorMode, focusStation, dsp, routeColors, groupColors), fillPercent / 100),
       onEachFeature(feature, layer) {
-        layers.push(layer);
+        allLayers.push(layer);
         layer.bindTooltip(() => tooltip(feature.properties), { direction: 'auto', sticky: true });
         layer.options.bubblingMouseEvents = false;
         const events = tooltipEvents(layer);
@@ -517,16 +517,29 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
           },
         });
       },
-    }).addTo(map);
+    });
+    updateStationLayers();
+    polygons.addTo(map);
+    if (fitToStation) fitStation();
+    layoutRouteLabels();
+  }
+  function updateStationLayers() {
+    clearRouteLabels();
+    zipLabels.forEach(label => { if (label.marker) map.removeLayer(label.marker); }); zipLabels.length = 0;
+    layers.length = 0;
+    for (const layer of allLayers) {
+      if (focusStation === null || layer.feature.properties.station === focusStation) {
+        polygons.addLayer(layer); layers.push(layer);
+      } else polygons.removeLayer(layer);
+    }
+    const features = layers.map(layer => layer.feature);
     updateLegend();
-    buildRouteLabels(data.features.features);
-    const properties = new Map(data.features.features.map(feature => [JSON.stringify([feature.properties.postal_code, feature.properties.route_id, feature.properties.station]), feature.properties]));
-    for (const anchor of zipLabelAnchors(data.features.features)) {
+    buildRouteLabels(features);
+    const properties = new Map(features.map(feature => [JSON.stringify([feature.properties.postal_code, feature.properties.route_id, feature.properties.station]), feature.properties]));
+    for (const anchor of zipLabelAnchors(features)) {
       zipLabels.push({ anchor, members: [properties.get(JSON.stringify([anchor.postal_code, anchor.route_id, anchor.station]))] });
     }
     if (zipEnabled) buildZipLabels();
-    if (fitToStation) fitStation();
-    layoutRouteLabels();
   }
   function setFocusStation(station, { fit = true } = {}) {
     clearInteraction();
@@ -536,6 +549,7 @@ export function createMapView({ leaflet: L, protomaps, document: doc, fetch: req
     highlight = null; highlightLayers.length = 0;
     selection = clearSelection(station);
     focusStation = station;
+    updateStationLayers();
     fitButton.setAttribute('aria-label', station ? t.fit : '\u5b9a\u4f4d\u7247\u533a');
     fitButton.title = station ? t.fit : '\u5b9a\u4f4d\u7247\u533a';
     refreshStyles();

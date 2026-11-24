@@ -100,15 +100,15 @@ test('unified ZIP search renders five distinct statuses, selection rows and real
   e['map-search'].value = '00009';
   replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00009' })));
   await e['map-search'].listeners.keydown({ key: 'Enter', preventDefault() {} });
-  assert.equal(e['map-station'].value, 'MOCKA'); assert.equal(e['map-search'].value, '00009');
+  assert.equal(e['map-station'].value, 'MOCKB'); assert.equal(e['map-search'].value, '00009');
   assert.equal(e['map-summary'].children[0].textContent, 'Mock-C');
-  // An owned ZIP without geometry leaves the viewport and selected Station unchanged.
+  // An owned ZIP without geometry switches to its station without fitting a ZIP boundary.
   data.stations.MOCKA.rows[0].postal_codes.push('00024');
   const beforeFits = map.fits.length;
   replies.push(reply(200, lookupZip({ profiles: data, boundaries: boundary, postalCode: '00024' })));
   await page.searchQuery('00024', true);
   assert.equal(e['map-station'].value, 'MOCKA');
-  assert.equal(map.fits.length, beforeFits);
+  assert.equal(map.fits.length, beforeFits + 1);
   assert.match(allText(e['map-selection']), /暂无可用边界数据/);
 });
 
@@ -203,6 +203,8 @@ export async function fixture(search = '', basemapStatus = 206, storage = null, 
     geoJSON(features, options = {}) {
       if (features.type === 'Feature') features = { type: 'FeatureCollection', features: [features] };
       const group = { options, layers: [], addTo() { return this; },
+        addLayer(layer) { if (!this.layers.includes(layer)) this.layers.push(layer); },
+        removeLayer(layer) { this.layers = this.layers.filter(item => item !== layer); },
         bringToFront() { this.front = true; }, getBounds: () => ({ isValid: () => features.features.length > 0 }) };
       for (const feature of features.features) {
         const layer = { feature, options: { ...options }, styles: [options.style?.(feature)],
@@ -447,7 +449,7 @@ test('map DOM uses API coverage and missing rows, safe tooltip elements and pers
   await e['map-station'].listeners.change();
   assert.equal(requests.at(-1).url, '/api/route-map/district?district=mock');
   assert.equal(map.removed.filter(layer => layer.options?.pane !== 'route-labels').length, 5);
-  assert.equal(map.removed.filter(layer => layer.options?.pane === 'route-labels').length, 0);
+  assert.equal(map.removed.filter(layer => layer.options?.pane === 'route-labels').length, 1);
 });
 
 test('map page loading, no data, known errors, retries and network failures clear stale data', async () => {
@@ -790,7 +792,7 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   assert.equal(e['map-station'].children[3].disabled, true); assert.equal(writes.length, 0);
   assert.equal(e['map-station'].value, 'MOCKA');
   const initial = groups[0];
-  assert.equal(initial.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles[0].fillOpacity, POLYGON_STYLE.outside.fillOpacity);
+  assert.ok(initial.layers.every(layer => layer.feature.properties.station === 'MOCKA'));
   assert.equal(e['map-coverage-count'].textContent, '2 / 4 ZIP 已上图');
   assert.equal(e['map-missing'].children[0].children[1].textContent, 'MOCKA');
   e['map-station'].value = ''; await e['map-station'].listeners.change();
@@ -806,10 +808,10 @@ test('DS map selectors, grouped overview, Station focus, ZIP search and manual p
   e['map-search'].value = 'Mock-C'; await e['map-search'].listeners.input();
   assert.equal(e['map-routes'].children[0].children[1].children[0].textContent, 'Mock-C');
   const fits = map.fits.length; const requestCount = requests.length;
-  await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits + 1); assert.equal(requests.length, requestCount);
+  await page.searchQuery('Mock-C', true); assert.equal(map.fits.length, fits); assert.equal(requests.length, requestCount);
   assert.equal(e['map-station'].value, 'MOCKA');
   const active = groups.filter(group => !map.removed.includes(group) && !group.options.pane && group.layers.length > 1).at(-1);
-  assert.equal(active.layers.find(layer => layer.feature.properties.station === 'MOCKB').styles.at(-1).fillOpacity, POLYGON_STYLE.selectedRoute.fillOpacity);
+  assert.ok(active.layers.every(layer => layer.feature.properties.station === 'MOCKA'));
   const saved = values.get('nc-ops-console.selection');
   replies.push(reply(200, { ...lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' }), station: 'OTHER' }));
   const beforeOutside = map.fits.length; await page.searchQuery('00009', true);
@@ -1151,11 +1153,11 @@ test('R2a greedy labels prioritize selection, focus, normal and area, and avoid 
   assert.deepEqual(routeMarkers.map(labelVisible), [false, true]);
   view.applySelection({ station: null, route: null, zip: null }); view.setDsp(null);
   view.render(data, { fitToStation: false, focusStation: 'A' });
-  assert.deepEqual(routeMarkers.slice(-2).map(labelVisible), [true, false]);
+  assert.equal(labelVisible(routeMarkers.at(-1)), true);
   assert.ok(routeMarkers.slice(0, 2).every(m => map.removed.includes(m)));
   const warehouse = { getBoundingClientRect: () => ({ left: 90, right: 110, top: 90, bottom: 110, width: 20, height: 20 }) };
   elements['route-map'].querySelectorAll = selector => { assert.equal(selector, '.warehouse-marker'); return [warehouse]; };
-  map.listeners.moveend(); assert.ok(routeMarkers.slice(-2).every(m => !labelVisible(m)));
+  map.listeners.moveend(); assert.equal(labelVisible(routeMarkers.at(-1)), false);
 });
 
 test('R2a zoom animation does not lay out labels or recalculate cached geometry', async () => {
@@ -1285,10 +1287,10 @@ test('RM11 shared assignments persist in view and focused labels track priority'
   const colors = new Map([[1, palette[0]], [2, palette[1]]]);
   view.render(data, { focusStation: 'A', routeColors: colors });
   const layers = groups.at(-1).layers;
-  assert.ok(routeMarkers.at(-2).node.classList.contains('route-label--focused'));
+  assert.ok(routeMarkers.at(-1).node.classList.contains('route-label--focused'));
   assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, undefined, 'route', 'A', null, colors).fillColor);
   view.applySelection(selectRoute(1));
-  assert.equal(routeMarkers.at(-2).node.classList.contains('route-label--focused'), false);
+  assert.equal(routeMarkers.at(-1).node.classList.contains('route-label--focused'), false);
   view.setColorMode('difficulty'); view.setColorMode('route'); view.setDsp('Alpha');
   assert.equal(layers[0].styles.at(-1).fillColor, polygonStyle(data.features.features[0].properties, selectRoute(1), 'route', 'A', 'Alpha', colors).fillColor);
   const source = await fs.readFile(new URL('../../web/map.js', import.meta.url), 'utf8');
@@ -1354,9 +1356,7 @@ test('MVR outside labels hide during route selection and return in overview; mix
   view.render(data, { fitToStation: false, focusStation: 'A' });
   view.applySelection(selectRoute({ route_id: 1, station: 'A' }));
   assert.equal(labelVisible(routeMarkers[0]), true);
-  assert.equal(labelVisible(routeMarkers[1]), false);
-  view.applySelection(selectRoute({ route_id: 2, station: 'B' }));
-  assert.equal(labelVisible(routeMarkers[1]), true); // Explicit selection wins over outside.
+  assert.equal(routeMarkers.length, 1); // Other stations have no label in station focus.
   view.render(data, { fitToStation: false });
   assert.ok(routeMarkers.slice(-2).every(labelVisible));
   const mixed = structuredClone(data.features.features[1]);
@@ -2170,9 +2170,11 @@ test('MVR-BF1 caps labels on all nine layers before adding them and tolerates un
   }
 });
 
-test('MVR-T17 expands every basemap pixel bounds by 25% and tolerates missing internals', async () => {
-  const { loadBasemapLayers, BASEMAP_PREFETCH } = await import('../../web/basemap-layers.js');
+test('MVR-T17 and MSO-T2 defer the basemap prefetch ring until the map is idle', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { loadBasemapLayers, BASEMAP_PREFETCH, BASEMAP_PREFETCH_DELAY_MS } = await import('../../web/basemap-layers.js');
   assert.equal(BASEMAP_PREFETCH, 0.25);
+  assert.equal(BASEMAP_PREFETCH_DELAY_MS, 400);
   // Leaflet source uses extensionless imports and Util expects a browser window.
   // Adapt module URLs for Node while keeping the actual geometry implementations.
   const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
@@ -2183,7 +2185,7 @@ ${await source('core/Util')}`);
   const { Point } = await import(pointUrl);
   const { Bounds } = await import(moduleUrl((await source('geometry/Bounds')).replace("'./Point'", JSON.stringify(pointUrl))));
   for (const hasBounds of [true, false]) {
-    const layers = [], map = {}, center = { lat: 37, lng: -122 };
+    const layers = [], listeners = {}, map = { on(names, fn) { for (const name of names.split(' ')) listeners[name] = fn; } }, center = { lat: 37, lng: -122 };
     let errors = 0;
     const protomaps = {
       LineSymbolizer: class {}, CenteredTextSymbolizer: class {}, LineLabelSymbolizer: class {},
@@ -2196,13 +2198,7 @@ ${await source('core/Util')}`);
             assert.equal(target, map);
             for (const [key, value] of Object.entries(MAP_RENDER.basemapGrid)) assert.equal(this.options[key], value);
             if (hasBounds) {
-              const expanded = this._getTiledPixelBounds(center);
-              assert.ok(expanded instanceof Bounds);
-              assert.deepEqual(expanded, new Bounds([-300, 100], [900, 700]));
-              assert.ok(expanded.min instanceof Point);
-              assert.ok(expanded.max instanceof Point);
-              assert.deepEqual(expanded.getSize(), new Point(1200, 600));
-              assert.deepEqual(expanded.min.unscaleBy(new Point(256, 256)), new Point(-300 / 256, 100 / 256));
+              assert.deepEqual(this._getTiledPixelBounds(center), new Bounds([-100, 200], [700, 600]));
             } else assert.equal(this._getTiledPixelBounds, undefined);
             layers.push(this);
           },
@@ -2211,6 +2207,7 @@ ${await source('core/Util')}`);
           assert.equal(this, layer); assert.equal(received, center);
           return new Bounds([-100, 200], [700, 600]);
         };
+        layer._update = function () { this.updates = (this.updates || 0) + 1; };
         return layer;
       },
     };
@@ -2220,6 +2217,25 @@ ${await source('core/Util')}`);
     });
     assert.equal(layers.length, basemaps.length);
     assert.equal(errors, 0);
+    listeners.movestart(); listeners.moveend();
+    t.mock.timers.tick(BASEMAP_PREFETCH_DELAY_MS - 1);
+    if (hasBounds) assert.deepEqual(layers[0]._getTiledPixelBounds(center), new Bounds([-100, 200], [700, 600]));
+    assert.ok(layers.every(layer => !layer.updates));
+    t.mock.timers.tick(1);
+    assert.ok(layers.every(layer => layer.updates === 1));
+    if (hasBounds) {
+      const expanded = layers[0]._getTiledPixelBounds(center);
+      assert.ok(expanded instanceof Bounds);
+      assert.deepEqual(expanded, new Bounds([-300, 100], [900, 700]));
+      assert.ok(expanded.min instanceof Point);
+      assert.ok(expanded.max instanceof Point);
+      assert.deepEqual(expanded.getSize(), new Point(1200, 600));
+      assert.deepEqual(expanded.min.unscaleBy(new Point(256, 256)), new Point(-300 / 256, 100 / 256));
+    }
+    listeners.moveend(); t.mock.timers.tick(BASEMAP_PREFETCH_DELAY_MS - 1);
+    listeners.zoomstart(); t.mock.timers.tick(BASEMAP_PREFETCH_DELAY_MS);
+    assert.ok(layers.every(layer => layer.updates === 1));
+    if (hasBounds) assert.deepEqual(layers[0]._getTiledPixelBounds(center), new Bounds([-100, 200], [700, 600]));
   }
   assert.deepEqual(MAP_RENDER.basemapGrid, { noWrap: true, updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4 });
 });
@@ -2451,7 +2467,7 @@ test('MZL-T2 ZIP preferences, filtering, collision and cleanup', async () => {
     assert.equal(input.checked, initial === 'true'); assert.equal(pane.classList.contains('zip-labels--disabled'), initial !== 'true');
     const routeInput = f.controls.at(-1).children[0].children[1].children[0]; routeInput.checked = false; routeInput.listeners.change();
     input.checked = true; input.listeners.change();
-    const labels = f.markers.filter(marker => marker.options.pane === 'zip-labels');
+    let labels = f.markers.filter(marker => marker.options.pane === 'zip-labels');
     assert.equal(labels.length, 2);
     const visible = () => labels.map(marker => !marker.node.classList.contains('zip-label--hidden'));
     assert.deepEqual(visible(), [true, true]);
@@ -2460,8 +2476,13 @@ test('MZL-T2 ZIP preferences, filtering, collision and cleanup', async () => {
     f.map.zoom = 11; f.map.listeners.zoomend();
     view.setColorMode('price'); assert.deepEqual(visible(), [true, true]);
     view.setDsp('Alpha'); assert.deepEqual(visible(), [true, false]);
-    view.setDsp(null); view.setFocusStation('A', { fit: false }); assert.deepEqual(visible(), [true, false]);
-    view.setFocusStation(null, { fit: false }); view.applySelection(selectRoute(f.data.features.features[1].properties));
+    view.setDsp(null); view.setFocusStation('A', { fit: false });
+    assert.ok(labels.every(marker => f.map.removed.includes(marker)));
+    labels = f.markers.filter(marker => marker.options.pane === 'zip-labels' && !f.map.removed.includes(marker));
+    assert.deepEqual(visible(), [true]);
+    view.setFocusStation(null, { fit: false });
+    labels = f.markers.filter(marker => marker.options.pane === 'zip-labels' && !f.map.removed.includes(marker));
+    view.applySelection(selectRoute(f.data.features.features[1].properties));
     assert.deepEqual(visible(), [false, true]);
     view.applySelection({ station: null, route: null, zip: null });
     f.map.latLngToContainerPoint = () => ({ x: 200, y: 200 }); f.map.listeners.moveend();
@@ -2541,4 +2562,46 @@ test('MZL-T5 invalid or unavailable storage defaults to 100 percent', async () =
     const input = f.controls.at(-1).children[0].children[3].children[1];
     assert.equal(input.value, '100'); input.value = '50'; input.listeners.input(); input.listeners.change();
   }
+});
+
+
+test('MSO station layers, labels and styles follow cached station changes', async () => {
+  const f = await labelFixture();
+  f.data.features.features.forEach((feature, i) => { feature.properties.postal_code = `0000${i + 1}`; });
+  f.view.render(f.data, { focusStation: 'A', fitToStation: false });
+  const group = f.groups.at(-1), first = group.layers[0];
+  assert.deepEqual(group.layers.map(layer => layer.feature.properties.station), ['A']);
+  f.view.setFocusStation('B', { fit: false });
+  assert.deepEqual(group.layers.map(layer => layer.feature.properties.station), ['B']);
+  assert.ok(f.map.removed.includes(f.routeMarkers[0]));
+  for (const mode of ['route', 'dsp', 'station', 'difficulty', 'price']) {
+    f.view.setColorMode(mode);
+    assert.ok(group.layers[0].styles.length > 1);
+  }
+  const slider = f.controls.at(-1).children[0].children[3].children[1];
+  slider.value = '0'; slider.listeners.input();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(group.layers[0].styles.at(-1).fillOpacity, 0);
+  f.view.setFocusStation(null, { fit: false });
+  assert.equal(group.layers.length, 2);
+  assert.ok(group.layers.includes(first));
+});
+
+test('MSO cross-station ZIP switches and saves preference without another district request', async () => {
+  const values = new Map();
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const f = await fixture('', 206, storage);
+  const { buildDistrictMap } = await import('../src/route-map/route-map.js');
+  const districts = [{ id: 'mock', name_zh: '????', stations: [{ code: 'MOCKA', has_snapshot: true }, { code: 'MOCKB', has_snapshot: true }] }];
+  const data = buildDistrictMap({ profiles: profiles(), districts, district: 'mock', boundaries: boundaries() });
+  f.replies.push(f.reply(200, { districts }), f.reply(200, data)); await f.page.start();
+  const before = f.requests.filter(r => r.url.includes('/api/route-map/district')).length;
+  f.replies.push(f.reply(200, lookupZip({ profiles: profiles(), boundaries: boundaries(), postalCode: '00009' })));
+  const fits = f.map.fits.length; await f.page.searchQuery('00009', true);
+  assert.equal(f.elements['map-station'].value, 'MOCKB');
+  assert.equal(JSON.parse(values.get('nc-ops-console.selection')).station, 'MOCKB');
+  assert.equal(f.elements['map-selection'].children[0].children[0].textContent, '00009');
+  assert.ok(f.map.fits.length > fits);
+  assert.ok(f.groups[0].layers.every(layer => layer.feature.properties.station === 'MOCKB'));
+  assert.equal(f.requests.filter(r => r.url.includes('/api/route-map/district')).length, before);
 });

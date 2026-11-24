@@ -4,7 +4,9 @@ import { buildPaintRules, buildLabelRules } from './basemap-rules.js';
 // when a viewport spans more than 16 data tiles. Recheck this internal property
 // on library upgrades; see docs/features/map-visual-refresh.md MVR-BF1.
 export const LABEL_TILE_CAP = 128;
+// Extend the viewport by 25% only after the map has been idle for 400 ms.
 export const BASEMAP_PREFETCH = 0.25;
+export const BASEMAP_PREFETCH_DELAY_MS = 400;
 
 // Based on @protomaps/basemaps 5.7.2 LIGHT; BSD-3-Clause, © Protomaps.
 // Google daytime style overrides follow map-visual-refresh.md P4-1.
@@ -191,6 +193,23 @@ export const basemaps = [
 // Missing archives must not prevent operational polygons from rendering.
 export async function loadBasemapLayers({ protomaps, map, request, onBasemapError, grid }) {
   const baseLayers = [], regions = [], missing = new Set();
+  let prefetch = false, prefetchTimer, moving = false;
+  const cancelPrefetch = () => {
+    moving = true;
+    prefetch = false;
+    clearTimeout(prefetchTimer);
+  };
+  const schedulePrefetch = () => {
+    moving = false;
+    clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(() => {
+      prefetch = true;
+      // Leaflet GridLayer internal method: recheck _update and tile retention on upgrades.
+      baseLayers.forEach(layer => layer._update?.());
+    }, BASEMAP_PREFETCH_DELAY_MS);
+  };
+  map.on?.('movestart zoomstart', cancelPrefetch);
+  map.on?.('moveend', schedulePrefetch);
   let regionsSettled = false;
   const intersectsRegion = coords => {
     const { west, east, north, south } = tileBounds(coords);
@@ -259,12 +278,13 @@ export async function loadBasemapLayers({ protomaps, map, request, onBasemapErro
         }
       };
       const layer = protomaps.leafletLayer({ url: archive, ...options, paintRules: buildPaintRules(protomaps, BASEMAP_FLAVOR), labelRules: buildLabelRules(protomaps, BASEMAP_FLAVOR, "en"), backgroundColor: BASEMAP_FLAVOR.background, ...grid });
-      // Leaflet internal method: recheck on upgrades. Render a surrounding ring
-      // after movement ends; updateWhenIdle still prevents new tiles during dragging.
+      // Leaflet GridLayer internal method: recheck on upgrades. Only expand the
+      // tile bounds after the map has been idle; keepBuffer retains nearby tiles.
       if (typeof layer._getTiledPixelBounds === 'function') {
         const pixelBounds = layer._getTiledPixelBounds.bind(layer);
         layer._getTiledPixelBounds = center => {
           const bounds = pixelBounds(center);
+          if (!prefetch) return bounds;
           const pad = bounds.getSize().multiplyBy(BASEMAP_PREFETCH);
           bounds.min = bounds.min.subtract(pad);
           bounds.max = bounds.max.add(pad);
@@ -289,4 +309,5 @@ export async function loadBasemapLayers({ protomaps, map, request, onBasemapErro
   }
   regionsSettled = true;
   refreshCoverage();
+  if (!moving) schedulePrefetch();
 }

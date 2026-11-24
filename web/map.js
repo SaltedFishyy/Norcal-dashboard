@@ -218,6 +218,12 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
         const owner = districts.find(district => district.stations.some(station => station.code === data.station));
         panel.searchStatus('success', '该 ZIP 属于 ' + (owner?.name_zh || '未分配站点') + '/' + data.station); return;
       }
+      if (scope === 'station' && data.status !== 'multi_station' && data.station && data.station !== focus()
+        && currentDistrict()?.stations.some(station => station.code === data.station)) {
+        stationSelect.value = data.station;
+        const switching = changeStation(), switchSequence = zipSequence;
+        if (!await switching || switchSequence !== zipSequence) return;
+      }
       updateSelection(selectZip(data, data.station || focus()));
       if (data.geometry) view.fitZip(data.geometry);
       panel.searchStatus('success');
@@ -321,12 +327,13 @@ export function createMapPage({ leaflet = globalThis.L, protomaps = globalThis.p
     retainedZipHint();
   }
   dspSelect.addEventListener('change', () => changeDsp(dspSelect.value));
-  stationSelect.addEventListener('change', () => {
+  function changeStation() {
     scope = stationSelect.value ? 'station' : 'district';
     if (stationSelect.value) selected.station = stationSelect.value;
     saveSelection(storage, selected); saveMapScope(storage, scope);
     return loadStation({ reuseCache: true });
-  });
+  }
+  stationSelect.addEventListener('change', changeStation);
   async function changeDistrict() {
     const current = ++sequence;
     clear();
